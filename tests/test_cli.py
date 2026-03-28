@@ -62,9 +62,10 @@ class TestRun:
         assert "tmux" in result.output
         assert "install" in result.output.lower()
 
-    def test_run_no_tmux_flag(self, runner, plan_file):
+    def test_run_no_tmux_flag(self, runner, plan_file, tmp_path):
         """--no-tmux skips tmux check, proceeds to run (mock orchestrator)."""
         with patch("workbench.cli.check_tmux_available") as mock_check, \
+             patch("workbench.cli._find_repo_root", return_value=tmp_path), \
              patch("workbench.cli.run_plan", return_value=[]) as mock_run:
             result = runner.invoke(main, ["run", str(plan_file), "--no-tmux"])
         # tmux check should NOT have been called
