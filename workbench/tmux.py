@@ -68,7 +68,7 @@ async def run_in_tmux(
         return (1, f"tmux new-session failed with code {create.returncode}")
 
     # Poll until exitcode file appears or timeout
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     deadline = loop.time() + timeout
     while loop.time() < deadline:
         if os.path.exists(exitcode_file):
