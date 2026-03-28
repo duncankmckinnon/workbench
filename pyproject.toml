@@ -12,6 +12,14 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
 ]
 
 [project.urls]
@@ -22,3 +30,10 @@ wb = "workbench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.package-data]
+"workbench.skills" = ["**/*.md"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
