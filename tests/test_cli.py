@@ -99,7 +99,7 @@ def test_run_without_tmux_shows_error(git_repo, tmp_path):
 
     runner = CliRunner()
     with patch("workbench.cli._find_repo_root", return_value=git_repo), \
-         patch("workbench.tmux.check_tmux_available", return_value=False):
+         patch("workbench.cli.check_tmux_available", return_value=False):
         result = runner.invoke(main, ["run", str(plan)])
 
     assert result.exit_code != 0
