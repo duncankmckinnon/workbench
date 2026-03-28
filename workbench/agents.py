@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import asyncio
-import json
-import subprocess
 from dataclasses import dataclass, field
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from .adapters import AgentAdapter, get_adapter
 from .plan_parser import Task
+from .tmux import run_in_tmux
 from .worktree import Worktree, get_diff, get_main_branch
 
 
@@ -184,8 +184,12 @@ async def run_agent(
     plan_context: str = "",
     plan_conventions: str = "",
     directive: str | None = None,
+    use_tmux: bool = True,
+    adapter: AgentAdapter | None = None,
 ) -> AgentResult:
     """Spawn a Claude Code agent in a worktree."""
+
+    adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
 
     base = session_branch or get_main_branch(repo)
     prompt = build_prompt(
@@ -200,28 +204,22 @@ async def run_agent(
     )
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            agent_cmd, "-p", prompt,
-            "--output-format", "json",
-            "--allowedTools", "Edit,Write,Read,Glob,Grep,Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)",
-            cwd=str(worktree.path),
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        stdout, stderr = await proc.communicate()
+        cmd = adapter.build_command(prompt, worktree.path)
+        if use_tmux:
+            session_name = f"wb-{task.id}-{role.value}"
+            returncode, raw_output = await run_in_tmux(session_name, cmd, worktree.path)
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=str(worktree.path),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            returncode = proc.returncode
+            raw_output = stdout.decode("utf-8", errors="replace")
 
-        output = stdout.decode("utf-8", errors="replace")
+        output_text, cost_data = adapter.parse_output(raw_output)
 
-        # Try to parse JSON output
-        try:
-            result_data = json.loads(output)
-            output_text = result_data.get("result", output)
-            cost_data = result_data.get("cost_usd", {})
-        except (json.JSONDecodeError, TypeError):
-            output_text = output
-            cost_data = {}
-
-        status = TaskStatus.DONE if proc.returncode == 0 else TaskStatus.FAILED
+        status = TaskStatus.DONE if returncode == 0 else TaskStatus.FAILED
 
         return AgentResult(
             task_id=task.id,
@@ -253,6 +251,7 @@ async def run_pipeline(
     plan_context: str = "",
     plan_conventions: str = "",
     directives: dict[Role, str] | None = None,
+    use_tmux: bool = True,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -282,6 +281,7 @@ async def run_pipeline(
         plan_context=plan_context,
         plan_conventions=plan_conventions,
         directive=directives.get(Role.IMPLEMENTOR) if directives else None,
+        use_tmux=use_tmux,
     )
     results.append(impl_result)
 
@@ -299,6 +299,7 @@ async def run_pipeline(
                 plan_context=plan_context,
                 plan_conventions=plan_conventions,
                 directive=directives.get(Role.TESTER) if directives else None,
+                use_tmux=use_tmux,
             )
             test_result.attempt = attempt
             results.append(test_result)
@@ -322,6 +323,7 @@ async def run_pipeline(
                     plan_context=plan_context,
                     plan_conventions=plan_conventions,
                     directive=directives.get(Role.FIXER) if directives else None,
+                    use_tmux=use_tmux,
                 )
                 fix_result.attempt = attempt
                 results.append(fix_result)
@@ -344,6 +346,7 @@ async def run_pipeline(
                 plan_context=plan_context,
                 plan_conventions=plan_conventions,
                 directive=directives.get(Role.REVIEWER) if directives else None,
+                use_tmux=use_tmux,
             )
             review_result.attempt = attempt
             results.append(review_result)
@@ -366,6 +369,7 @@ async def run_pipeline(
                     plan_context=plan_context,
                     plan_conventions=plan_conventions,
                     directive=directives.get(Role.FIXER) if directives else None,
+                    use_tmux=use_tmux,
                 )
                 fix_result.attempt = attempt
                 results.append(fix_result)
