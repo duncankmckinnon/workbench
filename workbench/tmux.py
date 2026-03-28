@@ -15,7 +15,8 @@ def check_tmux_available() -> bool:
 
 def _sanitize_session_name(name: str) -> str:
     """Replace characters that tmux doesn't allow in session names."""
-    return name.replace("/", "-").replace(" ", "-")
+    name = name.replace("/", "-").replace(" ", "-").replace(":", "-")
+    return name.lstrip(".")
 
 
 async def run_in_tmux(
@@ -62,14 +63,17 @@ async def run_in_tmux(
         stderr=asyncio.subprocess.DEVNULL,
     )
     await create.wait()
+    if create.returncode != 0:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+        return (1, f"tmux new-session failed with code {create.returncode}")
 
     # Poll until exitcode file appears or timeout
-    elapsed = 0.0
-    while elapsed < timeout:
+    loop = asyncio.get_event_loop()
+    deadline = loop.time() + timeout
+    while loop.time() < deadline:
         if os.path.exists(exitcode_file):
             break
         await asyncio.sleep(poll_interval)
-        elapsed += poll_interval
     else:
         # Timeout – kill the session and clean up
         kill = await asyncio.create_subprocess_exec(
@@ -82,8 +86,11 @@ async def run_in_tmux(
         return (1, f"timeout after {timeout}s")
 
     # Read results
-    with open(exitcode_file) as f:
-        rc = int(f.read().strip())
+    try:
+        with open(exitcode_file) as f:
+            rc = int(f.read().strip())
+    except (ValueError, OSError):
+        rc = 1
     output_text = ""
     if os.path.exists(output_file):
         with open(output_file) as f:
