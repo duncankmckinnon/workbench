@@ -1,0 +1,280 @@
+"""Orchestrator - coordinates parallel agent work across tasks."""
+
+from __future__ import annotations
+
+import asyncio
+import time
+from dataclasses import dataclass, field
+from pathlib import Path
+
+from rich.console import Console
+from rich.live import Live
+from rich.table import Table
+from rich.text import Text
+
+from .agents import AgentResult, Role, TaskStatus, run_pipeline
+from .plan_parser import Plan, Task
+from .worktree import (
+    Worktree,
+    create_session_branch,
+    create_worktree,
+    get_main_branch,
+    merge_into_session,
+)
+
+
+@dataclass
+class TaskState:
+    task: Task
+    worktree: Worktree | None = None
+    status: TaskStatus = TaskStatus.PENDING
+    results: list[AgentResult] = field(default_factory=list)
+    started_at: float | None = None
+    finished_at: float | None = None
+
+    @property
+    def elapsed(self) -> str:
+        if self.started_at is None:
+            return "-"
+        end = self.finished_at or time.time()
+        mins = int(end - self.started_at) // 60
+        secs = int(end - self.started_at) % 60
+        return f"{mins}m{secs:02d}s"
+
+    @property
+    def fix_count(self) -> int:
+        """How many fix cycles have run."""
+        return sum(1 for r in self.results if r.role == Role.FIXER)
+
+    @property
+    def phase_summary(self) -> str:
+        """Short summary of where we are in the pipeline."""
+        if not self.results:
+            return ""
+
+        phases = []
+        for r in self.results:
+            if r.role == Role.IMPLEMENTOR:
+                phases.append("impl:ok" if r.status != TaskStatus.FAILED else "impl:fail")
+            elif r.role == Role.TESTER:
+                if r.passed:
+                    phases.append("test:pass")
+                elif r.status == TaskStatus.FAILED:
+                    phases.append("test:crash")
+                else:
+                    phases.append(f"test:fail")
+            elif r.role == Role.FIXER:
+                phases.append("fix" if r.status != TaskStatus.FAILED else "fix:fail")
+            elif r.role == Role.REVIEWER:
+                if r.passed:
+                    phases.append("review:pass")
+                elif r.status == TaskStatus.FAILED:
+                    phases.append("review:crash")
+                else:
+                    phases.append(f"review:fail")
+
+        return " → ".join(phases)
+
+
+def _status_table(states: list[TaskState]) -> Table:
+    table = Table(title="Workbench", show_lines=True)
+    table.add_column("Task", style="bold", min_width=30)
+    table.add_column("Status", min_width=14)
+    table.add_column("Fixes", min_width=5, justify="center")
+    table.add_column("Time", min_width=8)
+    table.add_column("Pipeline", min_width=40)
+
+    status_styles = {
+        TaskStatus.PENDING: "dim",
+        TaskStatus.IMPLEMENTING: "yellow",
+        TaskStatus.TESTING: "cyan",
+        TaskStatus.REVIEWING: "magenta",
+        TaskStatus.FIXING: "yellow bold",
+        TaskStatus.DONE: "green",
+        TaskStatus.FAILED: "red bold",
+    }
+
+    for s in states:
+        style = status_styles.get(s.status, "")
+        fixes = str(s.fix_count) if s.fix_count > 0 else "-"
+        pipeline = s.phase_summary or (f"branch: {s.worktree.branch}" if s.worktree else "")
+
+        table.add_row(
+            s.task.title,
+            Text(s.status.value, style=style),
+            fixes,
+            s.elapsed,
+            pipeline,
+        )
+
+    return table
+
+
+async def run_plan(
+    plan: Plan,
+    repo: Path,
+    max_concurrent: int = 4,
+    max_retries: int = 2,
+    skip_test: bool = False,
+    skip_review: bool = False,
+    agent_cmd: str = "claude",
+    cleanup_on_done: bool = False,
+    session_branch: str | None = None,
+    start_wave: int = 1,
+) -> list[TaskState]:
+    """Execute a plan with parallel agent workers."""
+    console = Console()
+    waves = plan.independent_groups
+    all_states: list[TaskState] = []
+    state_map: dict[str, TaskState] = {}
+
+    # Use existing session branch or create a new one
+    if session_branch is None:
+        session_branch = create_session_branch(repo)
+
+    console.print(f"\n[bold]Plan:[/bold] {plan.title}")
+    console.print(f"[bold]Tasks:[/bold] {len(plan.tasks)} across {len(waves)} wave(s)")
+    console.print(f"[bold]Concurrency:[/bold] {max_concurrent}")
+    console.print(f"[bold]Max retries:[/bold] {max_retries}")
+    console.print(f"[bold]Repo:[/bold] {repo}")
+    console.print(f"[bold]Session branch:[/bold] {session_branch}")
+    console.print()
+
+    for wave_idx, wave in enumerate(waves):
+        wave_num = wave_idx + 1
+
+        # Skip waves before start_wave
+        if wave_num < start_wave:
+            console.print(f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (already merged) ━━━[/dim]\n")
+            for task in wave:
+                state = TaskState(task=task)
+                state.status = TaskStatus.DONE
+                all_states.append(state)
+                state_map[task.id] = state
+            continue
+
+        console.print(f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n")
+
+        # Initialize state for this wave
+        wave_states: list[TaskState] = []
+        for task in wave:
+            state = TaskState(task=task)
+            wave_states.append(state)
+            all_states.append(state)
+            state_map[task.id] = state
+
+        # Create worktrees for all tasks in wave, branching from session branch
+        for state in wave_states:
+            try:
+                wt = create_worktree(repo, state.task.id, state.task.slug, base_branch=session_branch)
+                state.worktree = wt
+            except Exception as e:
+                state.status = TaskStatus.FAILED
+                state.results.append(AgentResult(
+                    task_id=state.task.id,
+                    role=Role.IMPLEMENTOR,
+                    status=TaskStatus.FAILED,
+                    output=f"Worktree creation failed: {e}",
+                ))
+
+        # Status callback so the pipeline can update our display state
+        def _make_callback(state: TaskState):
+            def _on_status(task_id: str, status: TaskStatus):
+                state.status = status
+            return _on_status
+
+        # Run tasks concurrently with semaphore
+        sem = asyncio.Semaphore(max_concurrent)
+
+        async def _run_task(state: TaskState):
+            if state.status == TaskStatus.FAILED:
+                return
+
+            async with sem:
+                state.started_at = time.time()
+                state.status = TaskStatus.IMPLEMENTING
+
+                results = await run_pipeline(
+                    task=state.task,
+                    worktree=state.worktree,
+                    repo=repo,
+                    skip_test=skip_test,
+                    skip_review=skip_review,
+                    max_retries=max_retries,
+                    agent_cmd=agent_cmd,
+                    on_status_change=_make_callback(state),
+                    session_branch=session_branch,
+                )
+
+                state.results = results
+                state.finished_at = time.time()
+
+                # Final status based on last result
+                if any(r.role in (Role.TESTER, Role.REVIEWER) and not r.passed and r == results[-1]
+                       for r in results):
+                    state.status = TaskStatus.FAILED
+                elif any(r.status == TaskStatus.FAILED for r in results):
+                    state.status = TaskStatus.FAILED
+                else:
+                    state.status = TaskStatus.DONE
+
+        # Run with live status display
+        tasks = [_run_task(s) for s in wave_states]
+
+        with Live(_status_table(all_states), console=console, refresh_per_second=1) as live:
+            async def _update_display():
+                while not all(s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in wave_states):
+                    live.update(_status_table(all_states))
+                    await asyncio.sleep(1)
+                live.update(_status_table(all_states))
+
+            await asyncio.gather(*tasks, _update_display())
+
+        # After the wave: merge all successful task branches into the session branch
+        done_states = [s for s in wave_states if s.status == TaskStatus.DONE]
+        if done_states:
+            console.print(f"\n[bold]Merging {len(done_states)} branch(es) into {session_branch}...[/bold]\n")
+
+            for state in done_states:
+                result = merge_into_session(repo, session_branch, state.worktree.branch)
+                if result.success:
+                    console.print(f"  [green]✓[/green] {state.worktree.branch} — {result.message}")
+                else:
+                    console.print(f"  [red]✗[/red] {state.worktree.branch} — {result.message}")
+                    if result.conflicts:
+                        for cf in result.conflicts:
+                            console.print(f"      [dim]{cf}[/dim]")
+                    # Mark as failed so it doesn't get counted as done
+                    state.status = TaskStatus.FAILED
+
+            console.print()
+
+    # Summary
+    console.print("\n[bold]━━━ Summary ━━━[/bold]\n")
+    done = [s for s in all_states if s.status == TaskStatus.DONE]
+    failed = [s for s in all_states if s.status == TaskStatus.FAILED]
+    fixed = [s for s in done if s.fix_count > 0]
+
+    console.print(f"  [green]✓ {len(done)} completed[/green]")
+    if fixed:
+        console.print(f"  [yellow]↻ {len(fixed)} required fixes[/yellow]")
+        for s in fixed:
+            console.print(f"    - {s.task.title} ({s.fix_count} fix cycle(s))")
+    if failed:
+        console.print(f"  [red]✗ {len(failed)} failed[/red]")
+        for s in failed:
+            console.print(f"    - {s.task.title}: {s.phase_summary}")
+
+    # Show session branch for review
+    if done:
+        console.print(f"\n[bold]All changes merged into:[/bold] {session_branch}")
+        console.print(f"  git checkout {session_branch}")
+        console.print(f"  git diff main...{session_branch}")
+
+    if cleanup_on_done:
+        for s in all_states:
+            if s.worktree:
+                s.worktree.cleanup()
+        console.print("\n[dim]Worktrees cleaned up.[/dim]")
+
+    return all_states

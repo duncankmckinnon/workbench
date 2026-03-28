@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+*.egg
+
+# Virtual environments
+.venv/
+
+# Workbench runtime
+.workbench/
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+*.swp
