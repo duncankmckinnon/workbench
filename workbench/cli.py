@@ -109,18 +109,22 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
                 console.print(f"  Copied {name} → {dest}")
 
     elif agent == "codex":
+        if symlink:
+            console.print("  [yellow]Note: --symlink is not supported for codex (content is appended to a single file). Using copy.[/yellow]")
         target_dir = Path.cwd() / ".codex"
         target_dir.mkdir(parents=True, exist_ok=True)
         instructions_path = target_dir / "instructions.md"
         existing = instructions_path.read_text() if instructions_path.exists() else ""
 
+        marker_prefix = "<!-- workbench-skill:"
         for name, src in skills:
-            if name in existing:
+            marker = f"{marker_prefix}{name} -->"
+            if marker in existing:
                 console.print(f"  [yellow]Skipping {name} (already in instructions.md)[/yellow]")
                 continue
             content = src.read_text()
             separator = "\n\n---\n\n" if existing.strip() else ""
-            existing += separator + content
+            existing += f"{separator}{marker}\n{content}"
             console.print(f"  Appended {name} → {instructions_path}")
 
         instructions_path.write_text(existing)
