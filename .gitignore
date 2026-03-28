@@ -5,6 +5,7 @@ __pycache__/
 build/
 dist/
 *.egg
+workbench/_version.py
 
 # Virtual environments
 .venv/
