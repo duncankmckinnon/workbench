@@ -13,6 +13,7 @@ from rich.console import Console
 
 from .orchestrator import run_plan
 from .plan_parser import parse_plan
+from .tmux import check_tmux_available
 
 
 console = Console()
@@ -189,21 +190,19 @@ def run(
       wb run plan.md --agent gemini
       wb run plan.md --no-tmux
     """
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
     plan = parse_plan(plan_path.resolve())
 
     if not plan.tasks:
         raise click.ClickException("No tasks found in plan. Use '## Task: <title>' sections.")
-
-    if not no_tmux:
-        from .tmux import check_tmux_available
-        if not check_tmux_available():
-            raise click.ClickException(
-                "tmux is required but not found on PATH. "
-                "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
-                "Or use --no-tmux to run without it."
-            )
 
     from .agents import Role
 
