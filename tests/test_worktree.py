@@ -53,19 +53,14 @@ def test_create_worktree(git_repo):
     wt.cleanup()
 
 
-def test_worktree_cleanup(git_repo):
+def test_worktree_cleanup(git_repo, monkeypatch):
     session = create_session_branch(git_repo)
     wt = create_worktree(git_repo, "task-1", "cleanup-test", base_branch=session)
     assert wt.path.exists()
     branch = wt.branch
     # Run cleanup from the repo directory so git can find the repo
-    import os
-    old_cwd = os.getcwd()
-    os.chdir(git_repo)
-    try:
-        wt.cleanup()
-    finally:
-        os.chdir(old_cwd)
+    monkeypatch.chdir(git_repo)
+    wt.cleanup()
     # Worktree should no longer be listed
     result = subprocess.run(
         ["git", "worktree", "list"],
