@@ -121,6 +121,8 @@ async def run_plan(
     cleanup_on_done: bool = False,
     session_branch: str | None = None,
     start_wave: int = 1,
+    use_tmux: bool = True,
+    directives: dict[Role, str] | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -138,6 +140,10 @@ async def run_plan(
     console.print(f"[bold]Max retries:[/bold] {max_retries}")
     console.print(f"[bold]Repo:[/bold] {repo}")
     console.print(f"[bold]Session branch:[/bold] {session_branch}")
+    console.print(f"[bold]tmux:[/bold] {'enabled' if use_tmux else 'disabled'}")
+    if directives:
+        for role, _ in directives.items():
+            console.print(f"[bold]Custom directive:[/bold] {role.value}")
     console.print()
 
     for wave_idx, wave in enumerate(waves):
@@ -204,6 +210,10 @@ async def run_plan(
                     agent_cmd=agent_cmd,
                     on_status_change=_make_callback(state),
                     session_branch=session_branch,
+                    plan_context=plan.context,
+                    plan_conventions=plan.conventions,
+                    directives=directives,
+                    use_tmux=use_tmux,
                 )
 
                 state.results = results

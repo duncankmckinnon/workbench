@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import shutil
 import subprocess
+from importlib import resources
 from pathlib import Path
 
 import click
@@ -30,6 +32,111 @@ def _find_repo_root(start: Path = None) -> Path:
     return Path(result.stdout.strip())
 
 
+def _ensure_workbench_dir(repo: Path) -> Path:
+    """Ensure .workbench/ exists in the repo root. Returns the path."""
+    wb_dir = repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    return wb_dir
+
+
+def _get_skills_dir() -> Path:
+    """Return the path to the bundled skills directory."""
+    return Path(resources.files("workbench.skills"))
+
+
+def _discover_skills(skills_dir: Path) -> list[tuple[str, Path]]:
+    """Return list of (skill_name, skill_md_path) for all bundled skills."""
+    skills = []
+    for entry in sorted(skills_dir.iterdir()):
+        if entry.is_dir() and (entry / "SKILL.md").exists():
+            skills.append((entry.name, entry / "SKILL.md"))
+    return skills
+
+
+def _detect_agent() -> str:
+    """Auto-detect the agent platform from PATH."""
+    found = []
+    for name in ("claude", "codex", "cursor"):
+        if shutil.which(name):
+            found.append(name)
+
+    if len(found) == 1:
+        return found[0]
+    if len(found) > 1:
+        return click.prompt(
+            "Multiple agent platforms found. Choose one",
+            type=click.Choice(found),
+        )
+    return "manual"
+
+
+def _install_skills(agent: str | None, symlink: bool) -> None:
+    """Install bundled skills for the given agent platform."""
+    agent = agent or _detect_agent()
+    skills_dir = _get_skills_dir()
+    skills = _discover_skills(skills_dir)
+
+    if not skills:
+        console.print("[yellow]No bundled skills found.[/yellow]")
+        return
+
+    console.print(f"[bold]Installing {len(skills)} skill(s) for {agent}...[/bold]\n")
+
+    if agent == "claude":
+        target_dir = Path.home() / ".claude" / "commands"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            dest = target_dir / f"{name}.md"
+            if symlink:
+                dest.unlink(missing_ok=True)
+                dest.symlink_to(src.resolve())
+                console.print(f"  Linked {name} → {dest}")
+            else:
+                dest.write_text(src.read_text())
+                console.print(f"  Copied {name} → {dest}")
+
+    elif agent == "cursor":
+        target_dir = Path.cwd() / ".cursor" / "rules"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            dest = target_dir / f"{name}.md"
+            if symlink:
+                dest.unlink(missing_ok=True)
+                dest.symlink_to(src.resolve())
+                console.print(f"  Linked {name} → {dest}")
+            else:
+                dest.write_text(src.read_text())
+                console.print(f"  Copied {name} → {dest}")
+
+    elif agent == "codex":
+        if symlink:
+            console.print("  [yellow]Note: --symlink is not supported for codex (content is appended to a single file). Using copy.[/yellow]")
+        target_dir = Path.cwd() / ".codex"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        instructions_path = target_dir / "instructions.md"
+        existing = instructions_path.read_text() if instructions_path.exists() else ""
+
+        marker_prefix = "<!-- workbench-skill:"
+        for name, src in skills:
+            marker = f"{marker_prefix}{name} -->"
+            if marker in existing:
+                console.print(f"  [yellow]Skipping {name} (already in instructions.md)[/yellow]")
+                continue
+            content = src.read_text()
+            separator = "\n\n---\n\n" if existing.strip() else ""
+            existing += f"{separator}{marker}\n{content}"
+            console.print(f"  Appended {name} → {instructions_path}")
+
+        instructions_path.write_text(existing)
+
+    elif agent == "manual":
+        console.print(f"  Skills directory: {skills_dir}\n")
+        for name, src in skills:
+            console.print(f"  • {name}: {src}")
+
+    console.print(f"\n[green]Done. Installed {len(skills)} skill(s) for {agent}.[/green]")
+
+
 @click.group()
 @click.version_option()
 def main():
@@ -51,7 +158,28 @@ def main():
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
 @click.option("--session-branch", "-b", default=None, help="Resume from an existing session branch (e.g. workbench-1).")
 @click.option("--start-wave", "-w", default=1, type=int, help="Start from this wave number (1-indexed, default: 1).")
-def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool, max_retries: int, agent: str, cleanup: bool, repo: Path | None, session_branch: str | None, start_wave: int):
+@click.option("--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions.")
+@click.option("--implementor-directive", default=None, type=str, help="Override the implementor agent's instructions.")
+@click.option("--tester-directive", default=None, type=str, help="Override the tester agent's instructions.")
+@click.option("--reviewer-directive", default=None, type=str, help="Override the reviewer agent's instructions.")
+@click.option("--fixer-directive", default=None, type=str, help="Override the fixer agent's instructions.")
+def run(
+    plan_path: Path,
+    max_concurrent: int,
+    skip_test: bool,
+    skip_review: bool,
+    max_retries: int,
+    agent: str,
+    cleanup: bool,
+    repo: Path | None,
+    session_branch: str | None,
+    start_wave: int,
+    no_tmux: bool,
+    implementor_directive: str | None,
+    tester_directive: str | None,
+    reviewer_directive: str | None,
+    fixer_directive: str | None,
+):
     """Run a plan with parallel agents.
 
     \b
@@ -59,12 +187,35 @@ def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool
       wb run plan.md
       wb run plan.md -j 6 --skip-review
       wb run plan.md --agent gemini
+      wb run plan.md --no-tmux
     """
     repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
     plan = parse_plan(plan_path.resolve())
 
     if not plan.tasks:
         raise click.ClickException("No tasks found in plan. Use '## Task: <title>' sections.")
+
+    if not no_tmux:
+        from .tmux import check_tmux_available
+        if not check_tmux_available():
+            raise click.ClickException(
+                "tmux is required but not found on PATH. "
+                "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+                "Or use --no-tmux to run without it."
+            )
+
+    from .agents import Role
+
+    directives = {}
+    if implementor_directive:
+        directives[Role.IMPLEMENTOR] = implementor_directive
+    if tester_directive:
+        directives[Role.TESTER] = tester_directive
+    if reviewer_directive:
+        directives[Role.REVIEWER] = reviewer_directive
+    if fixer_directive:
+        directives[Role.FIXER] = fixer_directive
 
     console.print(f"\n[bold]Parsed {len(plan.tasks)} task(s) from[/bold] {plan_path}\n")
     for i, task in enumerate(plan.tasks, 1):
@@ -84,6 +235,8 @@ def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool
         cleanup_on_done=cleanup,
         session_branch=session_branch,
         start_wave=start_wave,
+        use_tmux=not no_tmux,
+        directives=directives or None,
     ))
 
 
@@ -119,6 +272,7 @@ def preview(plan_path: Path):
 def status(repo: Path | None):
     """Show active worktrees from workbench."""
     repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
     result = subprocess.run(
         ["git", "worktree", "list"],
         cwd=repo,
@@ -142,6 +296,7 @@ def status(repo: Path | None):
 def clean(repo: Path | None):
     """Remove all workbench worktrees and branches."""
     repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         cwd=repo,
@@ -169,6 +324,32 @@ def clean(repo: Path | None):
             subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
     console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+
+
+@main.command()
+@click.option("--agent", type=click.Choice(["claude", "cursor", "codex", "manual"]), default=None, help="Target agent platform.")
+@click.option("--symlink", is_flag=True, help="Symlink instead of copy (for development).")
+def init(agent: str | None, symlink: bool):
+    """Install workbench skills for your agent platform."""
+    _install_skills(agent, symlink)
+
+
+@main.command()
+@click.option("--agent", type=click.Choice(["claude", "cursor", "codex", "manual"]), default=None, help="Target agent platform.")
+@click.option("--symlink", is_flag=True, help="Symlink skills instead of copy (for development).")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
+def setup(agent: str | None, symlink: bool, repo: Path | None):
+    """Set up a repo for workbench: create .workbench/ and install skills."""
+    repo = repo or _find_repo_root()
+    wb_dir = repo / ".workbench"
+    if wb_dir.exists():
+        console.print(f"Already exists: {wb_dir}/")
+    else:
+        wb_dir.mkdir(exist_ok=True)
+        console.print(f"Created {wb_dir}/")
+
+    _install_skills(agent, symlink)
+    console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
 
 
 if __name__ == "__main__":
