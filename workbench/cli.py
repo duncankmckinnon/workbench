@@ -11,6 +11,7 @@ from rich.console import Console
 
 from .orchestrator import run_plan
 from .plan_parser import parse_plan
+from .tmux import check_tmux_available
 
 
 console = Console()
@@ -51,7 +52,8 @@ def main():
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
 @click.option("--session-branch", "-b", default=None, help="Resume from an existing session branch (e.g. workbench-1).")
 @click.option("--start-wave", "-w", default=1, type=int, help="Start from this wave number (1-indexed, default: 1).")
-def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool, max_retries: int, agent: str, cleanup: bool, repo: Path | None, session_branch: str | None, start_wave: int):
+@click.option("--no-tmux", is_flag=True, help="Run agents as subprocesses instead of tmux sessions.")
+def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool, max_retries: int, agent: str, cleanup: bool, repo: Path | None, session_branch: str | None, start_wave: int, no_tmux: bool):
     """Run a plan with parallel agents.
 
     \b
@@ -60,6 +62,13 @@ def run(plan_path: Path, max_concurrent: int, skip_test: bool, skip_review: bool
       wb run plan.md -j 6 --skip-review
       wb run plan.md --agent gemini
     """
+    use_tmux = not no_tmux
+    if use_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is not installed. Install it with your package manager "
+            "(e.g. 'brew install tmux') or use --no-tmux to run without it."
+        )
+
     repo = repo or _find_repo_root()
     plan = parse_plan(plan_path.resolve())
 
@@ -169,6 +178,39 @@ def clean(repo: Path | None):
             subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
     console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+
+
+SKILLS_DIR = Path(__file__).parent / "skills"
+
+
+@main.command()
+@click.option("--agent", default="manual", help="Agent to configure (manual, claude).")
+def init(agent: str):
+    """Initialize workbench skill files for an agent.
+
+    \b
+    Examples:
+      wb init --agent manual    # Print skill file paths
+      wb init --agent claude    # Create symlinks in ~/.claude/commands/
+    """
+    skill_files = sorted(SKILLS_DIR.glob("*.md")) if SKILLS_DIR.is_dir() else []
+    if not skill_files:
+        raise click.ClickException("No skill files found in workbench package.")
+
+    if agent == "claude":
+        commands_dir = Path.home() / ".claude" / "commands"
+        commands_dir.mkdir(parents=True, exist_ok=True)
+        for skill in skill_files:
+            link = commands_dir / skill.name
+            if link.exists() or link.is_symlink():
+                link.unlink()
+            link.symlink_to(skill.resolve())
+            console.print(f"  Linked {link} → {skill.resolve()}")
+        console.print(f"\n[green]Created {len(skill_files)} symlink(s) in {commands_dir}[/green]")
+    else:
+        console.print("[bold]Skill files:[/bold]\n")
+        for skill in skill_files:
+            console.print(f"  {skill.resolve()}")
 
 
 if __name__ == "__main__":
