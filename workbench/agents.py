@@ -19,6 +19,7 @@ class Role(str, Enum):
     TESTER = "tester"
     REVIEWER = "reviewer"
     FIXER = "fixer"
+    MERGER = "merger"
 
 
 class TaskStatus(str, Enum):
@@ -27,6 +28,7 @@ class TaskStatus(str, Enum):
     TESTING = "testing"
     REVIEWING = "reviewing"
     FIXING = "fixing"
+    MERGING = "merging"
     DONE = "done"
     FAILED = "failed"
 
@@ -66,6 +68,23 @@ DEFAULT_DIRECTIVES: dict[Role, str] = {
         "and commit the changes.\n\n"
         "Do NOT start from scratch. Read the existing code, understand the feedback, "
         "and make targeted fixes.\n"
+    ),
+    Role.MERGER: (
+        "You are a merge conflict resolution agent. A merge between two branches has produced conflicts. "
+        "Your job is to resolve ALL merge conflicts in the working tree.\n\n"
+        "For each conflicted file:\n"
+        "1. Read the file and understand both sides of the conflict\n"
+        "2. Resolve the conflict by keeping the correct combination of changes\n"
+        "3. The incoming branch (theirs) contains the new feature work\n"
+        "4. The target branch (ours) contains previously merged work from other tasks\n"
+        "5. In most cases you want BOTH sets of changes integrated correctly\n\n"
+        "After resolving all conflicts:\n"
+        "1. Stage all resolved files with git add\n"
+        "2. Do NOT commit — the orchestrator will handle the merge commit\n\n"
+        "IMPORTANT: You MUST end your response with exactly one of:\n"
+        "VERDICT: PASS  (all conflicts resolved)\n"
+        "VERDICT: FAIL  (unable to resolve one or more conflicts)\n\n"
+        "If FAIL, explain which files could not be resolved and why.\n\n"
     ),
 }
 
@@ -383,3 +402,63 @@ async def run_pipeline(
 
     _notify(TaskStatus.DONE)
     return results
+
+
+async def run_merge_resolver(
+    task_branch: str,
+    session_branch: str,
+    merge_dir: Path,
+    conflicts: list[str],
+    repo: Path,
+    agent_cmd: str = "claude",
+    use_tmux: bool = True,
+    adapter: AgentAdapter | None = None,
+) -> AgentResult:
+    """Run a merge conflict resolution agent in the merge worktree.
+
+    This is a standalone function (not part of the pipeline) called directly
+    by the orchestrator when merge conflicts are detected.
+    """
+    adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
+
+    prompt_parts = [
+        DEFAULT_DIRECTIVES[Role.MERGER],
+        f"Merging branch '{task_branch}' into '{session_branch}'",
+        "Conflicted files:\n" + "\n".join(f"  - {c}" for c in conflicts),
+        "Read each file, resolve the conflict markers, and stage with git add.",
+    ]
+    prompt = "\n\n".join(prompt_parts)
+
+    try:
+        cmd = adapter.build_command(prompt, merge_dir)
+        if use_tmux:
+            session_name = f"wb-merge-{task_branch.replace('/', '-')}"
+            returncode, raw_output = await run_in_tmux(session_name, cmd, merge_dir)
+        else:
+            proc = await asyncio.create_subprocess_exec(
+                *cmd, cwd=str(merge_dir),
+                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            returncode = proc.returncode
+            raw_output = stdout.decode("utf-8", errors="replace")
+
+        output_text, cost_data = adapter.parse_output(raw_output)
+
+        status = TaskStatus.DONE if returncode == 0 else TaskStatus.FAILED
+
+        return AgentResult(
+            task_id=task_branch,
+            role=Role.MERGER,
+            status=status,
+            output=output_text if isinstance(output_text, str) else str(output_text),
+            cost=cost_data,
+        )
+
+    except Exception as e:
+        return AgentResult(
+            task_id=task_branch,
+            role=Role.MERGER,
+            status=TaskStatus.FAILED,
+            output=f"Merge resolver error: {e}",
+        )

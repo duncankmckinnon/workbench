@@ -125,12 +125,22 @@ class MergeResult:
     success: bool
     message: str
     conflicts: list[str] | None = None
+    merge_dir: Path | None = None
 
 
-def merge_into_session(repo: Path, session_branch: str, task_branch: str) -> MergeResult:
+def merge_into_session(
+    repo: Path,
+    session_branch: str,
+    task_branch: str,
+    cleanup_on_conflict: bool = False,
+) -> MergeResult:
     """Merge a task branch into the session branch.
 
     Uses a temporary worktree to avoid disturbing the main working tree.
+
+    When cleanup_on_conflict is False (default), the merge worktree is left
+    in place on conflict so a resolver agent can be dispatched into it.
+    When True, conflicts are aborted and the worktree is cleaned up immediately.
     """
     merge_dir = repo / ".workbench" / "_merge"
 
@@ -149,37 +159,96 @@ def merge_into_session(repo: Path, session_branch: str, task_branch: str) -> Mer
             message=f"Failed to create merge worktree: {add_wt.stderr}",
         )
 
-    try:
-        # Attempt the merge inside the worktree
-        merge = subprocess.run(
-            ["git", "merge", task_branch, "-m", f"Merge {task_branch} into {session_branch}"],
-            cwd=merge_dir, capture_output=True, text=True,
+    # Attempt the merge inside the worktree
+    merge = subprocess.run(
+        ["git", "merge", task_branch, "-m", f"Merge {task_branch} into {session_branch}"],
+        cwd=merge_dir, capture_output=True, text=True,
+    )
+
+    if merge.returncode == 0:
+        # Clean merge — clean up worktree
+        subprocess.run(
+            ["git", "worktree", "remove", str(merge_dir), "--force"],
+            cwd=repo, capture_output=True,
         )
+        return MergeResult(branch=task_branch, success=True, message="Merged cleanly.")
 
-        if merge.returncode == 0:
-            return MergeResult(branch=task_branch, success=True, message="Merged cleanly.")
+    # Merge conflict — collect conflicting files
+    status = subprocess.run(
+        ["git", "diff", "--name-only", "--diff-filter=U"],
+        cwd=merge_dir, capture_output=True, text=True,
+    )
+    conflicts = [f.strip() for f in status.stdout.strip().split("\n") if f.strip()]
 
-        # Merge conflict — collect conflicting files
-        status = subprocess.run(
-            ["git", "diff", "--name-only", "--diff-filter=U"],
-            cwd=merge_dir, capture_output=True, text=True,
-        )
-        conflicts = [f.strip() for f in status.stdout.strip().split("\n") if f.strip()]
-
-        # Abort the merge so we don't leave the worktree in a broken state
+    if cleanup_on_conflict:
+        # Abort and clean up (old behavior)
         subprocess.run(["git", "merge", "--abort"], cwd=merge_dir, capture_output=True)
-
+        subprocess.run(
+            ["git", "worktree", "remove", str(merge_dir), "--force"],
+            cwd=repo, capture_output=True,
+        )
         return MergeResult(
             branch=task_branch, success=False,
             message=f"Merge conflict in {len(conflicts)} file(s).",
             conflicts=conflicts,
         )
-    finally:
-        # Always clean up the merge worktree
-        subprocess.run(
-            ["git", "worktree", "remove", str(merge_dir), "--force"],
-            cwd=repo, capture_output=True,
+
+    # Leave merge worktree in place for resolver agent
+    return MergeResult(
+        branch=task_branch, success=False,
+        message=f"Merge conflict in {len(conflicts)} file(s).",
+        conflicts=conflicts,
+        merge_dir=merge_dir,
+    )
+
+
+def complete_merge(merge_dir: Path, repo: Path, session_branch: str, task_branch: str) -> MergeResult:
+    """Complete a merge after conflicts have been resolved by staging and committing.
+
+    Checks that no conflict markers remain, commits the merge, and cleans up
+    the temporary merge worktree.
+    """
+    # Check for remaining conflict markers in tracked files
+    check = subprocess.run(
+        ["git", "diff", "--check"],
+        cwd=merge_dir, capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        return MergeResult(
+            branch=task_branch, success=False,
+            message=f"Conflict markers remain: {check.stdout.strip()}",
         )
+
+    # Commit the resolved merge
+    commit = subprocess.run(
+        ["git", "commit", "--no-edit"],
+        cwd=merge_dir, capture_output=True, text=True,
+    )
+    if commit.returncode != 0:
+        return MergeResult(
+            branch=task_branch, success=False,
+            message=f"Merge commit failed: {commit.stderr.strip()}",
+        )
+
+    # Clean up the merge worktree
+    subprocess.run(
+        ["git", "worktree", "remove", str(merge_dir), "--force"],
+        cwd=repo, capture_output=True,
+    )
+
+    return MergeResult(
+        branch=task_branch, success=True,
+        message=f"Merged {task_branch} into {session_branch} (conflicts resolved).",
+    )
+
+
+def cleanup_merge_worktree(repo: Path, merge_dir: Path) -> None:
+    """Abort merge and remove the merge worktree."""
+    subprocess.run(["git", "merge", "--abort"], cwd=merge_dir, capture_output=True)
+    subprocess.run(
+        ["git", "worktree", "remove", str(merge_dir), "--force"],
+        cwd=repo, capture_output=True,
+    )
 
 
 def get_diff(worktree: Worktree, base_branch: str) -> str:
