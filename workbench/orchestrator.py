@@ -12,10 +12,12 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from .agents import AgentResult, Role, TaskStatus, run_pipeline
+from .agents import AgentResult, Role, TaskStatus, run_merge_resolver, run_pipeline
 from .plan_parser import Plan, Task
 from .worktree import (
     Worktree,
+    cleanup_merge_worktree,
+    complete_merge,
     create_session_branch,
     create_worktree,
     get_main_branch,
@@ -90,6 +92,7 @@ def _status_table(states: list[TaskState]) -> Table:
         TaskStatus.TESTING: "cyan",
         TaskStatus.REVIEWING: "magenta",
         TaskStatus.FIXING: "yellow bold",
+        TaskStatus.MERGING: "blue bold",
         TaskStatus.DONE: "green",
         TaskStatus.FAILED: "red bold",
     }
@@ -249,12 +252,58 @@ async def run_plan(
                 result = merge_into_session(repo, session_branch, state.worktree.branch)
                 if result.success:
                     console.print(f"  [green]✓[/green] {state.worktree.branch} — {result.message}")
+                elif result.conflicts and result.merge_dir:
+                    # Conflicts detected — dispatch merge resolver agent
+                    console.print(
+                        f"  [blue]⚡[/blue] {state.worktree.branch} — "
+                        f"{result.message} Resolving..."
+                    )
+                    for cf in result.conflicts:
+                        console.print(f"      [dim]{cf}[/dim]")
+
+                    state.status = TaskStatus.MERGING
+
+                    resolver_result = await run_merge_resolver(
+                        task_branch=state.worktree.branch,
+                        session_branch=session_branch,
+                        merge_dir=result.merge_dir,
+                        conflicts=result.conflicts,
+                        repo=repo,
+                        agent_cmd=agent_cmd,
+                    )
+                    state.results.append(resolver_result)
+
+                    if resolver_result.passed:
+                        # Resolver succeeded — complete the merge
+                        merge_finish = complete_merge(
+                            result.merge_dir, repo, session_branch, state.worktree.branch,
+                        )
+                        if merge_finish.success:
+                            console.print(
+                                f"  [green]✓[/green] {state.worktree.branch} — "
+                                f"{merge_finish.message}"
+                            )
+                            state.status = TaskStatus.DONE
+                        else:
+                            console.print(
+                                f"  [red]✗[/red] {state.worktree.branch} — "
+                                f"{merge_finish.message}"
+                            )
+                            cleanup_merge_worktree(repo, result.merge_dir)
+                            state.status = TaskStatus.FAILED
+                    else:
+                        # Resolver failed — abort and mark failed
+                        console.print(
+                            f"  [red]✗[/red] {state.worktree.branch} — "
+                            f"Merge resolver failed"
+                        )
+                        cleanup_merge_worktree(repo, result.merge_dir)
+                        state.status = TaskStatus.FAILED
                 else:
                     console.print(f"  [red]✗[/red] {state.worktree.branch} — {result.message}")
                     if result.conflicts:
                         for cf in result.conflicts:
                             console.print(f"      [dim]{cf}[/dim]")
-                    # Mark as failed so it doesn't get counted as done
                     state.status = TaskStatus.FAILED
 
             console.print()
