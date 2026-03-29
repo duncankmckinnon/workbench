@@ -74,18 +74,43 @@ def _detect_agent() -> str:
 
 _PLATFORM_LABEL = {
     "claude": "command",
+    "gemini": "skill",
     "cursor": "rule",
     "codex": "instruction",
     "manual": "skill file",
 }
 
 
-def _install_skills(agent: str | None, symlink: bool) -> None:
+def _install_to_agents_skills(
+    skills: list[tuple[str, Path]], repo: Path, symlink: bool
+) -> None:
+    """Install skills to <repo>/.agents/skills/ for cross-client discoverability."""
+    target_dir = repo / ".agents" / "skills"
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for name, src in skills:
+        src_dir = src.parent
+        dest_dir = target_dir / name
+        if symlink:
+            if dest_dir.is_symlink():
+                dest_dir.unlink()
+            elif dest_dir.exists():
+                shutil.rmtree(dest_dir)
+            dest_dir.symlink_to(src_dir.resolve())
+        else:
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+    console.print(f"  Also installed to {target_dir} for cross-client discoverability.")
+
+
+def _install_skills(agent: str | None, symlink: bool, local: bool = False, repo: Path | None = None) -> None:
     """Install bundled skill files for the given agent platform."""
     agent = agent or _detect_agent()
     skills_dir = _get_skills_dir()
     skills = _discover_skills(skills_dir)
     label = _PLATFORM_LABEL.get(agent, "skill file")
+
+    if local and repo is None:
+        repo = _find_repo_root()
 
     if not skills:
         console.print("[yellow]No bundled skill files found.[/yellow]")
@@ -94,7 +119,10 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
     console.print(f"[bold]Installing {len(skills)} {label}(s) for {agent}...[/bold]\n")
 
     if agent == "claude":
-        target_dir = Path.home() / ".claude" / "skills"
+        if local:
+            target_dir = repo / ".claude" / "skills"
+        else:
+            target_dir = Path.home() / ".claude" / "skills"
         target_dir.mkdir(parents=True, exist_ok=True)
         for name, src in skills:
             src_dir = src.parent
@@ -119,8 +147,41 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
                 shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                 console.print(f"  Copied /{name} → {dest_dir}")
         console.print(f"\n  Use in Claude Code: [bold]/{skills[0][0]}[/bold]")
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
+
+    elif agent == "gemini":
+        if local:
+            target_dir = repo / ".agents" / "skills"
+        else:
+            target_dir = Path.home() / ".agents" / "skills"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            src_dir = src.parent
+            dest_dir = target_dir / name
+            dest = dest_dir / "SKILL.md"
+            if dest.exists() and not symlink:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing {name}?", default=True):
+                    console.print(f"  [yellow]Skipped {name}[/yellow]")
+                    continue
+            if symlink:
+                if dest_dir.is_symlink():
+                    dest_dir.unlink()
+                elif dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.symlink_to(src_dir.resolve())
+                console.print(f"  Linked {name} → {dest_dir}")
+            else:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                console.print(f"  Copied {name} → {dest_dir}")
 
     elif agent == "cursor":
+        if local:
+            console.print("  [dim]Note: cursor skills are always project-level.[/dim]")
         target_dir = Path.cwd() / ".cursor" / "rules"
         target_dir.mkdir(parents=True, exist_ok=True)
         for name, src in skills:
@@ -139,8 +200,12 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
             else:
                 dest.write_text(src.read_text())
                 console.print(f"  Copied {name} → {dest}")
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
 
     elif agent == "codex":
+        if local:
+            console.print("  [dim]Note: codex skills are always project-level.[/dim]")
         if symlink:
             console.print(
                 "  [yellow]Note: --symlink is not supported for codex (content is appended to a single file). Using copy.[/yellow]"
@@ -162,6 +227,8 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
             console.print(f"  Appended {name} → {instructions_path}")
 
         instructions_path.write_text(existing)
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
 
     elif agent == "manual":
         console.print(f"  Skill files directory: {skills_dir}\n")
@@ -498,20 +565,21 @@ def stop(cleanup: bool, repo: Path | None):
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "cursor", "codex", "manual"]),
+    type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]),
     default=None,
     help="Target agent platform.",
 )
 @click.option("--symlink", is_flag=True, help="Symlink instead of copy (for development).")
-def init(agent: str | None, symlink: bool):
+@click.option("--local", is_flag=True, help="Install skills at project level instead of user level.")
+def init(agent: str | None, symlink: bool, local: bool):
     """Install workbench skills for your agent platform."""
-    _install_skills(agent, symlink)
+    _install_skills(agent, symlink, local=local)
 
 
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "cursor", "codex", "manual"]),
+    type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]),
     default=None,
     help="Target agent platform.",
 )
@@ -532,7 +600,7 @@ def setup(agent: str | None, symlink: bool, repo: Path | None):
         wb_dir.mkdir(exist_ok=True)
         console.print(f"Created {wb_dir}/")
 
-    _install_skills(agent, symlink)
+    _install_skills(agent, symlink, local=True, repo=repo)
     console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
 
 
