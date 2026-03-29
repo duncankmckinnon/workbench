@@ -143,7 +143,7 @@ def test_build_prompt_implementor_has_branch(sample_task, sample_worktree):
     assert "Stay on this branch" in prompt
 
 
-def test_build_prompt_tester_has_no_branch_pinning(sample_task, sample_worktree):
+def test_build_prompt_tester_has_branch_pinning(sample_task, sample_worktree):
     with patch("workbench.agents.get_diff", return_value="some diff"):
         prompt = build_prompt(
             role=Role.TESTER,
@@ -151,7 +151,7 @@ def test_build_prompt_tester_has_no_branch_pinning(sample_task, sample_worktree)
             worktree=sample_worktree,
             base_branch="main",
         )
-    assert "Stay on this branch" not in prompt
+    assert "Stay on this branch" in prompt
 
 
 def test_build_prompt_directive_override(sample_task, sample_worktree):
@@ -227,3 +227,38 @@ def test_build_prompt_default_directive_used(sample_task, sample_worktree):
         base_branch="main",
     )
     assert DEFAULT_DIRECTIVES[Role.IMPLEMENTOR] in prompt
+
+
+def test_build_prompt_merger_has_branch_pinning(sample_task, sample_worktree):
+    with patch("workbench.agents.get_diff", return_value=""):
+        prompt = build_prompt(
+            role=Role.MERGER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+        )
+    assert "wb/task-1-add-widget" in prompt
+    assert "Stay on this branch" in prompt
+    assert "Resolve all merge conflicts" in prompt
+
+
+def test_build_prompt_merger_has_directive(sample_task, sample_worktree):
+    with patch("workbench.agents.get_diff", return_value=""):
+        prompt = build_prompt(
+            role=Role.MERGER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+        )
+    assert DEFAULT_DIRECTIVES[Role.MERGER] in prompt
+
+
+def test_build_prompt_reviewer_no_branch_pinning(sample_task, sample_worktree):
+    with patch("workbench.agents.get_diff", return_value=""):
+        prompt = build_prompt(
+            role=Role.REVIEWER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+        )
+    assert "Stay on this branch" not in prompt

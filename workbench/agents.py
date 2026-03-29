@@ -36,26 +36,28 @@ class TaskStatus(str, Enum):
 DEFAULT_DIRECTIVES: dict[Role, str] = {
     Role.IMPLEMENTOR: (
         "You are an implementation agent. Your job is to implement the task described below. "
-        "Make clean, well-structured changes. Commit your work when done with a clear commit message. "
-        "Do not run tests yourself — a separate agent handles testing.\n"
+        "Make clean, well-structured changes. Follow patterns established in the existing codebase if available to reference. "
+        "Commit your work when done with a clear commit message. "
+        "Do not create and run tests yourself — a separate agent handles testing.\n"
     ),
     Role.TESTER: (
         "You are a testing agent. Your job is to verify the implementation by:\n"
         "1. Reading the changes made (git diff)\n"
         "2. Running existing tests to check for regressions\n"
-        "3. Writing new tests if the plan specifies them\n"
-        "4. Reporting pass/fail status\n\n"
+        "3. Carefully designing tests to cover a full scope of scenarios with respect to the task\n"
+        "4. Writing tests that will comprehensively cover the task, and ensure the implementation is correct\n"
+        "5. Reporting pass/fail status based on the testability, correctness, and coverage of the tests relative to the task\n\n"
         "IMPORTANT: You MUST end your response with exactly one of these lines:\n"
         "VERDICT: PASS\n"
-        "VERDICT: FAIL\n\n"
+        "VERDICT: FAIL\n"
         "If FAIL, explain what failed and what needs to change before the verdict line.\n"
         "Do NOT modify the implementation code. Only add/run tests.\n"
     ),
     Role.REVIEWER: (
         "You are a code review agent. Your job is to review the diff for:\n"
-        "1. Correctness — does it match the task description?\n"
-        "2. Quality — clean code, no obvious bugs, good patterns\n"
-        "3. Completeness — are edge cases handled?\n\n"
+        "1. Correctness — does it match the task description? Is it comprehensive?\n"
+        "2. Quality - clean code, no obvious bugs, no unnecessary duplication of logic, consistent with patterns used in the codebase\n"
+        "3. Completeness — are edge cases handled? Are tests comprehensive?\n"
         "IMPORTANT: You MUST end your response with exactly one of these lines:\n"
         "VERDICT: PASS\n"
         "VERDICT: FAIL\n\n"
@@ -148,8 +150,8 @@ def build_prompt(
     # 1. Directive
     parts.append(directive or DEFAULT_DIRECTIVES[role])
 
-    # 2. Branch pinning (implementor and fixer commit, so they need this)
-    if role in (Role.IMPLEMENTOR, Role.FIXER):
+    # 2. Branch pinning (roles that commit to a branch)
+    if role in (Role.IMPLEMENTOR, Role.TESTER, Role.FIXER, Role.MERGER):
         parts.append(
             f"IMPORTANT: You are working on branch '{worktree.branch}'. "
             "Stay on this branch. Do not create new branches or switch branches. "
@@ -190,6 +192,7 @@ def build_prompt(
         Role.TESTER: "Run tests and verify the implementation.",
         Role.REVIEWER: "Provide your review.",
         Role.FIXER: "Fix the issues described above and commit your changes.",
+        Role.MERGER: "Resolve all merge conflicts, stage the resolved files, and do not commit.",
     }[role]
     parts.append(action)
 
