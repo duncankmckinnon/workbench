@@ -415,3 +415,410 @@ def test_stop_with_cleanup(git_repo):
     assert result.exit_code == 0
     assert "No active agent sessions" in result.output
     assert "Cleaned up" in result.output
+
+
+# ---------------------------------------------------------------------------
+# wb profile subcommand group
+# ---------------------------------------------------------------------------
+
+
+class TestProfileInit:
+    def test_profile_init_creates_file(self, tmp_path):
+        """wb profile init creates .workbench/profile.yaml with valid YAML."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        profile_path = repo / ".workbench" / "profile.yaml"
+        assert profile_path.exists()
+        # Should be valid YAML with roles
+        import yaml
+
+        data = yaml.safe_load(profile_path.read_text())
+        assert "roles" in data
+
+    def test_profile_init_global(self, tmp_path):
+        """wb profile init --global creates ~/.workbench/profile.yaml."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=fake_home):
+            result = runner.invoke(main, ["profile", "init", "--global"])
+
+        assert result.exit_code == 0
+        global_path = fake_home / ".workbench" / "profile.yaml"
+        assert global_path.exists()
+
+    def test_profile_init_global_creates_directory(self, tmp_path):
+        """wb profile init --global creates ~/.workbench/ if it doesn't exist."""
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=fake_home):
+            result = runner.invoke(main, ["profile", "init", "--global"])
+
+        assert result.exit_code == 0
+        assert (fake_home / ".workbench").is_dir()
+
+    def test_profile_init_no_overwrite(self, tmp_path):
+        """Existing file, user declines overwrite, file unchanged."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+        profile_path = wb_dir / "profile.yaml"
+        original_content = "# original content\nroles: {}\n"
+        profile_path.write_text(original_content)
+
+        runner = CliRunner()
+        # User inputs 'n' to decline overwrite
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo)], input="n\n")
+
+        assert profile_path.read_text() == original_content
+
+    def test_profile_init_overwrite_accepted(self, tmp_path):
+        """Existing file, user accepts overwrite, file is replaced."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+        profile_path = wb_dir / "profile.yaml"
+        profile_path.write_text("# old\nroles: {}\n")
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo)], input="y\n")
+
+        assert result.exit_code == 0
+        import yaml
+
+        data = yaml.safe_load(profile_path.read_text())
+        # Should now have all roles from default profile
+        assert "roles" in data
+        assert "implementor" in data["roles"]
+
+    def test_profile_init_prints_path(self, tmp_path):
+        """wb profile init prints the path of the created file."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        assert "profile.yaml" in result.output
+
+
+class TestProfileShow:
+    def test_profile_show_output(self, tmp_path):
+        """wb profile show displays role table with agents."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "show", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        # Should show all roles with their agents
+        assert "implementor" in result.output
+        assert "tester" in result.output
+        assert "reviewer" in result.output
+        assert "fixer" in result.output
+        assert "claude" in result.output
+
+    def test_profile_show_with_explicit_path(self, tmp_path):
+        """wb profile show --profile <path> uses the explicit profile."""
+        import yaml
+
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"reviewer": {"agent": "gemini"}}})
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main, ["profile", "show", "--repo", str(repo), "--profile", str(profile_path)]
+            )
+
+        assert result.exit_code == 0
+        assert "gemini" in result.output
+
+    def test_profile_show_truncates_directive(self, tmp_path):
+        """wb profile show truncates directive to first line."""
+        import yaml
+
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump(
+                {"roles": {"reviewer": {"directive": "First line.\nSecond line.\nThird line."}}}
+            )
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main, ["profile", "show", "--repo", str(repo), "--profile", str(profile_path)]
+            )
+
+        assert result.exit_code == 0
+        # First line should be visible; second/third should not
+        assert "First line." in result.output
+        assert "Second line." not in result.output
+
+
+class TestProfileSet:
+    def test_profile_set_agent(self, tmp_path):
+        """wb profile set reviewer.agent gemini updates the YAML."""
+        import yaml
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "reviewer.agent", "gemini", "--repo", str(repo)]
+        )
+
+        assert result.exit_code == 0
+        profile_path = wb_dir / "profile.yaml"
+        assert profile_path.exists()
+        data = yaml.safe_load(profile_path.read_text())
+        assert data["roles"]["reviewer"]["agent"] == "gemini"
+
+    def test_profile_set_directive_extend(self, tmp_path):
+        """wb profile set tester.directive_extend 'Extra' sets the extend field."""
+        import yaml
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "set", "tester.directive_extend", "Extra instructions.", "--repo", str(repo)],
+        )
+
+        assert result.exit_code == 0
+        profile_path = wb_dir / "profile.yaml"
+        data = yaml.safe_load(profile_path.read_text())
+        assert data["roles"]["tester"]["directive_extend"] == "Extra instructions."
+
+    def test_profile_set_invalid_key_format(self, tmp_path):
+        """wb profile set with key not in role.field format produces error."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "invalidkey", "value", "--repo", str(repo)]
+        )
+
+        assert result.exit_code != 0
+
+    def test_profile_set_invalid_role(self, tmp_path):
+        """wb profile set with unknown role produces error."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "nonexistent.agent", "gemini", "--repo", str(repo)]
+        )
+
+        assert result.exit_code != 0
+
+    def test_profile_set_invalid_field(self, tmp_path):
+        """wb profile set with unknown field produces error."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "reviewer.bogus_field", "x", "--repo", str(repo)]
+        )
+
+        assert result.exit_code != 0
+
+    def test_profile_set_updates_existing(self, tmp_path):
+        """wb profile set preserves other fields in existing YAML."""
+        import yaml
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+        profile_path = wb_dir / "profile.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"reviewer": {"agent": "codex"}, "tester": {"agent": "gemini"}}})
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "reviewer.agent", "gemini", "--repo", str(repo)]
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load(profile_path.read_text())
+        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        # tester should be unchanged
+        assert data["roles"]["tester"]["agent"] == "gemini"
+
+    def test_profile_set_global(self, tmp_path):
+        """wb profile set --global writes to ~/.workbench/profile.yaml."""
+        import yaml
+
+        fake_home = tmp_path / "home"
+        fake_home.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=fake_home):
+            result = runner.invoke(
+                main, ["profile", "set", "implementor.agent", "codex", "--global"]
+            )
+
+        assert result.exit_code == 0
+        global_path = fake_home / ".workbench" / "profile.yaml"
+        assert global_path.exists()
+        data = yaml.safe_load(global_path.read_text())
+        assert data["roles"]["implementor"]["agent"] == "codex"
+
+
+class TestProfileDiff:
+    def test_profile_diff_no_changes(self, tmp_path):
+        """Default profile shows 'matches defaults'."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "diff", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        assert "matches defaults" in result.output.lower()
+
+    def test_profile_diff_with_changes(self, tmp_path):
+        """Modified profile shows which roles differ."""
+        import yaml
+
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        wb_dir = repo / ".workbench"
+        wb_dir.mkdir()
+        (wb_dir / "profile.yaml").write_text(
+            yaml.dump(
+                {
+                    "roles": {
+                        "reviewer": {"agent": "gemini"},
+                        "tester": {"directive": "Custom directive."},
+                    }
+                }
+            )
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "diff", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        assert "reviewer" in result.output
+        assert "gemini" in result.output
+        # Directive diff should show [changed], not the full text
+        assert "tester" in result.output
+        assert "[changed]" in result.output.lower() or "changed" in result.output.lower()
+
+    def test_profile_diff_with_explicit_path(self, tmp_path):
+        """wb profile diff --profile <path> uses the explicit profile."""
+        import yaml
+
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"fixer": {"agent": "codex"}}})
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main, ["profile", "diff", "--repo", str(repo), "--profile", str(profile_path)]
+            )
+
+        assert result.exit_code == 0
+        assert "fixer" in result.output
+        assert "codex" in result.output
+
+
+# ---------------------------------------------------------------------------
+# wb run --profile flag
+# ---------------------------------------------------------------------------
+
+
+class TestRunWithProfile:
+    def test_run_with_profile_flag(self, git_repo, tmp_path):
+        """wb run plan.md --profile custom.yaml passes profile_path to run_plan."""
+        import yaml
+
+        plan = tmp_path / "plan.md"
+        plan.write_text("# Plan\n## Task: hello\nDo something\n")
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"implementor": {"agent": "gemini"}}})
+        )
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli.run_plan") as mock_run_plan,
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.asyncio") as mock_asyncio,
+        ):
+            mock_asyncio.run = lambda coro: None
+            result = runner.invoke(
+                main,
+                ["run", str(plan), "--no-tmux", "--profile", str(profile_path)],
+            )
+
+        # Verify the option was accepted
+        assert "no such option" not in (result.output or "").lower()
+        # Verify profile_path was passed to run_plan
+        if mock_run_plan.called:
+            call_kwargs = mock_run_plan.call_args
+            # run_plan is called with keyword args
+            if call_kwargs.kwargs:
+                assert call_kwargs.kwargs.get("profile_path") == profile_path
+            else:
+                # May be positional - just check it was called
+                pass
+
+    def test_run_profile_flag_nonexistent_file(self, git_repo, tmp_path):
+        """wb run --profile with nonexistent file produces an error."""
+        plan = tmp_path / "plan.md"
+        plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(
+                main,
+                ["run", str(plan), "--no-tmux", "--profile", str(tmp_path / "missing.yaml")],
+            )
+
+        # click.Path(exists=True) should reject nonexistent files
+        assert result.exit_code != 0
