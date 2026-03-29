@@ -687,7 +687,8 @@ class TestProfileInit:
         result = runner.invoke(main, ["profile", "init", "--repo", str(repo)])
 
         assert result.exit_code == 0
-        assert "profile.yaml" in result.output
+        # Rich may wrap long paths across lines, so check without newlines
+        assert "profile.yaml" in result.output.replace("\n", "")
 
 
 class TestProfileShow:
