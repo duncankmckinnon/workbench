@@ -91,6 +91,38 @@ DEFAULT_DIRECTIVES: dict[Role, str] = {
 }
 
 
+TDD_DIRECTIVES: dict[Role, str] = {
+    Role.TESTER: (
+        "You are a test-driven development agent. Your job is to write comprehensive "
+        "tests for the task described below BEFORE any implementation exists.\n\n"
+        "Write tests that:\n"
+        "1. Cover the expected behavior described in the task\n"
+        "2. Cover edge cases and error conditions\n"
+        "3. Follow the project's existing test patterns and conventions\n"
+        "4. Will FAIL because the implementation does not exist yet\n\n"
+        "Do NOT implement the feature. Only write tests.\n"
+        "Do NOT create stub implementations to make tests pass.\n"
+        "Commit your test files when done with a clear commit message.\n\n"
+        "IMPORTANT: You MUST end your response with exactly one of these lines:\n"
+        "VERDICT: PASS\n"
+        "VERDICT: FAIL\n\n"
+        "Use VERDICT: PASS if you successfully wrote the tests.\n"
+        "Use VERDICT: FAIL if you could not write meaningful tests.\n"
+    ),
+    Role.IMPLEMENTOR: (
+        "You are an implementation agent working in test-driven development mode. "
+        "Tests have already been written for this task and they are currently FAILING.\n\n"
+        "Your job is to:\n"
+        "1. Read the existing test files to understand what is expected\n"
+        "2. Implement the code to make ALL tests pass\n"
+        "3. Run the tests to verify they pass\n"
+        "4. Commit your work when done with a clear commit message\n\n"
+        "Do NOT modify the test files. Only write implementation code.\n"
+        "Do NOT delete or skip any tests.\n"
+    ),
+}
+
+
 def build_prompt(
     role: Role,
     task: Task,
@@ -274,6 +306,7 @@ async def run_pipeline(
     plan_conventions: str = "",
     directives: dict[Role, str] | None = None,
     use_tmux: bool = True,
+    tdd: bool = False,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -295,21 +328,65 @@ async def run_pipeline(
         if on_status_change:
             on_status_change(task.id, status)
 
-    # 1. Implement
-    _notify(TaskStatus.IMPLEMENTING)
-    impl_result = await run_agent(
-        Role.IMPLEMENTOR, task, worktree, repo, agent_cmd,
-        session_branch=session_branch,
-        plan_context=plan_context,
-        plan_conventions=plan_conventions,
-        directive=directives.get(Role.IMPLEMENTOR) if directives else None,
-        use_tmux=use_tmux,
-    )
-    results.append(impl_result)
+    if tdd:
+        # TDD Phase 1: Write failing tests
+        _notify(TaskStatus.TESTING)
+        tdd_test_directive = (directives or {}).get(Role.TESTER) or TDD_DIRECTIVES[Role.TESTER]
+        test_write_result = await run_agent(
+            Role.TESTER, task, worktree, repo, agent_cmd,
+            session_branch=session_branch,
+            plan_context=plan_context,
+            plan_conventions=plan_conventions,
+            directive=tdd_test_directive,
+            use_tmux=use_tmux,
+        )
+        results.append(test_write_result)
 
-    if impl_result.status == TaskStatus.FAILED:
-        _notify(TaskStatus.FAILED)
-        return results
+        if test_write_result.status == TaskStatus.FAILED:
+            _notify(TaskStatus.FAILED)
+            return results
+
+        if not test_write_result.passed:
+            _notify(TaskStatus.FAILED)
+            return results
+
+        # TDD Phase 2: Implement to make tests pass
+        _notify(TaskStatus.IMPLEMENTING)
+        tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[Role.IMPLEMENTOR]
+        impl_result = await run_agent(
+            Role.IMPLEMENTOR, task, worktree, repo, agent_cmd,
+            session_branch=session_branch,
+            plan_context=plan_context,
+            plan_conventions=plan_conventions,
+            directive=tdd_impl_directive,
+            use_tmux=use_tmux,
+        )
+        results.append(impl_result)
+
+        if impl_result.status == TaskStatus.FAILED:
+            _notify(TaskStatus.FAILED)
+            return results
+
+        # Continue to normal test verification (phase 2) and review (phase 3)
+        # The existing test/review loop below will verify the implementation
+        # and handle fix retries as normal.
+
+    # 1. Implement (skipped in TDD mode — already done above)
+    if not tdd:
+        _notify(TaskStatus.IMPLEMENTING)
+        impl_result = await run_agent(
+            Role.IMPLEMENTOR, task, worktree, repo, agent_cmd,
+            session_branch=session_branch,
+            plan_context=plan_context,
+            plan_conventions=plan_conventions,
+            directive=directives.get(Role.IMPLEMENTOR) if directives else None,
+            use_tmux=use_tmux,
+        )
+        results.append(impl_result)
+
+        if impl_result.status == TaskStatus.FAILED:
+            _notify(TaskStatus.FAILED)
+            return results
 
     # 2. Test (with retry loop)
     if not skip_test:

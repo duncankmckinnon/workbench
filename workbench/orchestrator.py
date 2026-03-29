@@ -126,6 +126,7 @@ async def run_plan(
     start_wave: int = 1,
     use_tmux: bool = True,
     directives: dict[Role, str] | None = None,
+    tdd: bool = False,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -144,6 +145,8 @@ async def run_plan(
     console.print(f"[bold]Repo:[/bold] {repo}")
     console.print(f"[bold]Session branch:[/bold] {session_branch}")
     console.print(f"[bold]tmux:[/bold] {'enabled' if use_tmux else 'disabled'}")
+    if tdd:
+        console.print("[bold]Mode:[/bold] test-driven development (tests first)")
     if directives:
         for role, _ in directives.items():
             console.print(f"[bold]Custom directive:[/bold] {role.value}")
@@ -217,6 +220,7 @@ async def run_plan(
                     plan_conventions=plan.conventions,
                     directives=directives,
                     use_tmux=use_tmux,
+                    tdd=tdd,
                 )
 
                 state.results = results

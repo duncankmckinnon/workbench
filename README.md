@@ -48,27 +48,55 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 
 ## Plan format
 
-```markdown
-# Plan Title
+## TDD mode
 
-## Context
-What this project is and what we're building.
+Run with `--tdd` to write tests before implementation:
+
+```bash
+wb run plan.md --tdd
+```
+
+Pipeline becomes: **write tests → implement → verify tests → review → fix**
+
+The tester agent writes comprehensive failing tests based on the task description, then the implementor writes code to make them pass. After that, normal test verification and review proceed as usual.
+
+Cannot be combined with `--skip-test`.
+
+## Stopping agents
+
+```bash
+wb stop              # kill all active agent tmux sessions
+wb stop --cleanup    # also remove worktrees and branches
+```
+
+## CLI reference
+
+| Command | Description |
+|---|---|
+| `wb run <plan>` | Execute a plan |
+| `wb preview <plan>` | Dry-run preview of tasks and waves |
+| `wb status` | Show active worktrees |
+| `wb stop` | Stop all running agents and optionally clean up |
+| `wb clean` | Remove all workbench worktrees and branches |
+| `wb init` | Set up workbench for your agent platform |
 
 ## Conventions
 - Python 3.11+, type hints
 - Tests: pytest, run with `uv run pytest`
 
-## Task: Auth middleware
-Files: src/auth.py, src/middleware.py
-Depends: database-setup
-
-Implement JWT authentication middleware...
-
-## Task: Database setup
-Files: src/db.py, migrations/
-
-Set up SQLAlchemy models...
-```
+| Flag | Description |
+|---|---|
+| `-j N` | Max concurrent tasks (default: 4) |
+| `--tdd` | Test-driven: write tests first, then implement |
+| `--skip-test` | Skip the test phase |
+| `--skip-review` | Skip the review phase |
+| `--max-retries N` | Max fix cycles per task (default: 2) |
+| `--agent CMD` | Agent CLI command (default: `claude`) |
+| `--no-tmux` | Run agents as subprocesses instead of in tmux sessions |
+| `--session-branch NAME` | Resume an existing session branch |
+| `--start-wave N` | Skip already-merged waves |
+| `--cleanup` | Remove worktrees after completion |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
 
 - `## Context` and `## Conventions` are injected into every agent's prompt.
 - `Files:` declares which files the task owns (prevents parallel conflicts).

@@ -170,6 +170,7 @@ def main():
 @click.option("--session-branch", "-b", default=None, help="Resume from an existing session branch (e.g. workbench-1).")
 @click.option("--start-wave", "-w", default=1, type=int, help="Start from this wave number (1-indexed, default: 1).")
 @click.option("--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions.")
+@click.option("--tdd", is_flag=True, help="Test-driven development mode: write tests first, then implement.")
 @click.option("--implementor-directive", default=None, type=str, help="Override the implementor agent's instructions.")
 @click.option("--tester-directive", default=None, type=str, help="Override the tester agent's instructions.")
 @click.option("--reviewer-directive", default=None, type=str, help="Override the reviewer agent's instructions.")
@@ -186,6 +187,7 @@ def run(
     session_branch: str | None,
     start_wave: int,
     no_tmux: bool,
+    tdd: bool,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -206,6 +208,9 @@ def run(
             "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
             "Or use --no-tmux to run without it."
         )
+
+    if tdd and skip_test:
+        raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
 
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
@@ -246,6 +251,7 @@ def run(
         start_wave=start_wave,
         use_tmux=not no_tmux,
         directives=directives or None,
+        tdd=tdd,
     ))
 
 
@@ -333,6 +339,69 @@ def clean(repo: Path | None):
             subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
     console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+
+
+@main.command()
+@click.option("--cleanup", is_flag=True, help="Also remove worktrees and branches.")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
+def stop(cleanup: bool, repo: Path | None):
+    """Stop all running workbench agents."""
+    # Find tmux sessions with wb- prefix
+    result = subprocess.run(
+        ["tmux", "list-sessions", "-F", "#{session_name}"],
+        capture_output=True,
+        text=True,
+    )
+
+    wb_sessions = []
+    if result.returncode == 0:
+        wb_sessions = [
+            line for line in result.stdout.splitlines()
+            if line.startswith("wb-")
+        ]
+
+    if wb_sessions:
+        for session_name in wb_sessions:
+            subprocess.run(
+                ["tmux", "kill-session", "-t", session_name],
+                capture_output=True,
+            )
+        console.print(f"Stopped {len(wb_sessions)} agent session(s).")
+    else:
+        console.print("No active agent sessions.")
+
+    if cleanup:
+        repo = repo or _find_repo_root()
+        _ensure_workbench_dir(repo)
+
+        # Remove worktrees
+        result = subprocess.run(
+            ["git", "worktree", "list", "--porcelain"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+
+        removed = 0
+        for line in result.stdout.splitlines():
+            if line.startswith("worktree ") and ".workbench" in line:
+                path = line.split("worktree ", 1)[1]
+                subprocess.run(["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True)
+                removed += 1
+
+        # Clean up wb/ branches
+        result = subprocess.run(
+            ["git", "branch", "--list", "wb/*"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        for line in result.stdout.splitlines():
+            branch = line.strip()
+            if branch:
+                subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
+
+        console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
 
 
 @main.command()

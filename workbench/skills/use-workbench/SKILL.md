@@ -221,30 +221,18 @@ This is useful when you want agents to focus on specific aspects without modifyi
 
 ## CLI Reference
 
-```bash
-# Setup
-wb setup                           # Create .workbench/ and install agent commands
-wb init --agent claude             # Install /use-workbench command for Claude Code
+With `--tdd`, the pipeline becomes: **test (write failing) → implement (make pass) → test (verify) → review → fix**
 
-# Running plans
-wb run plan.md                     # Run with defaults (4 agents, tmux, claude)
-wb run plan.md -j 6                # 6 parallel agents
-wb run plan.md -r 3                # 3 fix retries per stage (default: 2)
-wb run plan.md --skip-test         # Skip testing phase
-wb run plan.md --skip-review       # Skip review phase
-wb run plan.md --agent codex       # Use codex instead of claude
-wb run plan.md --no-tmux           # Run without tmux sessions
-wb run plan.md --cleanup           # Remove worktrees when done
+In TDD mode, the tester writes comprehensive failing tests first. The implementor then writes code to make all tests pass. Normal test verification and review follow.
 
-# Resuming
-wb run plan.md -b workbench-2 -w 3 # Resume session branch from wave 3
+## Key commands
 
-# Monitoring
-wb preview plan.md                 # Preview without running
-wb status                          # Check active worktrees
-wb clean                           # Clean up all workbench worktrees
-
-# Watching agents (when using tmux)
-tmux ls                            # List active sessions
-tmux attach -t wb-task-1-implementor  # Watch an agent work
-```
+- `wb run <plan>` — execute a plan with parallel agents
+- `wb preview <plan>` — dry-run to see parsed tasks and waves
+- `wb status` — show active worktrees
+- `wb run plan.md --tdd` — test-driven: tests first, then implement
+- `wb stop` — kill all active agent sessions
+- `wb stop --cleanup` — also remove worktrees and branches
+- `wb clean` — remove all workbench worktrees
+- `wb setup` — prepare a repo for workbench use
+- `wb init` — install workbench skills for your agent platform
