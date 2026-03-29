@@ -10,7 +10,6 @@ import yaml
 from workbench.agents import DEFAULT_DIRECTIVES, Role
 from workbench.profile import Profile, RoleConfig
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -50,9 +49,9 @@ class TestDefaultProfile:
         profile = Profile.default()
         for role in ALL_ROLES:
             cfg = getattr(profile, role.value)
-            assert cfg.directive == DEFAULT_DIRECTIVES[role], (
-                f"{role} directive does not match DEFAULT_DIRECTIVES"
-            )
+            assert (
+                cfg.directive == DEFAULT_DIRECTIVES[role]
+            ), f"{role} directive does not match DEFAULT_DIRECTIVES"
 
 
 # ---------------------------------------------------------------------------
@@ -357,7 +356,13 @@ class TestResolve:
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(Path, "home", classmethod(lambda cls: home))
             profile = Profile.resolve(repo=repo)
-        expected = DEFAULT_DIRECTIVES[Role.TESTER] + "\n\n" + "Global addition." + "\n\n" + "Local addition."
+        expected = (
+            DEFAULT_DIRECTIVES[Role.TESTER]
+            + "\n\n"
+            + "Global addition."
+            + "\n\n"
+            + "Local addition."
+        )
         assert profile.tester.directive == expected
 
     def test_resolve_explicit_path_none_skipped(self, tmp_path):

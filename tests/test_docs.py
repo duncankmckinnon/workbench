@@ -40,9 +40,9 @@ class TestReadmeProfilesSection:
         content = _read(README)
         branching_pos = content.index("## Branching strategy")
         profiles_pos = content.index("## Profiles")
-        assert profiles_pos > branching_pos, (
-            "Profiles section should appear after Branching strategy"
-        )
+        assert (
+            profiles_pos > branching_pos
+        ), "Profiles section should appear after Branching strategy"
 
     def test_profile_init_command_documented(self):
         content = _read(README)
@@ -158,9 +158,9 @@ class TestReadmeRequirements:
     def test_gemini_in_requirements(self):
         content = _read(README)
         # Find the requirements section and check gemini is mentioned
-        assert "gemini" in content.lower(), (
-            "README.md requirements should mention Gemini as a supported agent"
-        )
+        assert (
+            "gemini" in content.lower()
+        ), "README.md requirements should mention Gemini as a supported agent"
 
 
 # ---------------------------------------------------------------------------
@@ -173,9 +173,9 @@ class TestSkillProfilesSection:
 
     def test_profiles_heading_exists(self):
         content = _read(SKILL_MD)
-        assert "## Profiles" in content or "## Profile" in content, (
-            "SKILL.md missing Profiles heading"
-        )
+        assert (
+            "## Profiles" in content or "## Profile" in content
+        ), "SKILL.md missing Profiles heading"
 
     def test_profiles_after_branching_strategy(self):
         content = _read(SKILL_MD)
@@ -183,9 +183,9 @@ class TestSkillProfilesSection:
         # Profiles section should appear after Branching Strategy
         profiles_section = "## Profiles" if "## Profiles" in content else "## Profile"
         profiles_pos = content.index(profiles_section)
-        assert profiles_pos > branching_pos, (
-            "Profiles section should appear after Branching Strategy in SKILL.md"
-        )
+        assert (
+            profiles_pos > branching_pos
+        ), "Profiles section should appear after Branching Strategy in SKILL.md"
 
     def test_profile_yaml_format_documented(self):
         """SKILL.md should document the YAML format for profiles."""
@@ -223,9 +223,7 @@ class TestSkillGeminiSupport:
 
     def test_gemini_mentioned(self):
         content = _read(SKILL_MD)
-        assert "gemini" in content.lower(), (
-            "SKILL.md should mention Gemini as a supported agent"
-        )
+        assert "gemini" in content.lower(), "SKILL.md should mention Gemini as a supported agent"
 
 
 # ---------------------------------------------------------------------------

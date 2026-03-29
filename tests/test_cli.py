@@ -712,9 +712,7 @@ class TestProfileShow:
         """wb profile show --profile <path> uses the explicit profile."""
 
         profile_path = tmp_path / "custom.yaml"
-        profile_path.write_text(
-            yaml.dump({"roles": {"reviewer": {"agent": "gemini"}}})
-        )
+        profile_path.write_text(yaml.dump({"roles": {"reviewer": {"agent": "gemini"}}}))
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -782,7 +780,14 @@ class TestProfileSet:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["profile", "set", "tester.directive_extend", "Extra instructions.", "--repo", str(repo)],
+            [
+                "profile",
+                "set",
+                "tester.directive_extend",
+                "Extra instructions.",
+                "--repo",
+                str(repo),
+            ],
         )
 
         assert result.exit_code == 0
@@ -917,9 +922,7 @@ class TestProfileDiff:
         """wb profile diff --profile <path> uses the explicit profile."""
 
         profile_path = tmp_path / "custom.yaml"
-        profile_path.write_text(
-            yaml.dump({"roles": {"fixer": {"agent": "codex"}}})
-        )
+        profile_path.write_text(yaml.dump({"roles": {"fixer": {"agent": "codex"}}}))
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -946,9 +949,7 @@ class TestRunWithProfile:
         plan = tmp_path / "plan.md"
         plan.write_text("# Plan\n## Task: hello\nDo something\n")
         profile_path = tmp_path / "custom.yaml"
-        profile_path.write_text(
-            yaml.dump({"roles": {"implementor": {"agent": "gemini"}}})
-        )
+        profile_path.write_text(yaml.dump({"roles": {"implementor": {"agent": "gemini"}}}))
 
         runner = CliRunner()
         with (

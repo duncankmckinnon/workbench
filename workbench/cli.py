@@ -81,9 +81,7 @@ _PLATFORM_LABEL = {
 }
 
 
-def _install_to_agents_skills(
-    skills: list[tuple[str, Path]], repo: Path, symlink: bool
-) -> None:
+def _install_to_agents_skills(skills: list[tuple[str, Path]], repo: Path, symlink: bool) -> None:
     """Install skills to <repo>/.agents/skills/ for cross-client discoverability."""
     target_dir = repo / ".agents" / "skills"
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +100,9 @@ def _install_to_agents_skills(
     console.print(f"  Also installed to {target_dir} for cross-client discoverability.")
 
 
-def _install_skills(agent: str | None, symlink: bool, local: bool = False, repo: Path | None = None) -> None:
+def _install_skills(
+    agent: str | None, symlink: bool, local: bool = False, repo: Path | None = None
+) -> None:
     """Install bundled skill files for the given agent platform."""
     agent = agent or _detect_agent()
     skills_dir = _get_skills_dir()
@@ -570,7 +570,9 @@ def stop(cleanup: bool, repo: Path | None):
     help="Target agent platform.",
 )
 @click.option("--symlink", is_flag=True, help="Symlink instead of copy (for development).")
-@click.option("--local", is_flag=True, help="Install skills at project level instead of user level.")
+@click.option(
+    "--local", is_flag=True, help="Install skills at project level instead of user level."
+)
 def init(agent: str | None, symlink: bool, local: bool):
     """Install workbench skills for your agent platform."""
     _install_skills(agent, symlink, local=local)
@@ -615,7 +617,9 @@ def profile():
 
 
 @profile.command("init")
-@click.option("--global", "use_global", is_flag=True, help="Create in ~/.workbench/ instead of .workbench/.")
+@click.option(
+    "--global", "use_global", is_flag=True, help="Create in ~/.workbench/ instead of .workbench/."
+)
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def profile_init(use_global: bool, repo: Path | None):
     """Create a default profile.yaml."""

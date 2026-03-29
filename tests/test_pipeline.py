@@ -7,7 +7,14 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from workbench.agents import DEFAULT_DIRECTIVES, TDD_DIRECTIVES, AgentResult, Role, TaskStatus, run_pipeline
+from workbench.agents import (
+    DEFAULT_DIRECTIVES,
+    TDD_DIRECTIVES,
+    AgentResult,
+    Role,
+    TaskStatus,
+    run_pipeline,
+)
 from workbench.plan_parser import Task
 from workbench.profile import Profile, RoleConfig
 from workbench.worktree import Worktree
@@ -260,7 +267,9 @@ class TestPipelineUsesProfileAgent:
         captured_calls: list[dict] = []
 
         async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            captured_calls.append(
+                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
+            )
             return _pass_result(args[0])
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
@@ -389,11 +398,16 @@ class TestPipelineProfileFixerAgent:
         captured_calls: list[dict] = []
 
         async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            captured_calls.append(
+                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
+            )
             role = args[0]
             if role == Role.IMPLEMENTOR:
                 return _pass_result(role)
-            if role == Role.TESTER and len([c for c in captured_calls if c["role"] == Role.TESTER]) == 1:
+            if (
+                role == Role.TESTER
+                and len([c for c in captured_calls if c["role"] == Role.TESTER]) == 1
+            ):
                 return _fail_verdict_result(role)  # first test fails
             if role == Role.FIXER:
                 return _done_result(role)
@@ -424,7 +438,9 @@ class TestPipelineExplicitAgentCmdOverridesProfile:
         captured_calls: list[dict] = []
 
         async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            captured_calls.append(
+                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
+            )
             return _pass_result(args[0])
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
@@ -455,7 +471,9 @@ class TestPipelineProfileMultipleRolesCustomized:
         captured_calls: list[dict] = []
 
         async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            captured_calls.append(
+                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
+            )
             return _pass_result(args[0])
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
@@ -481,18 +499,23 @@ class TestPipelineProfileMultipleRolesCustomized:
 class TestRunAgentProfileRoleConfig:
     """Test run_agent's profile_role_config parameter directly."""
 
-    def test_run_agent_profile_role_config_sets_directive(self, sample_task, sample_worktree, tmp_path):
+    def test_run_agent_profile_role_config_sets_directive(
+        self, sample_task, sample_worktree, tmp_path
+    ):
         """profile_role_config.directive is used when no explicit directive passed."""
         rc = RoleConfig(agent="claude", directive="Profile directive for implementor")
 
-        with patch("workbench.agents.get_adapter") as mock_adapter, \
-             patch("workbench.agents.get_main_branch", return_value="main"):
+        with (
+            patch("workbench.agents.get_adapter") as mock_adapter,
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
             mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
             mock_adapter.return_value = mock_adapter_instance
 
             from workbench.agents import run_agent
+
             result = asyncio.run(
                 run_agent(
                     Role.IMPLEMENTOR,
@@ -515,14 +538,17 @@ class TestRunAgentProfileRoleConfig:
         rc = RoleConfig(agent="claude", directive="Profile directive")
         explicit = "Explicit directive wins"
 
-        with patch("workbench.agents.get_adapter") as mock_adapter, \
-             patch("workbench.agents.get_main_branch", return_value="main"):
+        with (
+            patch("workbench.agents.get_adapter") as mock_adapter,
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
             mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
             mock_adapter.return_value = mock_adapter_instance
 
             from workbench.agents import run_agent
+
             result = asyncio.run(
                 run_agent(
                     Role.IMPLEMENTOR,
@@ -539,18 +565,23 @@ class TestRunAgentProfileRoleConfig:
         assert "Explicit directive wins" in prompt_arg
         assert "Profile directive" not in prompt_arg
 
-    def test_run_agent_profile_role_config_sets_agent(self, sample_task, sample_worktree, tmp_path):
+    def test_run_agent_profile_role_config_sets_agent(
+        self, sample_task, sample_worktree, tmp_path
+    ):
         """profile_role_config.agent is used when agent_cmd is default 'claude'."""
         rc = RoleConfig(agent="gemini", directive=DEFAULT_DIRECTIVES[Role.IMPLEMENTOR])
 
-        with patch("workbench.agents.get_adapter") as mock_adapter, \
-             patch("workbench.agents.get_main_branch", return_value="main"):
+        with (
+            patch("workbench.agents.get_adapter") as mock_adapter,
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
             mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
             mock_adapter.return_value = mock_adapter_instance
 
             from workbench.agents import run_agent
+
             result = asyncio.run(
                 run_agent(
                     Role.IMPLEMENTOR,
@@ -571,14 +602,17 @@ class TestRunAgentProfileRoleConfig:
         """Explicit agent_cmd != 'claude' should not be overridden by profile_role_config.agent."""
         rc = RoleConfig(agent="gemini", directive=DEFAULT_DIRECTIVES[Role.IMPLEMENTOR])
 
-        with patch("workbench.agents.get_adapter") as mock_adapter, \
-             patch("workbench.agents.get_main_branch", return_value="main"):
+        with (
+            patch("workbench.agents.get_adapter") as mock_adapter,
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
             mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
             mock_adapter.return_value = mock_adapter_instance
 
             from workbench.agents import run_agent
+
             result = asyncio.run(
                 run_agent(
                     Role.IMPLEMENTOR,
@@ -610,7 +644,9 @@ class TestTDDPipelineUsesProfileAgent:
         captured_calls: list[dict] = []
 
         async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            captured_calls.append(
+                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
+            )
             return _pass_result(args[0])
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
