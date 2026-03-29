@@ -270,3 +270,124 @@ def test_clean_creates_workbench_dir(git_repo):
         result = runner.invoke(main, ["clean", "--yes"])
 
     assert (git_repo / ".workbench").is_dir()
+
+
+# ---------------------------------------------------------------------------
+# wb run --tdd flag
+# ---------------------------------------------------------------------------
+
+
+def test_tdd_flag_accepted(git_repo, tmp_path):
+    """wb run plan.md --tdd --no-tmux should be accepted without error."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
+         patch("workbench.cli.asyncio") as mock_asyncio:
+        mock_asyncio.run = lambda coro: None
+        result = runner.invoke(main, ["run", str(plan), "--tdd", "--no-tmux"])
+
+    assert "no such option" not in (result.output or "").lower()
+    assert "mutually exclusive" not in (result.output or "").lower()
+
+
+def test_tdd_skip_test_mutually_exclusive(git_repo, tmp_path):
+    """wb run plan.md --tdd --skip-test should produce an error."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
+         patch("workbench.cli.check_tmux_available", return_value=True):
+        result = runner.invoke(main, ["run", str(plan), "--tdd", "--skip-test"])
+
+    assert result.exit_code != 0
+    assert "mutually exclusive" in result.output
+
+
+# ---------------------------------------------------------------------------
+# wb stop command
+# ---------------------------------------------------------------------------
+
+
+def test_stop_no_sessions():
+    """When tmux has no server, should print 'No active agent sessions'."""
+    runner = CliRunner()
+    with patch("workbench.cli.subprocess.run") as mock_run:
+        # tmux list-sessions returns non-zero when no server
+        mock_run.return_value = subprocess.CompletedProcess(
+            args=["tmux", "list-sessions", "-F", "#{session_name}"],
+            returncode=1,
+            stdout="",
+            stderr="no server running",
+        )
+        result = runner.invoke(main, ["stop"])
+
+    assert result.exit_code == 0
+    assert "No active agent sessions" in result.output
+
+
+def test_stop_kills_sessions():
+    """Should kill only wb- prefixed sessions and report count."""
+    runner = CliRunner()
+    with patch("workbench.cli.subprocess.run") as mock_run:
+        def side_effect(cmd, **kwargs):
+            if cmd[0] == "tmux" and cmd[1] == "list-sessions":
+                return subprocess.CompletedProcess(
+                    args=cmd,
+                    returncode=0,
+                    stdout="wb-task-1-implementor\nwb-task-2-tester\nother-session\n",
+                    stderr="",
+                )
+            # kill-session calls
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = side_effect
+        result = runner.invoke(main, ["stop"])
+
+    assert result.exit_code == 0
+    assert "Stopped 2 agent session(s)" in result.output
+
+    # Verify kill-session was called for each wb- session
+    kill_calls = [
+        c for c in mock_run.call_args_list
+        if len(c[0][0]) >= 2 and c[0][0][1] == "kill-session"
+    ]
+    assert len(kill_calls) == 2
+    killed_names = [c[0][0][3] for c in kill_calls]
+    assert "wb-task-1-implementor" in killed_names
+    assert "wb-task-2-tester" in killed_names
+    assert "other-session" not in killed_names
+
+
+def test_stop_with_cleanup(git_repo):
+    """wb stop --cleanup should kill sessions and clean up worktrees."""
+    runner = CliRunner()
+    with patch("workbench.cli.subprocess.run") as mock_run, \
+         patch("workbench.cli._find_repo_root", return_value=git_repo):
+        def side_effect(cmd, **kwargs):
+            if cmd[0] == "tmux" and cmd[1] == "list-sessions":
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=1, stdout="", stderr="no server",
+                )
+            if cmd[0] == "git" and "worktree" in cmd and "list" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout="worktree /repo/.workbench/task-1\nbranch refs/heads/wb/task-1\n\n",
+                    stderr="",
+                )
+            if cmd[0] == "git" and "branch" in cmd and "--list" in cmd:
+                return subprocess.CompletedProcess(
+                    args=cmd, returncode=0,
+                    stdout="  wb/task-1\n",
+                    stderr="",
+                )
+            return subprocess.CompletedProcess(args=cmd, returncode=0, stdout="", stderr="")
+
+        mock_run.side_effect = side_effect
+        result = runner.invoke(main, ["stop", "--cleanup"])
+
+    assert result.exit_code == 0
+    assert "No active agent sessions" in result.output
+    assert "Cleaned up" in result.output
