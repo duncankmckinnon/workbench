@@ -92,17 +92,30 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
     console.print(f"[bold]Installing {len(skills)} {label}(s) for {agent}...[/bold]\n")
 
     if agent == "claude":
-        target_dir = Path.home() / ".claude" / "commands"
+        target_dir = Path.home() / ".claude" / "skills"
         target_dir.mkdir(parents=True, exist_ok=True)
         for name, src in skills:
-            dest = target_dir / f"{name}.md"
+            src_dir = src.parent
+            dest_dir = target_dir / name
+            dest = dest_dir / "SKILL.md"
+            if dest.exists() and not symlink:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping /{name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing /{name}?", default=True):
+                    console.print(f"  [yellow]Skipped /{name}[/yellow]")
+                    continue
             if symlink:
-                dest.unlink(missing_ok=True)
-                dest.symlink_to(src.resolve())
-                console.print(f"  Linked /{name} → {dest}")
+                if dest_dir.is_symlink():
+                    dest_dir.unlink()
+                elif dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.symlink_to(src_dir.resolve())
+                console.print(f"  Linked /{name} → {dest_dir}")
             else:
-                dest.write_text(src.read_text())
-                console.print(f"  Copied /{name} → {dest}")
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                console.print(f"  Copied /{name} → {dest_dir}")
         console.print(f"\n  Use in Claude Code: [bold]/{skills[0][0]}[/bold]")
 
     elif agent == "cursor":
@@ -110,6 +123,13 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
         target_dir.mkdir(parents=True, exist_ok=True)
         for name, src in skills:
             dest = target_dir / f"{name}.md"
+            if dest.exists() and not symlink:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing {name}?", default=True):
+                    console.print(f"  [yellow]Skipped {name}[/yellow]")
+                    continue
             if symlink:
                 dest.unlink(missing_ok=True)
                 dest.symlink_to(src.resolve())
