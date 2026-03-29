@@ -193,10 +193,15 @@ def main():
     "--tdd", is_flag=True, help="Test-driven development mode: write tests first, then implement."
 )
 @click.option(
-    "--local", is_flag=True, help="Branch from local ref instead of fetching origin. Use to build on local work."
+    "--local",
+    is_flag=True,
+    help="Branch from local ref instead of fetching origin. Use to build on local work.",
 )
 @click.option(
-    "--base", default=None, type=str, help="Base branch to start from (default: main). Works with --local."
+    "--base",
+    default=None,
+    type=str,
+    help="Base branch to start from (default: main). Works with --local.",
 )
 @click.option(
     "--implementor-directive",
