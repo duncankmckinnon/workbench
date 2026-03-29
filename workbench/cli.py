@@ -9,10 +9,12 @@ from importlib import resources
 from pathlib import Path
 
 import click
+import yaml
 from rich.console import Console
 
 from .orchestrator import run_plan
 from .plan_parser import parse_plan
+from .profile import Profile, RoleConfig
 from .tmux import check_tmux_available
 
 console = Console()
@@ -224,6 +226,13 @@ def main():
     help="Base branch to start from (default: main). Works with --local.",
 )
 @click.option(
+    "--profile",
+    "profile_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a profile.yaml to use.",
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -256,6 +265,7 @@ def run(
     tdd: bool,
     local: bool,
     base: str | None,
+    profile_path: Path | None,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -323,6 +333,7 @@ def run(
             tdd=tdd,
             local=local,
             base_branch=base,
+            profile_path=profile_path,
         )
     )
 
@@ -523,6 +534,136 @@ def setup(agent: str | None, symlink: bool, repo: Path | None):
 
     _install_skills(agent, symlink)
     console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
+
+
+_VALID_ROLES = Profile._ROLE_NAMES
+_VALID_FIELDS = ("agent", "directive", "directive_extend")
+
+
+@main.group()
+def profile():
+    """Manage agent profiles."""
+    pass
+
+
+@profile.command("init")
+@click.option("--global", "use_global", is_flag=True, help="Create in ~/.workbench/ instead of .workbench/.")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def profile_init(use_global: bool, repo: Path | None):
+    """Create a default profile.yaml."""
+    if use_global:
+        target = Path.home() / ".workbench" / "profile.yaml"
+    else:
+        repo = repo or Path.cwd()
+        target = repo / ".workbench" / "profile.yaml"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    if target.exists():
+        if not click.confirm(f"{target} already exists. Overwrite?"):
+            return
+
+    Profile.default().save(target)
+    console.print(f"Created {target}")
+
+
+@profile.command("show")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option(
+    "--profile",
+    "profile_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+)
+def profile_show(repo: Path | None, profile_path: Path | None):
+    """Show the resolved profile for each role."""
+    repo = repo or Path.cwd()
+    resolved = Profile.resolve(repo, profile_path=Path(profile_path) if profile_path else None)
+
+    console.print(f"{'Role':<15} {'Agent':<12} {'Directive'}")
+    console.print("-" * 60)
+    for role_name in _VALID_ROLES:
+        cfg: RoleConfig = getattr(resolved, role_name)
+        directive_preview = cfg.directive.split("\n")[0][:60] if cfg.directive else ""
+        console.print(f"{role_name:<15} {cfg.agent:<12} {directive_preview}")
+
+
+@profile.command("set")
+@click.argument("key")
+@click.argument("value")
+@click.option("--global", "use_global", is_flag=True)
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def profile_set(key: str, value: str, use_global: bool, repo: Path | None):
+    """Set a profile field (e.g. reviewer.agent gemini)."""
+    parts = key.split(".")
+    if len(parts) != 2:
+        raise click.ClickException(f"Key must be in <role>.<field> format, got: {key}")
+
+    role_name, field_name = parts
+
+    if role_name not in _VALID_ROLES:
+        raise click.ClickException(
+            f"Unknown role: {role_name}. Valid roles: {', '.join(_VALID_ROLES)}"
+        )
+    if field_name not in _VALID_FIELDS:
+        raise click.ClickException(
+            f"Unknown field: {field_name}. Valid fields: {', '.join(_VALID_FIELDS)}"
+        )
+
+    if use_global:
+        target = Path.home() / ".workbench" / "profile.yaml"
+    else:
+        repo = repo or Path.cwd()
+        target = repo / ".workbench" / "profile.yaml"
+
+    target.parent.mkdir(parents=True, exist_ok=True)
+
+    # Load existing YAML or start empty
+    if target.exists():
+        data = yaml.safe_load(target.read_text()) or {}
+    else:
+        data = {}
+
+    if "roles" not in data:
+        data["roles"] = {}
+    if role_name not in data["roles"]:
+        data["roles"][role_name] = {}
+
+    data["roles"][role_name][field_name] = value
+    target.write_text(yaml.dump(data, default_flow_style=False))
+    console.print(f"Set {key} = {value} in {target}")
+
+
+@profile.command("diff")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option(
+    "--profile",
+    "profile_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+)
+def profile_diff(repo: Path | None, profile_path: Path | None):
+    """Compare resolved profile against defaults."""
+    repo = repo or Path.cwd()
+    resolved = Profile.resolve(repo, profile_path=Path(profile_path) if profile_path else None)
+    default = Profile.default()
+
+    diffs = []
+    for role_name in _VALID_ROLES:
+        resolved_cfg: RoleConfig = getattr(resolved, role_name)
+        default_cfg: RoleConfig = getattr(default, role_name)
+
+        if resolved_cfg.agent != default_cfg.agent:
+            diffs.append(f"  {role_name}.agent: {default_cfg.agent} → {resolved_cfg.agent}")
+        if resolved_cfg.directive != default_cfg.directive:
+            diffs.append(f"  {role_name}.directive: \\[changed]")
+
+    if not diffs:
+        console.print("Profile matches defaults.")
+    else:
+        console.print("Differences from defaults:")
+        for line in diffs:
+            console.print(line)
 
 
 if __name__ == "__main__":
