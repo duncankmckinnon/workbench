@@ -14,6 +14,7 @@ from rich.text import Text
 
 from .agents import AgentResult, Role, TaskStatus, run_merge_resolver, run_pipeline
 from .plan_parser import Plan, Task
+from .profile import Profile
 from .worktree import (
     Worktree,
     cleanup_merge_worktree,
@@ -129,9 +130,11 @@ async def run_plan(
     tdd: bool = False,
     local: bool = False,
     base_branch: str | None = None,
+    profile_path: Path | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
+    profile = Profile.resolve(repo, profile_path=profile_path)
     waves = plan.independent_groups
     all_states: list[TaskState] = []
     state_map: dict[str, TaskState] = {}
@@ -152,6 +155,10 @@ async def run_plan(
     if directives:
         for role, _ in directives.items():
             console.print(f"[bold]Custom directive:[/bold] {role.value}")
+    for role in Role:
+        rc = getattr(profile, role.value)
+        if rc.agent != "claude":
+            console.print(f"[bold]{role.value}:[/bold] using {rc.agent}")
     console.print()
 
     for wave_idx, wave in enumerate(waves):
@@ -232,6 +239,7 @@ async def run_plan(
                     directives=directives,
                     use_tmux=use_tmux,
                     tdd=tdd,
+                    profile=profile,
                 )
 
                 state.results = results

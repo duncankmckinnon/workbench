@@ -11,6 +11,7 @@ from workbench.adapters import (
     ClaudeAdapter,
     CodexAdapter,
     ConfigAdapter,
+    GeminiAdapter,
     GenericAdapter,
     get_adapter,
 )
@@ -79,6 +80,65 @@ class TestCodexAdapter:
         text, cost = self.adapter.parse_output("  hello world  \n")
         assert text == "hello world"
         assert cost == {}
+
+    def test_is_agent_adapter(self):
+        assert isinstance(self.adapter, AgentAdapter)
+
+
+class TestGeminiAdapter:
+    def setup_method(self):
+        self.adapter = GeminiAdapter()
+
+    def test_name(self):
+        assert self.adapter.name == "gemini"
+
+    def test_build_command(self, tmp_path):
+        cmd = self.adapter.build_command("refactor module", tmp_path)
+        assert cmd == [
+            "gemini",
+            "-p",
+            "refactor module",
+            "--output-format",
+            "json",
+            "--approval-mode",
+            "yolo",
+        ]
+
+    def test_build_command_prompt_with_special_chars(self, tmp_path):
+        prompt = 'fix the "bug" in foo\'s module & run tests'
+        cmd = self.adapter.build_command(prompt, tmp_path)
+        assert cmd[0] == "gemini"
+        assert cmd[1] == "-p"
+        assert cmd[2] == prompt  # prompt passed as-is, shell escaping is caller's job
+
+    def test_parse_output_valid_json(self):
+        raw = json.dumps({"response": "all done", "stats": {"tokens": 150}})
+        text, stats = self.adapter.parse_output(raw)
+        assert text == "all done"
+        assert stats == {"tokens": 150}
+
+    def test_parse_output_json_missing_keys(self):
+        raw = json.dumps({"other": "data"})
+        text, stats = self.adapter.parse_output(raw)
+        assert text == raw  # falls back to raw when response key missing
+        assert stats == {}
+
+    def test_parse_output_invalid_json(self):
+        raw = "not json at all"
+        text, stats = self.adapter.parse_output(raw)
+        assert text == raw
+        assert stats == {}
+
+    def test_parse_output_empty_string(self):
+        text, stats = self.adapter.parse_output("")
+        assert text == ""
+        assert stats == {}
+
+    def test_parse_output_json_with_error(self):
+        raw = json.dumps({"response": "", "stats": {}, "error": {"message": "rate limited"}})
+        text, stats = self.adapter.parse_output(raw)
+        assert text == ""
+        assert stats == {}
 
     def test_is_agent_adapter(self):
         assert isinstance(self.adapter, AgentAdapter)
@@ -177,6 +237,10 @@ class TestGetAdapter:
     def test_returns_codex_adapter(self):
         adapter = get_adapter("codex")
         assert isinstance(adapter, CodexAdapter)
+
+    def test_returns_gemini_adapter(self):
+        adapter = get_adapter("gemini")
+        assert isinstance(adapter, GeminiAdapter)
 
     def test_returns_generic_for_unknown(self):
         adapter = get_adapter("some-random-tool")

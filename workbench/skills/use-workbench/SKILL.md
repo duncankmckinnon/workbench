@@ -9,7 +9,7 @@ How to write effective plans for the `wb` CLI to execute with parallel AI agents
 
 ## Overview
 
-Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents to implement, test, and review each task in isolated git worktrees.
+Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Gemini CLI, Codex, or custom) to implement, test, and review each task in isolated git worktrees.
 
 Each task becomes a standalone agent session — the agent only sees its own task description, not the rest of the plan. This means the plan must be thorough enough that each task is self-sufficient.
 
@@ -245,6 +245,39 @@ Use `--base` when you're working off a branch other than `main` — for example,
 
 Use `-b workbench-N` (or `--session-branch`) to resume a previous session. This skips branch creation entirely and continues merging into the existing session branch. Pair with `--start-wave N` to skip already-completed waves.
 
+## Profiles
+
+Profiles configure which agent CLI and instructions are used for each pipeline role. When no profile exists, built-in defaults apply.
+
+### YAML format
+
+Create or edit `.workbench/profile.yaml`:
+
+```yaml
+roles:
+  reviewer:
+    agent: gemini
+    directive: "Focus on security and correctness."
+  tester:
+    directive_extend: "Also check edge cases for null inputs."
+```
+
+Use `directive_extend` to append to the default directive without replacing it.
+
+### Profile CLI commands
+
+```bash
+wb profile init              # create .workbench/profile.yaml from defaults
+wb profile init --global     # create ~/.workbench/profile.yaml
+wb profile show              # print resolved profile
+wb profile set reviewer.agent gemini
+wb profile diff              # show differences from defaults
+```
+
+### Merge order
+
+Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags.
+
 ## TDD Mode
 
 With `--tdd`, the pipeline becomes: **test (write failing) → implement (make pass) → test (verify) → review → fix**
@@ -265,3 +298,10 @@ In TDD mode, the tester writes comprehensive failing tests first. The implemento
 - `wb clean` — remove all workbench worktrees
 - `wb setup` — prepare a repo for workbench use
 - `wb init` — install workbench skills for your agent platform
+- `wb init --agent gemini` — install skills for Gemini CLI
+- `wb init --agent claude --local` — install to repo-local .claude/skills/ + .agents/skills/
+- `wb init --agent gemini --local` — install to repo-local .agents/skills/
+- `wb profile init` — create profile.yaml from defaults
+- `wb profile show` — print resolved profile
+- `wb profile set <key> <value>` — update a profile field
+- `wb profile diff` — show differences from defaults

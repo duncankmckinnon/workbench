@@ -13,7 +13,7 @@ Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks,
 
 - Python 3.11+
 - tmux (recommended — `brew install tmux` / `apt install tmux`). Use `--no-tmux` without it.
-- An agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default), [Codex](https://github.com/openai/codex), or any custom CLI.
+- An agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex](https://github.com/openai/codex), or any custom CLI.
 
 ## Install
 
@@ -34,12 +34,15 @@ This creates a `.workbench/` directory in your repo and installs the bundled ski
 You can also run setup in two steps:
 
 ```bash
-wb init                    # install skills only (auto-detects agent platform)
-wb init --agent claude     # install as skill in ~/.claude/skills/
-wb init --agent cursor     # install as skill in .cursor/rules/
-wb init --agent codex      # install as skill in .codex/instructions.md
-wb init --agent manual     # print paths for manual setup
-wb init --symlink          # symlink instead of copy (stays in sync with updates)
+wb init                            # install skills only (auto-detects agent platform)
+wb init --agent claude             # install to ~/.claude/skills/
+wb init --agent gemini             # install to ~/.agents/skills/
+wb init --agent codex              # install as skill in .codex/instructions.md
+wb init --agent cursor             # install as skill in .cursor/rules/
+wb init --agent manual             # print paths for manual setup
+wb init --agent claude --local     # install to <repo>/.claude/skills/ + .agents/skills/
+wb init --agent gemini --local     # install to <repo>/.agents/skills/
+wb init --symlink                  # symlink instead of copy (stays in sync with updates)
 ```
 
 If the skill file already exists and is unchanged, it's skipped. If it differs, you'll be prompted before overwriting.
@@ -134,6 +137,44 @@ By default, workbench fetches `origin/main` and creates the session branch from 
 | `--base <branch> --local` | `<branch>` | local `<branch>` | Branch from a local feature branch |
 | `-b workbench-3` | *(existing)* | *(existing)* | Resume a previous session |
 
+## Profiles
+
+Profiles configure which agent CLI and instructions are used for each pipeline role. When no profile exists, built-in defaults apply.
+
+### Create a profile
+
+```bash
+wb profile init              # create .workbench/profile.yaml from defaults
+wb profile init --global     # create ~/.workbench/profile.yaml
+```
+
+### Customize roles
+
+```bash
+wb profile set reviewer.agent gemini
+wb profile set tester.directive_extend "Run pytest with -x flag."
+```
+
+Or edit `.workbench/profile.yaml` directly:
+
+```yaml
+roles:
+  reviewer:
+    agent: gemini
+    directive: "Focus on security and correctness."
+  tester:
+    directive_extend: "Also check edge cases for null inputs."
+```
+
+### View and compare
+
+```bash
+wb profile show              # print resolved profile
+wb profile diff              # show differences from defaults
+```
+
+Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags.
+
 ## TDD mode
 
 ```bash
@@ -187,6 +228,10 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb clean` | Remove all workbench worktrees and `wb/` branches |
 | `wb init` | Install skills for an agent platform |
 | `wb setup` | Create `.workbench/` and install skills |
+| `wb profile init` | Create profile.yaml from defaults |
+| `wb profile show` | Show resolved profile |
+| `wb profile set <key> <value>` | Update a profile field |
+| `wb profile diff` | Show differences from defaults |
 
 ### `wb run` flags
 
@@ -205,13 +250,15 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `-w N` / `--start-wave` | Skip already-completed waves |
 | `--cleanup` | Remove worktrees after completion |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
+| `--profile PATH` | Use a specific profile.yaml |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
 ### `wb init` flags
 
 | Flag | Description |
 |---|---|
-| `--agent NAME` | Target platform: `claude`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
+| `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
+| `--local` | Install skills to repo-local paths instead of global |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 
 ### `wb stop` flags
