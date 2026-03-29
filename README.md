@@ -42,6 +42,27 @@ wb run plan.md --agent codex
 3. Each task runs through a pipeline of specialized agents (implementor, tester, reviewer, fixer) with automatic retry on failure.
 4. Completed branches are merged into a session branch for review.
 
+## TDD mode
+
+Run with `--tdd` to write tests before implementation:
+
+```bash
+wb run plan.md --tdd
+```
+
+Pipeline becomes: **write tests → implement → verify tests → review → fix**
+
+The tester agent writes comprehensive failing tests based on the task description, then the implementor writes code to make them pass. After that, normal test verification and review proceed as usual.
+
+Cannot be combined with `--skip-test`.
+
+## Stopping agents
+
+```bash
+wb stop              # kill all active agent tmux sessions
+wb stop --cleanup    # also remove worktrees and branches
+```
+
 ## CLI reference
 
 | Command | Description |
@@ -49,6 +70,7 @@ wb run plan.md --agent codex
 | `wb run <plan>` | Execute a plan |
 | `wb preview <plan>` | Dry-run preview of tasks and waves |
 | `wb status` | Show active worktrees |
+| `wb stop` | Stop all running agents and optionally clean up |
 | `wb clean` | Remove all workbench worktrees and branches |
 | `wb init` | Set up workbench for your agent platform |
 
@@ -57,6 +79,7 @@ wb run plan.md --agent codex
 | Flag | Description |
 |---|---|
 | `-j N` | Max concurrent tasks (default: 4) |
+| `--tdd` | Test-driven: write tests first, then implement |
 | `--skip-test` | Skip the test phase |
 | `--skip-review` | Skip the review phase |
 | `--max-retries N` | Max fix cycles per task (default: 2) |
