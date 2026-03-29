@@ -122,7 +122,7 @@ def test_init_manual_prints_skill_paths():
 
 
 def test_init_claude_copies_skills(tmp_path):
-    """wb init --agent claude should copy skill files to ~/.claude/commands/."""
+    """wb init --agent claude should copy skill folders to ~/.claude/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -131,14 +131,14 @@ def test_init_claude_copies_skills(tmp_path):
         result = runner.invoke(main, ["init", "--agent", "claude"])
 
     assert result.exit_code == 0
-    commands_dir = fake_home / ".claude" / "commands"
-    assert commands_dir.is_dir()
-    assert (commands_dir / "use-workbench.md").exists()
+    skills_dir = fake_home / ".claude" / "skills"
+    assert skills_dir.is_dir()
+    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
     assert "Copied" in result.output
 
 
 def test_init_claude_symlinks(tmp_path):
-    """wb init --agent claude --symlink should create symlinks."""
+    """wb init --agent claude --symlink should symlink skill dirs."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -147,7 +147,7 @@ def test_init_claude_symlinks(tmp_path):
         result = runner.invoke(main, ["init", "--agent", "claude", "--symlink"])
 
     assert result.exit_code == 0
-    dest = fake_home / ".claude" / "commands" / "use-workbench.md"
+    dest = fake_home / ".claude" / "skills" / "use-workbench"
     assert dest.is_symlink()
     assert "Linked" in result.output
 
