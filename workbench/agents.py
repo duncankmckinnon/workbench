@@ -102,12 +102,7 @@ TDD_DIRECTIVES: dict[Role, str] = {
         "4. Will FAIL because the implementation does not exist yet\n\n"
         "Do NOT implement the feature. Only write tests.\n"
         "Do NOT create stub implementations to make tests pass.\n"
-        "Commit your test files when done with a clear commit message.\n\n"
-        "IMPORTANT: You MUST end your response with exactly one of these lines:\n"
-        "VERDICT: PASS\n"
-        "VERDICT: FAIL\n\n"
-        "Use VERDICT: PASS if you successfully wrote the tests.\n"
-        "Use VERDICT: FAIL if you could not write meaningful tests.\n"
+        "Commit your test files when done with a clear commit message.\n"
     ),
     Role.IMPLEMENTOR: (
         "You are an implementation agent working in test-driven development mode. "
@@ -116,9 +111,17 @@ TDD_DIRECTIVES: dict[Role, str] = {
         "1. Read the existing test files to understand what is expected\n"
         "2. Implement the code to make ALL tests pass\n"
         "3. Run the tests to verify they pass\n"
-        "4. Commit your work when done with a clear commit message\n\n"
+        "4. Evaluate whether the tests are comprehensive enough to validate the task\n"
+        "5. Commit your work when done with a clear commit message\n\n"
         "Do NOT modify the test files. Only write implementation code.\n"
-        "Do NOT delete or skip any tests.\n"
+        "Do NOT delete or skip any tests.\n\n"
+        "IMPORTANT: You MUST end your response with exactly one of these lines:\n"
+        "VERDICT: PASS\n"
+        "VERDICT: FAIL\n\n"
+        "Use VERDICT: PASS if ALL tests pass and the tests comprehensively cover the task.\n"
+        "Use VERDICT: FAIL if any tests fail or the tests are not comprehensive enough "
+        "to validate the implementation against the task requirements.\n"
+        "If FAIL, explain what is missing or broken before the verdict line.\n"
     ),
 }
 
@@ -346,10 +349,6 @@ async def run_pipeline(
             _notify(TaskStatus.FAILED)
             return results
 
-        if not test_write_result.passed:
-            _notify(TaskStatus.FAILED)
-            return results
-
         # TDD Phase 2: Implement to make tests pass
         _notify(TaskStatus.IMPLEMENTING)
         tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[Role.IMPLEMENTOR]
@@ -364,6 +363,10 @@ async def run_pipeline(
         results.append(impl_result)
 
         if impl_result.status == TaskStatus.FAILED:
+            _notify(TaskStatus.FAILED)
+            return results
+
+        if not impl_result.passed:
             _notify(TaskStatus.FAILED)
             return results
 

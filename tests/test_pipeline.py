@@ -50,12 +50,12 @@ def _done_result(role: Role) -> AgentResult:
 
 class TestTDDPipelineFullPass:
     def test_pipeline_tdd_full_pass(self, sample_task, sample_worktree, tmp_path):
-        """TDD: tester writes tests (PASS), implementor implements (DONE),
+        """TDD: tester writes tests (DONE), implementor implements (PASS verdict),
         test verification passes, review passes.
         Verify roles are: TESTER, IMPLEMENTOR, TESTER, REVIEWER."""
         side_effects = [
-            _pass_result(Role.TESTER),       # TDD Phase 1: write failing tests
-            _done_result(Role.IMPLEMENTOR),   # TDD Phase 2: implement
+            _done_result(Role.TESTER),       # TDD Phase 1: write failing tests (no verdict needed)
+            _pass_result(Role.IMPLEMENTOR),  # TDD Phase 2: implement (tests pass + comprehensive)
             _pass_result(Role.TESTER),        # Verification: test
             _pass_result(Role.REVIEWER),      # Review
         ]
@@ -96,11 +96,12 @@ class TestTDDTestWriteFails:
         assert results[0].status == TaskStatus.FAILED
 
 
-class TestTDDTestWriteVerdictFail:
-    def test_pipeline_tdd_test_write_verdict_fail(self, sample_task, sample_worktree, tmp_path):
-        """TDD tester returns VERDICT: FAIL -> pipeline stops."""
+class TestTDDImplVerdictFail:
+    def test_pipeline_tdd_impl_verdict_fail(self, sample_task, sample_worktree, tmp_path):
+        """TDD implementor returns VERDICT: FAIL (tests fail or not comprehensive) -> pipeline stops."""
         side_effects = [
-            _fail_verdict_result(Role.TESTER),
+            _done_result(Role.TESTER),
+            _fail_verdict_result(Role.IMPLEMENTOR),
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
@@ -112,16 +113,17 @@ class TestTDDTestWriteVerdictFail:
                 tdd=True,
             ))
 
-        assert len(results) == 1
+        assert len(results) == 2
         assert results[0].role == Role.TESTER
-        assert not results[0].passed
+        assert results[1].role == Role.IMPLEMENTOR
+        assert not results[1].passed
 
 
 class TestTDDImplFails:
     def test_pipeline_tdd_impl_fails(self, sample_task, sample_worktree, tmp_path):
         """TDD implementation crashes -> pipeline stops after 2 results."""
         side_effects = [
-            _pass_result(Role.TESTER),
+            _done_result(Role.TESTER),
             _crash_result(Role.IMPLEMENTOR),
         ]
 
@@ -148,12 +150,9 @@ class TestTDDDirectives:
         async def mock_run_agent(*args, **kwargs):
             captured_directives.append(kwargs.get("directive"))
             role = args[0]
-            if role == Role.TESTER:
-                return _pass_result(Role.TESTER)
-            elif role == Role.IMPLEMENTOR:
-                return _done_result(Role.IMPLEMENTOR)
-            else:
-                return _pass_result(role)
+            if role == Role.TESTER and len(captured_directives) == 1:
+                return _done_result(role)  # TDD tester: no verdict
+            return _pass_result(role)
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
             results = asyncio.run(run_pipeline(
@@ -178,12 +177,9 @@ class TestTDDDirectives:
         async def mock_run_agent(*args, **kwargs):
             captured_directives.append(kwargs.get("directive"))
             role = args[0]
-            if role == Role.TESTER:
-                return _pass_result(Role.TESTER)
-            elif role == Role.IMPLEMENTOR:
-                return _done_result(Role.IMPLEMENTOR)
-            else:
-                return _pass_result(role)
+            if role == Role.TESTER and len(captured_directives) == 1:
+                return _done_result(role)  # TDD tester: no verdict
+            return _pass_result(role)
 
         custom_directives = {
             Role.TESTER: custom_tester,
@@ -208,8 +204,8 @@ class TestTDDVerificationFailsThenFixes:
     def test_pipeline_tdd_verification_fails_then_fixes(self, sample_task, sample_worktree, tmp_path):
         """After TDD impl, verification test fails, fixer runs, test passes on retry."""
         side_effects = [
-            _pass_result(Role.TESTER),            # TDD Phase 1: write tests
-            _done_result(Role.IMPLEMENTOR),        # TDD Phase 2: implement
+            _done_result(Role.TESTER),            # TDD Phase 1: write tests (no verdict)
+            _pass_result(Role.IMPLEMENTOR),       # TDD Phase 2: implement (PASS verdict)
             _fail_verdict_result(Role.TESTER),     # Verification: test FAILS
             _done_result(Role.FIXER),              # Fixer addresses issues
             _pass_result(Role.TESTER),             # Verification retry: PASS
