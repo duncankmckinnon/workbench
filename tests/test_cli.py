@@ -6,6 +6,7 @@ import subprocess
 from pathlib import Path
 from unittest.mock import patch
 
+import yaml
 from click.testing import CliRunner
 
 from workbench.cli import _discover_skills, _ensure_workbench_dir, _get_skills_dir, main
@@ -436,7 +437,6 @@ class TestProfileInit:
         profile_path = repo / ".workbench" / "profile.yaml"
         assert profile_path.exists()
         # Should be valid YAML with roles
-        import yaml
 
         data = yaml.safe_load(profile_path.read_text())
         assert "roles" in data
@@ -495,7 +495,6 @@ class TestProfileInit:
         result = runner.invoke(main, ["profile", "init", "--repo", str(repo)], input="y\n")
 
         assert result.exit_code == 0
-        import yaml
 
         data = yaml.safe_load(profile_path.read_text())
         # Should now have all roles from default profile
@@ -535,7 +534,6 @@ class TestProfileShow:
 
     def test_profile_show_with_explicit_path(self, tmp_path):
         """wb profile show --profile <path> uses the explicit profile."""
-        import yaml
 
         profile_path = tmp_path / "custom.yaml"
         profile_path.write_text(
@@ -555,7 +553,6 @@ class TestProfileShow:
 
     def test_profile_show_truncates_directive(self, tmp_path):
         """wb profile show truncates directive to first line."""
-        import yaml
 
         profile_path = tmp_path / "custom.yaml"
         profile_path.write_text(
@@ -581,7 +578,6 @@ class TestProfileShow:
 class TestProfileSet:
     def test_profile_set_agent(self, tmp_path):
         """wb profile set reviewer.agent gemini updates the YAML."""
-        import yaml
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -601,7 +597,6 @@ class TestProfileSet:
 
     def test_profile_set_directive_extend(self, tmp_path):
         """wb profile set tester.directive_extend 'Extra' sets the extend field."""
-        import yaml
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -660,7 +655,6 @@ class TestProfileSet:
 
     def test_profile_set_updates_existing(self, tmp_path):
         """wb profile set preserves other fields in existing YAML."""
-        import yaml
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -684,7 +678,6 @@ class TestProfileSet:
 
     def test_profile_set_global(self, tmp_path):
         """wb profile set --global writes to ~/.workbench/profile.yaml."""
-        import yaml
 
         fake_home = tmp_path / "home"
         fake_home.mkdir()
@@ -717,7 +710,6 @@ class TestProfileDiff:
 
     def test_profile_diff_with_changes(self, tmp_path):
         """Modified profile shows which roles differ."""
-        import yaml
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -747,7 +739,6 @@ class TestProfileDiff:
 
     def test_profile_diff_with_explicit_path(self, tmp_path):
         """wb profile diff --profile <path> uses the explicit profile."""
-        import yaml
 
         profile_path = tmp_path / "custom.yaml"
         profile_path.write_text(
@@ -775,7 +766,6 @@ class TestProfileDiff:
 class TestRunWithProfile:
     def test_run_with_profile_flag(self, git_repo, tmp_path):
         """wb run plan.md --profile custom.yaml passes profile_path to run_plan."""
-        import yaml
 
         plan = tmp_path / "plan.md"
         plan.write_text("# Plan\n## Task: hello\nDo something\n")
@@ -796,17 +786,10 @@ class TestRunWithProfile:
                 ["run", str(plan), "--no-tmux", "--profile", str(profile_path)],
             )
 
-        # Verify the option was accepted
+        # Verify the option was accepted and run_plan was called
         assert "no such option" not in (result.output or "").lower()
-        # Verify profile_path was passed to run_plan
-        if mock_run_plan.called:
-            call_kwargs = mock_run_plan.call_args
-            # run_plan is called with keyword args
-            if call_kwargs.kwargs:
-                assert call_kwargs.kwargs.get("profile_path") == profile_path
-            else:
-                # May be positional - just check it was called
-                pass
+        assert mock_run_plan.called, "run_plan was never called"
+        assert mock_run_plan.call_args.kwargs["profile_path"] == profile_path
 
     def test_run_profile_flag_nonexistent_file(self, git_repo, tmp_path):
         """wb run --profile with nonexistent file produces an error."""
