@@ -100,6 +100,32 @@ class ConfigAdapter(AgentAdapter):
         return (raw.strip(), {})
 
 
+class GeminiAdapter(AgentAdapter):
+    """Adapter for the Gemini CLI."""
+
+    name = "gemini"
+
+    def build_command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            "gemini",
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
+            "--approval-mode",
+            "yolo",
+        ]
+
+    def parse_output(self, raw: str) -> tuple[str, dict]:
+        try:
+            data = json.loads(raw)
+            result = data.get("response", raw)
+            stats = data.get("stats", {})
+            return (result, stats)
+        except (json.JSONDecodeError, TypeError):
+            return (raw, {})
+
+
 class GenericAdapter(AgentAdapter):
     """Fallback adapter for unknown agent commands."""
 
@@ -154,4 +180,6 @@ def get_adapter(agent_cmd: str, config_path: Path | None = None) -> AgentAdapter
         return ClaudeAdapter()
     if agent_cmd == "codex":
         return CodexAdapter()
+    if agent_cmd == "gemini":
+        return GeminiAdapter()
     return GenericAdapter(agent_cmd)
