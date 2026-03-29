@@ -3,12 +3,18 @@ requires = ["setuptools>=68.0", "setuptools-scm>=8.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "workbench"
+name = "wbcli"
 dynamic = ["version"]
 description = "Lightweight multi-agent orchestrator for iterative development"
 license = "MIT"
 authors = [{name = "Duncan McKinnon"}]
 requires-python = ">=3.11"
+classifiers = [
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+]
 dependencies = [
     "click>=8.0",
     "rich>=13.0",

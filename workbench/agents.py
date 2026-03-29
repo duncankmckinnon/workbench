@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
@@ -14,7 +14,7 @@ from .tmux import run_in_tmux
 from .worktree import Worktree, get_diff, get_main_branch
 
 
-class Role(str, Enum):
+class Role(StrEnum):
     IMPLEMENTOR = "implementor"
     TESTER = "tester"
     REVIEWER = "reviewer"
@@ -22,7 +22,7 @@ class Role(str, Enum):
     MERGER = "merger"
 
 
-class TaskStatus(str, Enum):
+class TaskStatus(StrEnum):
     PENDING = "pending"
     IMPLEMENTING = "implementing"
     TESTING = "testing"

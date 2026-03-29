@@ -1,5 +1,10 @@
 # Workbench
 
+[![CI](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml)
+[![PyPI](https://img.shields.io/pypi/v/wbcli)](https://pypi.org/project/wbcli/)
+[![Python](https://img.shields.io/pypi/pyversions/wbcli)](https://pypi.org/project/wbcli/)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 Multi-agent orchestrator that dispatches AI coding agents in parallel across isolated git worktrees.
 
 Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks, groups them into dependency waves, and runs each task through an implement → test → review → fix pipeline.
@@ -13,7 +18,12 @@ Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks,
 ## Install
 
 ```bash
-pip install -e .
+pip install wbcli
+```
+
+For development:
+
+```bash
 pip install -e ".[dev]"   # includes pytest
 ```
 
@@ -186,7 +196,7 @@ pip install -e ".[dev]"
 pytest                    # 114 tests
 ```
 
-Version is derived from git tags via `setuptools-scm`. To release:
+Version is derived from git tags via `setuptools-scm`. Published to PyPI as [`wbcli`](https://pypi.org/project/wbcli/). To release:
 
 ```bash
 git tag v0.1.0
