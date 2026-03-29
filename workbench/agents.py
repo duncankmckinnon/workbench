@@ -344,16 +344,39 @@ async def run_pipeline(
         if on_status_change:
             on_status_change(task.id, status)
 
+    def _resolve_for_role(role: Role) -> tuple[str, str | None]:
+        """Resolve effective agent_cmd and directive for a role.
+
+        Priority: CLI flags > profile > defaults.
+        """
+        cli_directive = directives.get(role) if directives else None
+        if profile:
+            rc = getattr(profile, role.value)
+            eff_agent = rc.agent if agent_cmd == "claude" else agent_cmd
+            eff_directive = cli_directive if cli_directive is not None else rc.directive
+        else:
+            eff_agent = agent_cmd
+            eff_directive = cli_directive
+        return eff_agent, eff_directive
+
+    def _resolve_agent_for_role(role: Role) -> str:
+        """Resolve effective agent_cmd for a role (agent only, no directive)."""
+        if profile and agent_cmd == "claude":
+            return getattr(profile, role.value).agent
+        return agent_cmd
+
     if tdd:
         # TDD Phase 1: Write failing tests
+        # Directive priority for TDD: CLI > TDD_DIRECTIVES (profile directives are ignored)
         _notify(TaskStatus.TESTING)
+        tdd_test_agent = _resolve_agent_for_role(Role.TESTER)
         tdd_test_directive = (directives or {}).get(Role.TESTER) or TDD_DIRECTIVES[Role.TESTER]
         test_write_result = await run_agent(
             Role.TESTER,
             task,
             worktree,
             repo,
-            agent_cmd,
+            agent_cmd=tdd_test_agent,
             session_branch=session_branch,
             plan_context=plan_context,
             plan_conventions=plan_conventions,
@@ -368,6 +391,7 @@ async def run_pipeline(
 
         # TDD Phase 2: Implement to make tests pass
         _notify(TaskStatus.IMPLEMENTING)
+        tdd_impl_agent = _resolve_agent_for_role(Role.IMPLEMENTOR)
         tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[
             Role.IMPLEMENTOR
         ]
@@ -376,7 +400,7 @@ async def run_pipeline(
             task,
             worktree,
             repo,
-            agent_cmd,
+            agent_cmd=tdd_impl_agent,
             session_branch=session_branch,
             plan_context=plan_context,
             plan_conventions=plan_conventions,
@@ -396,21 +420,6 @@ async def run_pipeline(
         # Continue to normal test verification (phase 2) and review (phase 3)
         # The existing test/review loop below will verify the implementation
         # and handle fix retries as normal.
-
-    def _resolve_for_role(role: Role) -> tuple[str, str | None]:
-        """Resolve effective agent_cmd and directive for a role.
-
-        Priority: CLI flags > profile > defaults.
-        """
-        cli_directive = directives.get(role) if directives else None
-        if profile:
-            rc = getattr(profile, role.value)
-            eff_agent = rc.agent if agent_cmd == "claude" else agent_cmd
-            eff_directive = cli_directive if cli_directive is not None else rc.directive
-        else:
-            eff_agent = agent_cmd
-            eff_directive = cli_directive
-        return eff_agent, eff_directive
 
     # 1. Implement (skipped in TDD mode — already done above)
     if not tdd:
