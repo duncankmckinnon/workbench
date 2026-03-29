@@ -10,9 +10,9 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -20,10 +20,10 @@ jobs:
         run: pip install black isort
 
       - name: Check formatting
-        run: black --check .
+        run: black --check --line-length 99 --target-version py311 .
 
       - name: Check import order
-        run: isort --check .
+        run: isort --check --profile black --line-length 99 .
 
   test:
     runs-on: ubuntu-latest
@@ -32,11 +32,11 @@ jobs:
         python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0  # full history for setuptools-scm
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python-version }}
           allow-prereleases: true

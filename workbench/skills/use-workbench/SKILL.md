@@ -219,11 +219,37 @@ This is useful when you want agents to focus on specific aspects without modifyi
 | Task title is a full sentence | Keep titles to 2-4 words — they become dependency slugs |
 | Line number references for code to change | Line numbers shift — describe code by content/pattern instead |
 
-## CLI Reference
+## Branching Strategy
+
+By default, `wb run` fetches `origin/main` and creates a new session branch (`workbench-N`) from the latest remote state. This ensures work starts from the most up-to-date code and avoids merge conflicts when the session branch is later merged back.
+
+### Flags
+
+| Flag | Base branch | Source | Use case |
+|------|-------------|--------|----------|
+| *(default)* | `main` | `origin/main` (fetched) | Standard — start from latest remote |
+| `--local` | `main` | local `main` | Build on uncommitted/unpushed local work |
+| `--base feature-x` | `feature-x` | `origin/feature-x` (fetched) | Branch from a specific remote branch |
+| `--base feature-x --local` | `feature-x` | local `feature-x` | Branch from a local feature branch |
+| `-b workbench-3` | *(existing)* | *(existing)* | Resume a previous session branch |
+
+### When to use `--local`
+
+Use `--local` when your base branch has local commits you haven't pushed yet and you want workbench to build on top of them. Without `--local`, workbench fetches from origin and your unpushed work won't be included.
+
+### When to use `--base`
+
+Use `--base` when you're working off a branch other than `main` — for example, a long-running feature branch, a release branch, or another team member's branch. Combined with `--local`, it lets you build on any local branch.
+
+### Resuming with `-b`
+
+Use `-b workbench-N` (or `--session-branch`) to resume a previous session. This skips branch creation entirely and continues merging into the existing session branch. Pair with `--start-wave N` to skip already-completed waves.
+
+## TDD Mode
 
 With `--tdd`, the pipeline becomes: **test (write failing) → implement (make pass) → test (verify) → review → fix**
 
-In TDD mode, the tester writes comprehensive failing tests first. The implementor then writes code to make all tests pass. Normal test verification and review follow.
+In TDD mode, the tester writes comprehensive failing tests first. The implementor then writes code to make all tests pass and reports whether the tests are comprehensive. Normal test verification and review follow.
 
 ## Key commands
 
@@ -231,6 +257,9 @@ In TDD mode, the tester writes comprehensive failing tests first. The implemento
 - `wb preview <plan>` — dry-run to see parsed tasks and waves
 - `wb status` — show active worktrees
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
+- `wb run plan.md --base feature-x` — branch from a specific branch
+- `wb run plan.md --local` — branch from local ref instead of fetching
+- `wb run plan.md -b workbench-3 -w 2` — resume session from wave 2
 - `wb stop` — kill all active agent sessions
 - `wb stop --cleanup` — also remove worktrees and branches
 - `wb clean` — remove all workbench worktrees

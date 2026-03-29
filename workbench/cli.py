@@ -193,6 +193,12 @@ def main():
     "--tdd", is_flag=True, help="Test-driven development mode: write tests first, then implement."
 )
 @click.option(
+    "--local", is_flag=True, help="Branch from local ref instead of fetching origin. Use to build on local work."
+)
+@click.option(
+    "--base", default=None, type=str, help="Base branch to start from (default: main). Works with --local."
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -223,6 +229,8 @@ def run(
     start_wave: int,
     no_tmux: bool,
     tdd: bool,
+    local: bool,
+    base: str | None,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -288,6 +296,8 @@ def run(
             use_tmux=not no_tmux,
             directives=directives or None,
             tdd=tdd,
+            local=local,
+            base_branch=base,
         )
     )
 
