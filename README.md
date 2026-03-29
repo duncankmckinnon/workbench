@@ -224,7 +224,6 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
 | `wb status` | Show active worktrees |
 | `wb stop` | Kill all running agent tmux sessions |
-| `wb stop --cleanup` | Also remove worktrees and branches |
 | `wb clean` | Remove all workbench worktrees and `wb/` branches |
 | `wb init` | Install skills for an agent platform |
 | `wb setup` | Create `.workbench/` and install skills |
@@ -233,7 +232,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb profile set <key> <value>` | Update a profile field |
 | `wb profile diff` | Show differences from defaults |
 
-### `wb run` flags
+### `wb run`
 
 | Flag | Description |
 |---|---|
@@ -253,7 +252,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--profile PATH` | Use a specific profile.yaml |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
-### `wb init` flags
+### `wb init`
 
 | Flag | Description |
 |---|---|
@@ -261,11 +260,60 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--local` | Install skills to repo-local paths instead of global |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 
-### `wb stop` flags
+### `wb setup`
+
+| Flag | Description |
+|---|---|
+| `--agent NAME` | Target platform (auto-detected if omitted) |
+| `--symlink` | Symlink skills instead of copy |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb stop`
 
 | Flag | Description |
 |---|---|
 | `--cleanup` | Also remove worktrees and `wb/` branches |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb status`
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb clean`
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+| `--yes` | Skip confirmation prompt |
+
+### `wb profile init`
+
+| Flag | Description |
+|---|---|
+| `--global` | Create in `~/.workbench/` instead of `.workbench/` |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb profile show`
+
+| Flag | Description |
+|---|---|
+| `--profile PATH` | Path to a specific profile.yaml |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb profile set`
+
+| Flag | Description |
+|---|---|
+| `--global` | Update `~/.workbench/profile.yaml` instead of local |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb profile diff`
+
+| Flag | Description |
+|---|---|
+| `--profile PATH` | Path to a specific profile.yaml |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ## Contributing
