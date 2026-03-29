@@ -6,9 +6,7 @@ from workbench.plan_parser import parse_plan
 def test_parse_single_task(tmp_path):
     plan_file = tmp_path / "plan.md"
     plan_file.write_text(
-        "# My Plan\n\n"
-        "## Task: Build the widget\n"
-        "Implement the widget component.\n"
+        "# My Plan\n\n" "## Task: Build the widget\n" "Implement the widget component.\n"
     )
     plan = parse_plan(plan_file)
     assert len(plan.tasks) == 1
@@ -63,10 +61,7 @@ def test_parse_depends_metadata(tmp_path):
 def test_independent_groups_no_deps(tmp_path):
     plan_file = tmp_path / "plan.md"
     plan_file.write_text(
-        "# Plan\n\n"
-        "## Task: A\nDo A.\n\n"
-        "## Task: B\nDo B.\n\n"
-        "## Task: C\nDo C.\n"
+        "# Plan\n\n" "## Task: A\nDo A.\n\n" "## Task: B\nDo B.\n\n" "## Task: C\nDo C.\n"
     )
     plan = parse_plan(plan_file)
     groups = plan.independent_groups
@@ -125,10 +120,6 @@ def test_plan_title(tmp_path):
 
 def test_task_slug(tmp_path):
     plan_file = tmp_path / "plan.md"
-    plan_file.write_text(
-        "# Plan\n\n"
-        "## Task: Add User Authentication\n"
-        "Implement auth.\n"
-    )
+    plan_file.write_text("# Plan\n\n" "## Task: Add User Authentication\n" "Implement auth.\n")
     plan = parse_plan(plan_file)
     assert plan.tasks[0].slug == "add-user-authentication"

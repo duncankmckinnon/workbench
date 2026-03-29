@@ -3,17 +3,11 @@
 from __future__ import annotations
 
 import asyncio
-from unittest.mock import AsyncMock, patch, call
+from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
-from workbench.agents import (
-    AgentResult,
-    Role,
-    TaskStatus,
-    TDD_DIRECTIVES,
-    run_pipeline,
-)
+from workbench.agents import TDD_DIRECTIVES, AgentResult, Role, TaskStatus, run_pipeline
 from workbench.plan_parser import Task
 from workbench.worktree import Worktree
 
@@ -54,24 +48,29 @@ class TestTDDPipelineFullPass:
         test verification passes, review passes.
         Verify roles are: TESTER, IMPLEMENTOR, TESTER, REVIEWER."""
         side_effects = [
-            _done_result(Role.TESTER),       # TDD Phase 1: write failing tests (no verdict needed)
+            _done_result(Role.TESTER),  # TDD Phase 1: write failing tests (no verdict needed)
             _pass_result(Role.IMPLEMENTOR),  # TDD Phase 2: implement (tests pass + comprehensive)
-            _pass_result(Role.TESTER),        # Verification: test
-            _pass_result(Role.REVIEWER),      # Review
+            _pass_result(Role.TESTER),  # Verification: test
+            _pass_result(Role.REVIEWER),  # Review
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         assert len(results) == 4
         assert [r.role for r in results] == [
-            Role.TESTER, Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER,
+            Role.TESTER,
+            Role.IMPLEMENTOR,
+            Role.TESTER,
+            Role.REVIEWER,
         ]
 
 
@@ -83,13 +82,15 @@ class TestTDDTestWriteFails:
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         assert len(results) == 1
         assert results[0].role == Role.TESTER
@@ -105,13 +106,15 @@ class TestTDDImplVerdictFail:
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         assert len(results) == 2
         assert results[0].role == Role.TESTER
@@ -128,13 +131,15 @@ class TestTDDImplFails:
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         assert len(results) == 2
         assert results[0].role == Role.TESTER
@@ -155,13 +160,15 @@ class TestTDDDirectives:
             return _pass_result(role)
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         # First call: TDD tester directive
         assert captured_directives[0] == TDD_DIRECTIVES[Role.TESTER]
@@ -187,41 +194,52 @@ class TestTDDDirectives:
         }
 
         with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-                directives=custom_directives,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                    directives=custom_directives,
+                )
+            )
 
         assert captured_directives[0] == custom_tester
         assert captured_directives[1] == custom_impl
 
 
 class TestTDDVerificationFailsThenFixes:
-    def test_pipeline_tdd_verification_fails_then_fixes(self, sample_task, sample_worktree, tmp_path):
+    def test_pipeline_tdd_verification_fails_then_fixes(
+        self, sample_task, sample_worktree, tmp_path
+    ):
         """After TDD impl, verification test fails, fixer runs, test passes on retry."""
         side_effects = [
-            _done_result(Role.TESTER),            # TDD Phase 1: write tests (no verdict)
-            _pass_result(Role.IMPLEMENTOR),       # TDD Phase 2: implement (PASS verdict)
-            _fail_verdict_result(Role.TESTER),     # Verification: test FAILS
-            _done_result(Role.FIXER),              # Fixer addresses issues
-            _pass_result(Role.TESTER),             # Verification retry: PASS
-            _pass_result(Role.REVIEWER),           # Review: PASS
+            _done_result(Role.TESTER),  # TDD Phase 1: write tests (no verdict)
+            _pass_result(Role.IMPLEMENTOR),  # TDD Phase 2: implement (PASS verdict)
+            _fail_verdict_result(Role.TESTER),  # Verification: test FAILS
+            _done_result(Role.FIXER),  # Fixer addresses issues
+            _pass_result(Role.TESTER),  # Verification retry: PASS
+            _pass_result(Role.REVIEWER),  # Review: PASS
         ]
 
         with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
-            results = asyncio.run(run_pipeline(
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                use_tmux=False,
-                tdd=True,
-            ))
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                )
+            )
 
         assert len(results) == 6
         assert [r.role for r in results] == [
-            Role.TESTER, Role.IMPLEMENTOR, Role.TESTER, Role.FIXER, Role.TESTER, Role.REVIEWER,
+            Role.TESTER,
+            Role.IMPLEMENTOR,
+            Role.TESTER,
+            Role.FIXER,
+            Role.TESTER,
+            Role.REVIEWER,
         ]

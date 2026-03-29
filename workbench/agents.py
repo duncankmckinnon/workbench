@@ -267,8 +267,10 @@ async def run_agent(
             returncode, raw_output = await run_in_tmux(session_name, cmd, worktree.path)
         else:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=str(worktree.path),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                *cmd,
+                cwd=str(worktree.path),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
             returncode = proc.returncode
@@ -336,7 +338,11 @@ async def run_pipeline(
         _notify(TaskStatus.TESTING)
         tdd_test_directive = (directives or {}).get(Role.TESTER) or TDD_DIRECTIVES[Role.TESTER]
         test_write_result = await run_agent(
-            Role.TESTER, task, worktree, repo, agent_cmd,
+            Role.TESTER,
+            task,
+            worktree,
+            repo,
+            agent_cmd,
             session_branch=session_branch,
             plan_context=plan_context,
             plan_conventions=plan_conventions,
@@ -351,9 +357,15 @@ async def run_pipeline(
 
         # TDD Phase 2: Implement to make tests pass
         _notify(TaskStatus.IMPLEMENTING)
-        tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[Role.IMPLEMENTOR]
+        tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[
+            Role.IMPLEMENTOR
+        ]
         impl_result = await run_agent(
-            Role.IMPLEMENTOR, task, worktree, repo, agent_cmd,
+            Role.IMPLEMENTOR,
+            task,
+            worktree,
+            repo,
+            agent_cmd,
             session_branch=session_branch,
             plan_context=plan_context,
             plan_conventions=plan_conventions,
@@ -378,7 +390,11 @@ async def run_pipeline(
     if not tdd:
         _notify(TaskStatus.IMPLEMENTING)
         impl_result = await run_agent(
-            Role.IMPLEMENTOR, task, worktree, repo, agent_cmd,
+            Role.IMPLEMENTOR,
+            task,
+            worktree,
+            repo,
+            agent_cmd,
             session_branch=session_branch,
             plan_context=plan_context,
             plan_conventions=plan_conventions,
@@ -396,7 +412,11 @@ async def run_pipeline(
         for attempt in range(1, max_retries + 2):  # +2: 1 initial + max_retries fixes
             _notify(TaskStatus.TESTING)
             test_result = await run_agent(
-                Role.TESTER, task, worktree, repo, agent_cmd,
+                Role.TESTER,
+                task,
+                worktree,
+                repo,
+                agent_cmd,
                 session_branch=session_branch,
                 plan_context=plan_context,
                 plan_conventions=plan_conventions,
@@ -419,7 +439,11 @@ async def run_pipeline(
                 _notify(TaskStatus.FIXING)
                 feedback = test_result.feedback or test_result.output[:2000]
                 fix_result = await run_agent(
-                    Role.FIXER, task, worktree, repo, agent_cmd,
+                    Role.FIXER,
+                    task,
+                    worktree,
+                    repo,
+                    agent_cmd,
                     extra_context=f"[Test failure, attempt {attempt}]\n{feedback}",
                     session_branch=session_branch,
                     plan_context=plan_context,
@@ -443,7 +467,11 @@ async def run_pipeline(
         for attempt in range(1, max_retries + 2):
             _notify(TaskStatus.REVIEWING)
             review_result = await run_agent(
-                Role.REVIEWER, task, worktree, repo, agent_cmd,
+                Role.REVIEWER,
+                task,
+                worktree,
+                repo,
+                agent_cmd,
                 session_branch=session_branch,
                 plan_context=plan_context,
                 plan_conventions=plan_conventions,
@@ -465,7 +493,11 @@ async def run_pipeline(
                 _notify(TaskStatus.FIXING)
                 feedback = review_result.feedback or review_result.output[:2000]
                 fix_result = await run_agent(
-                    Role.FIXER, task, worktree, repo, agent_cmd,
+                    Role.FIXER,
+                    task,
+                    worktree,
+                    repo,
+                    agent_cmd,
                     extra_context=f"[Review failure, attempt {attempt}]\n{feedback}",
                     session_branch=session_branch,
                     plan_context=plan_context,
@@ -519,8 +551,10 @@ async def run_merge_resolver(
             returncode, raw_output = await run_in_tmux(session_name, cmd, merge_dir)
         else:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=str(merge_dir),
-                stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                *cmd,
+                cwd=str(merge_dir),
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
             )
             stdout, stderr = await proc.communicate()
             returncode = proc.returncode

@@ -8,13 +8,7 @@ from unittest.mock import patch
 
 from click.testing import CliRunner
 
-from workbench.cli import (
-    _discover_skills,
-    _ensure_workbench_dir,
-    _get_skills_dir,
-    main,
-)
-
+from workbench.cli import _discover_skills, _ensure_workbench_dir, _get_skills_dir, main
 
 # ---------------------------------------------------------------------------
 # _ensure_workbench_dir
@@ -73,8 +67,10 @@ def test_run_no_tmux_skips_check(git_repo, tmp_path):
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
-    with patch("workbench.cli.run_plan") as mock_run_plan, \
-         patch("workbench.cli._find_repo_root", return_value=git_repo):
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
         # Make run_plan a coroutine that returns immediately
         import asyncio
 
@@ -85,7 +81,11 @@ def test_run_no_tmux_skips_check(git_repo, tmp_path):
 
         # Patch asyncio.run to actually run our coroutine
         with patch("workbench.cli.asyncio") as mock_asyncio:
-            mock_asyncio.run = lambda coro: asyncio.get_event_loop().run_until_complete(coro) if asyncio.get_event_loop().is_running() else asyncio.new_event_loop().run_until_complete(coro)
+            mock_asyncio.run = lambda coro: (
+                asyncio.get_event_loop().run_until_complete(coro)
+                if asyncio.get_event_loop().is_running()
+                else asyncio.new_event_loop().run_until_complete(coro)
+            )
             result = runner.invoke(main, ["run", str(plan), "--no-tmux"])
 
     # Should not fail with tmux error
@@ -98,8 +98,10 @@ def test_run_without_tmux_shows_error(git_repo, tmp_path):
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
-    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
-         patch("workbench.cli.check_tmux_available", return_value=False):
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=False),
+    ):
         result = runner.invoke(main, ["run", str(plan)])
 
     assert result.exit_code != 0
@@ -170,7 +172,9 @@ def test_init_codex_skips_duplicates(tmp_path, monkeypatch):
     # Pre-populate instructions.md with the marker so the check triggers
     codex_dir = tmp_path / ".codex"
     codex_dir.mkdir()
-    (codex_dir / "instructions.md").write_text("<!-- workbench-skill:use-workbench -->\n# Existing skill\n")
+    (codex_dir / "instructions.md").write_text(
+        "<!-- workbench-skill:use-workbench -->\n# Existing skill\n"
+    )
 
     runner = CliRunner()
     result = runner.invoke(main, ["init", "--agent", "codex"])
@@ -231,15 +235,23 @@ def test_run_directive_options_accepted(git_repo, tmp_path):
 
     runner = CliRunner()
     # Just test that the options are parsed - use --no-tmux to skip tmux check
-    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
-         patch("workbench.cli.asyncio") as mock_asyncio:
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
         mock_asyncio.run = lambda coro: None
-        result = runner.invoke(main, [
-            "run", str(plan),
-            "--no-tmux",
-            "--implementor-directive", "Be concise",
-            "--tester-directive", "Focus on edge cases",
-        ])
+        result = runner.invoke(
+            main,
+            [
+                "run",
+                str(plan),
+                "--no-tmux",
+                "--implementor-directive",
+                "Be concise",
+                "--tester-directive",
+                "Focus on edge cases",
+            ],
+        )
 
     # Should parse without error (may fail later due to mock, but options are valid)
     assert "no such option" not in (result.output or "").lower()
@@ -283,8 +295,10 @@ def test_tdd_flag_accepted(git_repo, tmp_path):
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
-    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
-         patch("workbench.cli.asyncio") as mock_asyncio:
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
         mock_asyncio.run = lambda coro: None
         result = runner.invoke(main, ["run", str(plan), "--tdd", "--no-tmux"])
 
@@ -298,8 +312,10 @@ def test_tdd_skip_test_mutually_exclusive(git_repo, tmp_path):
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
-    with patch("workbench.cli._find_repo_root", return_value=git_repo), \
-         patch("workbench.cli.check_tmux_available", return_value=True):
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+    ):
         result = runner.invoke(main, ["run", str(plan), "--tdd", "--skip-test"])
 
     assert result.exit_code != 0
@@ -332,6 +348,7 @@ def test_stop_kills_sessions():
     """Should kill only wb- prefixed sessions and report count."""
     runner = CliRunner()
     with patch("workbench.cli.subprocess.run") as mock_run:
+
         def side_effect(cmd, **kwargs):
             if cmd[0] == "tmux" and cmd[1] == "list-sessions":
                 return subprocess.CompletedProcess(
@@ -351,8 +368,7 @@ def test_stop_kills_sessions():
 
     # Verify kill-session was called for each wb- session
     kill_calls = [
-        c for c in mock_run.call_args_list
-        if len(c[0][0]) >= 2 and c[0][0][1] == "kill-session"
+        c for c in mock_run.call_args_list if len(c[0][0]) >= 2 and c[0][0][1] == "kill-session"
     ]
     assert len(kill_calls) == 2
     killed_names = [c[0][0][3] for c in kill_calls]
@@ -364,22 +380,30 @@ def test_stop_kills_sessions():
 def test_stop_with_cleanup(git_repo):
     """wb stop --cleanup should kill sessions and clean up worktrees."""
     runner = CliRunner()
-    with patch("workbench.cli.subprocess.run") as mock_run, \
-         patch("workbench.cli._find_repo_root", return_value=git_repo):
+    with (
+        patch("workbench.cli.subprocess.run") as mock_run,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+
         def side_effect(cmd, **kwargs):
             if cmd[0] == "tmux" and cmd[1] == "list-sessions":
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=1, stdout="", stderr="no server",
+                    args=cmd,
+                    returncode=1,
+                    stdout="",
+                    stderr="no server",
                 )
             if cmd[0] == "git" and "worktree" in cmd and "list" in cmd:
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0,
+                    args=cmd,
+                    returncode=0,
                     stdout="worktree /repo/.workbench/task-1\nbranch refs/heads/wb/task-1\n\n",
                     stderr="",
                 )
             if cmd[0] == "git" and "branch" in cmd and "--list" in cmd:
                 return subprocess.CompletedProcess(
-                    args=cmd, returncode=0,
+                    args=cmd,
+                    returncode=0,
                     stdout="  wb/task-1\n",
                     stderr="",
                 )

@@ -27,6 +27,9 @@ dev = [
     "pytest-asyncio>=0.23",
     "pytest-mock>=3.12",
     "pytest-cov>=6.0",
+    "pre-commit>=3.6",
+    "black>=24.0",
+    "isort>=5.13",
 ]
 
 [project.urls]
@@ -54,6 +57,14 @@ omit = [
     "workbench/_version.py",
     "workbench/skills/*",
 ]
+
+[tool.black]
+line-length = 99
+target-version = ["py311"]
+
+[tool.isort]
+profile = "black"
+line_length = 99
 
 [tool.coverage.report]
 exclude_lines = [

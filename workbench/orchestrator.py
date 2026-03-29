@@ -157,7 +157,9 @@ async def run_plan(
 
         # Skip waves before start_wave
         if wave_num < start_wave:
-            console.print(f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (already merged) ━━━[/dim]\n")
+            console.print(
+                f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (already merged) ━━━[/dim]\n"
+            )
             for task in wave:
                 state = TaskState(task=task)
                 state.status = TaskStatus.DONE
@@ -165,7 +167,9 @@ async def run_plan(
                 state_map[task.id] = state
             continue
 
-        console.print(f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n")
+        console.print(
+            f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n"
+        )
 
         # Initialize state for this wave
         wave_states: list[TaskState] = []
@@ -178,21 +182,26 @@ async def run_plan(
         # Create worktrees for all tasks in wave, branching from session branch
         for state in wave_states:
             try:
-                wt = create_worktree(repo, state.task.id, state.task.slug, base_branch=session_branch)
+                wt = create_worktree(
+                    repo, state.task.id, state.task.slug, base_branch=session_branch
+                )
                 state.worktree = wt
             except Exception as e:
                 state.status = TaskStatus.FAILED
-                state.results.append(AgentResult(
-                    task_id=state.task.id,
-                    role=Role.IMPLEMENTOR,
-                    status=TaskStatus.FAILED,
-                    output=f"Worktree creation failed: {e}",
-                ))
+                state.results.append(
+                    AgentResult(
+                        task_id=state.task.id,
+                        role=Role.IMPLEMENTOR,
+                        status=TaskStatus.FAILED,
+                        output=f"Worktree creation failed: {e}",
+                    )
+                )
 
         # Status callback so the pipeline can update our display state
         def _make_callback(state: TaskState):
             def _on_status(task_id: str, status: TaskStatus):
                 state.status = status
+
             return _on_status
 
         # Run tasks concurrently with semaphore
@@ -227,8 +236,10 @@ async def run_plan(
                 state.finished_at = time.time()
 
                 # Final status based on last result
-                if any(r.role in (Role.TESTER, Role.REVIEWER) and not r.passed and r == results[-1]
-                       for r in results):
+                if any(
+                    r.role in (Role.TESTER, Role.REVIEWER) and not r.passed and r == results[-1]
+                    for r in results
+                ):
                     state.status = TaskStatus.FAILED
                 elif any(r.status == TaskStatus.FAILED for r in results):
                     state.status = TaskStatus.FAILED
@@ -239,8 +250,11 @@ async def run_plan(
         tasks = [_run_task(s) for s in wave_states]
 
         with Live(_status_table(all_states), console=console, refresh_per_second=1) as live:
+
             async def _update_display():
-                while not all(s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in wave_states):
+                while not all(
+                    s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in wave_states
+                ):
                     live.update(_status_table(all_states))
                     await asyncio.sleep(1)
                 live.update(_status_table(all_states))
@@ -250,7 +264,9 @@ async def run_plan(
         # After the wave: merge all successful task branches into the session branch
         done_states = [s for s in wave_states if s.status == TaskStatus.DONE]
         if done_states:
-            console.print(f"\n[bold]Merging {len(done_states)} branch(es) into {session_branch}...[/bold]\n")
+            console.print(
+                f"\n[bold]Merging {len(done_states)} branch(es) into {session_branch}...[/bold]\n"
+            )
 
             for state in done_states:
                 result = merge_into_session(repo, session_branch, state.worktree.branch)
@@ -280,7 +296,10 @@ async def run_plan(
                     if resolver_result.passed:
                         # Resolver succeeded — complete the merge
                         merge_finish = complete_merge(
-                            result.merge_dir, repo, session_branch, state.worktree.branch,
+                            result.merge_dir,
+                            repo,
+                            session_branch,
+                            state.worktree.branch,
                         )
                         if merge_finish.success:
                             console.print(
@@ -298,8 +317,7 @@ async def run_plan(
                     else:
                         # Resolver failed — abort and mark failed
                         console.print(
-                            f"  [red]✗[/red] {state.worktree.branch} — "
-                            f"Merge resolver failed"
+                            f"  [red]✗[/red] {state.worktree.branch} — " f"Merge resolver failed"
                         )
                         cleanup_merge_worktree(repo, result.merge_dir)
                         state.status = TaskStatus.FAILED

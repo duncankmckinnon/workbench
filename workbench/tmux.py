@@ -49,7 +49,10 @@ async def run_in_tmux(
 
     # Kill any stale session with the same name
     stale = await asyncio.create_subprocess_exec(
-        "tmux", "kill-session", "-t", safe_name,
+        "tmux",
+        "kill-session",
+        "-t",
+        safe_name,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
@@ -57,7 +60,13 @@ async def run_in_tmux(
 
     # Create a detached tmux session running the script
     create = await asyncio.create_subprocess_exec(
-        "tmux", "new-session", "-d", "-s", safe_name, "-c", str(cwd),
+        "tmux",
+        "new-session",
+        "-d",
+        "-s",
+        safe_name,
+        "-c",
+        str(cwd),
         f"bash {shlex.quote(script_path)}",
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
@@ -77,7 +86,10 @@ async def run_in_tmux(
     else:
         # Timeout – kill the session and clean up
         kill = await asyncio.create_subprocess_exec(
-            "tmux", "kill-session", "-t", safe_name,
+            "tmux",
+            "kill-session",
+            "-t",
+            safe_name,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.DEVNULL,
         )
@@ -98,7 +110,10 @@ async def run_in_tmux(
 
     # Cleanup
     kill = await asyncio.create_subprocess_exec(
-        "tmux", "kill-session", "-t", safe_name,
+        "tmux",
+        "kill-session",
+        "-t",
+        safe_name,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )

@@ -10,6 +10,7 @@ from pathlib import Path
 @dataclass
 class Task:
     """A single unit of work parsed from a plan."""
+
     id: str
     title: str
     description: str
@@ -24,6 +25,7 @@ class Task:
 @dataclass
 class Plan:
     """A parsed plan containing tasks."""
+
     title: str
     tasks: list[Task]
     source: Path
@@ -117,13 +119,15 @@ def parse_plan(path: Path) -> Plan:
         if current_title:
             task_id = f"task-{len(tasks) + 1}"
             desc = "\n".join(current_lines).strip()
-            tasks.append(Task(
-                id=task_id,
-                title=current_title,
-                description=desc,
-                files=list(current_files),
-                depends_on=list(current_depends),
-            ))
+            tasks.append(
+                Task(
+                    id=task_id,
+                    title=current_title,
+                    description=desc,
+                    files=list(current_files),
+                    depends_on=list(current_depends),
+                )
+            )
 
     for line in lines:
         m = task_pattern.match(line)
