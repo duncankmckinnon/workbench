@@ -71,17 +71,26 @@ def _detect_agent() -> str:
     return "manual"
 
 
+_PLATFORM_LABEL = {
+    "claude": "command",
+    "cursor": "rule",
+    "codex": "instruction",
+    "manual": "skill file",
+}
+
+
 def _install_skills(agent: str | None, symlink: bool) -> None:
-    """Install bundled skills for the given agent platform."""
+    """Install bundled skill files for the given agent platform."""
     agent = agent or _detect_agent()
     skills_dir = _get_skills_dir()
     skills = _discover_skills(skills_dir)
+    label = _PLATFORM_LABEL.get(agent, "skill file")
 
     if not skills:
-        console.print("[yellow]No bundled skills found.[/yellow]")
+        console.print("[yellow]No bundled skill files found.[/yellow]")
         return
 
-    console.print(f"[bold]Installing {len(skills)} skill(s) for {agent}...[/bold]\n")
+    console.print(f"[bold]Installing {len(skills)} {label}(s) for {agent}...[/bold]\n")
 
     if agent == "claude":
         target_dir = Path.home() / ".claude" / "commands"
@@ -91,10 +100,11 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
             if symlink:
                 dest.unlink(missing_ok=True)
                 dest.symlink_to(src.resolve())
-                console.print(f"  Linked {name} → {dest}")
+                console.print(f"  Linked /{name} → {dest}")
             else:
                 dest.write_text(src.read_text())
-                console.print(f"  Copied {name} → {dest}")
+                console.print(f"  Copied /{name} → {dest}")
+        console.print(f"\n  Use in Claude Code: [bold]/{skills[0][0]}[/bold]")
 
     elif agent == "cursor":
         target_dir = Path.cwd() / ".cursor" / "rules"
@@ -131,11 +141,11 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
         instructions_path.write_text(existing)
 
     elif agent == "manual":
-        console.print(f"  Skills directory: {skills_dir}\n")
+        console.print(f"  Skill files directory: {skills_dir}\n")
         for name, src in skills:
             console.print(f"  • {name}: {src}")
 
-    console.print(f"\n[green]Done. Installed {len(skills)} skill(s) for {agent}.[/green]")
+    console.print(f"\n[green]Done. Installed {len(skills)} {label}(s) for {agent}.[/green]")
 
 
 @click.group()

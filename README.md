@@ -103,19 +103,19 @@ agents:
 wb run plan.md --agent my-agent
 ```
 
-## Skills
+## Agent commands
 
-Workbench bundles skill files that teach agents how to write plans. Install them for your platform:
+Workbench bundles guidance files that teach agents how to write plans. `wb init` installs them in the right format for each platform:
 
 ```bash
-wb init --agent claude     # copies to ~/.claude/commands/
-wb init --agent cursor     # copies to .cursor/rules/
+wb init --agent claude     # installs as /use-workbench command in ~/.claude/commands/
+wb init --agent cursor     # installs as rule in .cursor/rules/
 wb init --agent codex      # appends to .codex/instructions.md
 wb init --agent manual     # prints paths for manual setup
 wb init --symlink          # symlink instead of copy (for development)
 ```
 
-`wb setup` combines `.workbench/` creation with skill installation in one step.
+`wb setup` combines `.workbench/` creation with command installation in one step.
 
 ## Monitoring
 

@@ -115,7 +115,7 @@ def test_init_manual_prints_skill_paths():
     runner = CliRunner()
     result = runner.invoke(main, ["init", "--agent", "manual"])
     assert result.exit_code == 0
-    assert "Skills directory:" in result.output
+    assert "Skill files directory:" in result.output
     assert "use-workbench" in result.output
 
 
@@ -204,7 +204,7 @@ def test_setup_creates_workbench_dir_and_installs(git_repo):
 
     assert result.exit_code == 0
     assert (git_repo / ".workbench").is_dir()
-    assert "Skills directory:" in result.output
+    assert "Skill files directory:" in result.output
     assert "Repo is ready" in result.output
 
 
