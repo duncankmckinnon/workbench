@@ -6,6 +6,7 @@ build/
 dist/
 *.egg
 workbench/_version.py
+.coverage
 
 # Virtual environments
 .venv/
