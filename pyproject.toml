@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "workbench"
-version = "0.1.0"
+dynamic = ["version"]
 description = "Lightweight multi-agent orchestrator for iterative development"
 license = "MIT"
 authors = [{name = "Duncan McKinnon"}]
@@ -12,6 +12,15 @@ requires-python = ">=3.11"
 dependencies = [
     "click>=8.0",
     "rich>=13.0",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "pytest-mock>=3.12",
+    "pytest-cov>=6.0",
 ]
 
 [project.urls]
@@ -22,3 +31,27 @@ wb = "workbench.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
+
+[tool.setuptools.package-data]
+"workbench.skills" = ["**/*.md"]
+
+[tool.setuptools_scm]
+write_to = "workbench/_version.py"
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+testpaths = ["tests"]
+addopts = "--cov=workbench --cov-report=term-missing --cov-fail-under=70"
+
+[tool.coverage.run]
+omit = [
+    "workbench/_version.py",
+    "workbench/skills/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "if __name__ == .__main__.",
+    "if TYPE_CHECKING:",
+]

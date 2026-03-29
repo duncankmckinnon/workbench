@@ -27,6 +27,8 @@ class Plan:
     title: str
     tasks: list[Task]
     source: Path
+    context: str = ""
+    conventions: str = ""
 
     @property
     def independent_groups(self) -> list[list[Task]]:
@@ -77,6 +79,28 @@ def parse_plan(path: Path) -> Plan:
         if line.startswith("# "):
             plan_title = line[2:].strip()
             break
+
+    # Extract ## Context and ## Conventions sections
+    plan_context = ""
+    plan_conventions = ""
+    context_pattern = re.compile(r"^##\s+Context\s*$", re.IGNORECASE)
+    conventions_pattern = re.compile(r"^##\s+Conventions\s*$", re.IGNORECASE)
+
+    for i, line in enumerate(lines):
+        if context_pattern.match(line):
+            section_lines = []
+            for j in range(i + 1, len(lines)):
+                if lines[j].startswith("## "):
+                    break
+                section_lines.append(lines[j])
+            plan_context = "\n".join(section_lines).strip()
+        elif conventions_pattern.match(line):
+            section_lines = []
+            for j in range(i + 1, len(lines)):
+                if lines[j].startswith("## "):
+                    break
+                section_lines.append(lines[j])
+            plan_conventions = "\n".join(section_lines).strip()
 
     # Split into task sections
     tasks: list[Task] = []
@@ -133,4 +157,10 @@ def parse_plan(path: Path) -> Plan:
     for task in tasks:
         task.depends_on = [slug_to_id.get(d, d) for d in task.depends_on]
 
-    return Plan(title=plan_title, tasks=tasks, source=path)
+    return Plan(
+        title=plan_title,
+        tasks=tasks,
+        source=path,
+        context=plan_context,
+        conventions=plan_conventions,
+    )
