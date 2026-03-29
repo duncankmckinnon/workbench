@@ -2,7 +2,7 @@
 
 import asyncio
 import json
-from unittest.mock import AsyncMock, patch, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -25,34 +25,46 @@ class TestRunAgentTmux:
     def test_run_agent_success_tmux(self, sample_task, sample_worktree, tmp_path):
         """Mock run_in_tmux returning (0, json), verify AgentResult.status == DONE."""
         output = json.dumps({"result": "all good", "cost_usd": {"input": 0.01}})
-        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, output)), \
-             patch("workbench.agents.get_main_branch", return_value="main"), \
-             patch("workbench.agents.get_diff", return_value=""):
-            result = asyncio.run(run_agent(
-                role=Role.IMPLEMENTOR,
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                agent_cmd="claude",
-                use_tmux=True,
-            ))
+        with (
+            patch(
+                "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, output)
+            ),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_diff", return_value=""),
+        ):
+            result = asyncio.run(
+                run_agent(
+                    role=Role.IMPLEMENTOR,
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                )
+            )
 
         assert result.status == TaskStatus.DONE
         assert result.task_id == "task-1"
 
     def test_run_agent_failure_tmux(self, sample_task, sample_worktree, tmp_path):
         """Mock returning (1, "error"), verify FAILED."""
-        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(1, "error")), \
-             patch("workbench.agents.get_main_branch", return_value="main"), \
-             patch("workbench.agents.get_diff", return_value=""):
-            result = asyncio.run(run_agent(
-                role=Role.IMPLEMENTOR,
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                agent_cmd="claude",
-                use_tmux=True,
-            ))
+        with (
+            patch(
+                "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(1, "error")
+            ),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_diff", return_value=""),
+        ):
+            result = asyncio.run(
+                run_agent(
+                    role=Role.IMPLEMENTOR,
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                )
+            )
 
         assert result.status == TaskStatus.FAILED
 
@@ -64,17 +76,25 @@ class TestRunAgentSubprocess:
         mock_proc.communicate.return_value = (b"done", b"")
         mock_proc.returncode = 0
 
-        with patch("workbench.agents.asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=mock_proc) as mock_exec, \
-             patch("workbench.agents.get_main_branch", return_value="main"), \
-             patch("workbench.agents.get_diff", return_value=""):
-            result = asyncio.run(run_agent(
-                role=Role.IMPLEMENTOR,
-                task=sample_task,
-                worktree=sample_worktree,
-                repo=tmp_path,
-                agent_cmd="claude",
-                use_tmux=False,
-            ))
+        with (
+            patch(
+                "workbench.agents.asyncio.create_subprocess_exec",
+                new_callable=AsyncMock,
+                return_value=mock_proc,
+            ) as mock_exec,
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_diff", return_value=""),
+        ):
+            result = asyncio.run(
+                run_agent(
+                    role=Role.IMPLEMENTOR,
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=False,
+                )
+            )
 
         mock_exec.assert_called_once()
         assert result.status == TaskStatus.DONE

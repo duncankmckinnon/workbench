@@ -17,7 +17,9 @@ def _commit_file(repo, filename, content, message):
     subprocess.run(["git", "add", filename], cwd=repo, capture_output=True, check=True)
     subprocess.run(
         ["git", "commit", "-m", message],
-        cwd=repo, capture_output=True, check=True,
+        cwd=repo,
+        capture_output=True,
+        check=True,
     )
 
 
@@ -31,7 +33,9 @@ def test_create_session_branch(git_repo):
     # Verify the branch exists
     result = subprocess.run(
         ["git", "branch", "--list", branch],
-        cwd=git_repo, capture_output=True, text=True,
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
     )
     assert branch in result.stdout
 
@@ -64,13 +68,17 @@ def test_worktree_cleanup(git_repo, monkeypatch):
     # Worktree should no longer be listed
     result = subprocess.run(
         ["git", "worktree", "list"],
-        cwd=git_repo, capture_output=True, text=True,
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
     )
     assert "cleanup-test" not in result.stdout
     # Branch should be deleted
     result = subprocess.run(
         ["git", "branch", "--list", branch],
-        cwd=git_repo, capture_output=True, text=True,
+        cwd=git_repo,
+        capture_output=True,
+        text=True,
     )
     assert branch not in result.stdout
 
@@ -138,26 +146,34 @@ def test_complete_merge(git_repo):
         merge_dir = git_repo / ".workbench" / "_merge_manual"
         subprocess.run(
             ["git", "worktree", "add", str(merge_dir), session],
-            cwd=git_repo, capture_output=True, check=True,
+            cwd=git_repo,
+            capture_output=True,
+            check=True,
         )
         # Start the merge (will conflict)
         subprocess.run(
             ["git", "merge", wt2.branch],
-            cwd=merge_dir, capture_output=True,
+            cwd=merge_dir,
+            capture_output=True,
         )
         # Resolve by choosing a final version
         (merge_dir / "shared.txt").write_text("resolved version")
-        subprocess.run(["git", "add", "shared.txt"], cwd=merge_dir, capture_output=True, check=True)
+        subprocess.run(
+            ["git", "add", "shared.txt"], cwd=merge_dir, capture_output=True, check=True
+        )
         result = subprocess.run(
             ["git", "commit", "--no-edit"],
-            cwd=merge_dir, capture_output=True, text=True,
+            cwd=merge_dir,
+            capture_output=True,
+            text=True,
         )
         assert result.returncode == 0
 
         # Clean up merge worktree
         subprocess.run(
             ["git", "worktree", "remove", str(merge_dir), "--force"],
-            cwd=git_repo, capture_output=True,
+            cwd=git_repo,
+            capture_output=True,
         )
     finally:
         wt1.cleanup()
@@ -178,11 +194,14 @@ def test_complete_merge_unresolved(git_repo):
         merge_dir = git_repo / ".workbench" / "_merge_manual"
         subprocess.run(
             ["git", "worktree", "add", str(merge_dir), session],
-            cwd=git_repo, capture_output=True, check=True,
+            cwd=git_repo,
+            capture_output=True,
+            check=True,
         )
         merge_result = subprocess.run(
             ["git", "merge", wt2.branch],
-            cwd=merge_dir, capture_output=True,
+            cwd=merge_dir,
+            capture_output=True,
         )
         assert merge_result.returncode != 0
 
@@ -202,7 +221,8 @@ def test_complete_merge_unresolved(git_repo):
         subprocess.run(["git", "merge", "--abort"], cwd=merge_dir, capture_output=True)
         subprocess.run(
             ["git", "worktree", "remove", str(merge_dir), "--force"],
-            cwd=git_repo, capture_output=True,
+            cwd=git_repo,
+            capture_output=True,
         )
     finally:
         wt1.cleanup()

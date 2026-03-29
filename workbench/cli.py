@@ -15,7 +15,6 @@ from .orchestrator import run_plan
 from .plan_parser import parse_plan
 from .tmux import check_tmux_available
 
-
 console = Console()
 
 
@@ -121,7 +120,9 @@ def _install_skills(agent: str | None, symlink: bool) -> None:
 
     elif agent == "codex":
         if symlink:
-            console.print("  [yellow]Note: --symlink is not supported for codex (content is appended to a single file). Using copy.[/yellow]")
+            console.print(
+                "  [yellow]Note: --symlink is not supported for codex (content is appended to a single file). Using copy.[/yellow]"
+            )
         target_dir = Path.cwd() / ".codex"
         target_dir.mkdir(parents=True, exist_ok=True)
         instructions_path = target_dir / "instructions.md"
@@ -166,15 +167,49 @@ def main():
 @click.option("--max-retries", "-r", default=2, help="Max fix attempts per failed stage.")
 @click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, etc).")
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
-@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
-@click.option("--session-branch", "-b", default=None, help="Resume from an existing session branch (e.g. workbench-1).")
-@click.option("--start-wave", "-w", default=1, type=int, help="Start from this wave number (1-indexed, default: 1).")
-@click.option("--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions.")
-@click.option("--tdd", is_flag=True, help="Test-driven development mode: write tests first, then implement.")
-@click.option("--implementor-directive", default=None, type=str, help="Override the implementor agent's instructions.")
-@click.option("--tester-directive", default=None, type=str, help="Override the tester agent's instructions.")
-@click.option("--reviewer-directive", default=None, type=str, help="Override the reviewer agent's instructions.")
-@click.option("--fixer-directive", default=None, type=str, help="Override the fixer agent's instructions.")
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
+@click.option(
+    "--session-branch",
+    "-b",
+    default=None,
+    help="Resume from an existing session branch (e.g. workbench-1).",
+)
+@click.option(
+    "--start-wave",
+    "-w",
+    default=1,
+    type=int,
+    help="Start from this wave number (1-indexed, default: 1).",
+)
+@click.option(
+    "--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions."
+)
+@click.option(
+    "--tdd", is_flag=True, help="Test-driven development mode: write tests first, then implement."
+)
+@click.option(
+    "--implementor-directive",
+    default=None,
+    type=str,
+    help="Override the implementor agent's instructions.",
+)
+@click.option(
+    "--tester-directive", default=None, type=str, help="Override the tester agent's instructions."
+)
+@click.option(
+    "--reviewer-directive",
+    default=None,
+    type=str,
+    help="Override the reviewer agent's instructions.",
+)
+@click.option(
+    "--fixer-directive", default=None, type=str, help="Override the fixer agent's instructions."
+)
 def run(
     plan_path: Path,
     max_concurrent: int,
@@ -238,21 +273,23 @@ def run(
         console.print(f"  {i}. {task.title}{files}{deps}")
 
     console.print()
-    asyncio.run(run_plan(
-        plan=plan,
-        repo=repo,
-        max_concurrent=max_concurrent,
-        skip_test=skip_test,
-        skip_review=skip_review,
-        max_retries=max_retries,
-        agent_cmd=agent,
-        cleanup_on_done=cleanup,
-        session_branch=session_branch,
-        start_wave=start_wave,
-        use_tmux=not no_tmux,
-        directives=directives or None,
-        tdd=tdd,
-    ))
+    asyncio.run(
+        run_plan(
+            plan=plan,
+            repo=repo,
+            max_concurrent=max_concurrent,
+            skip_test=skip_test,
+            skip_review=skip_review,
+            max_retries=max_retries,
+            agent_cmd=agent,
+            cleanup_on_done=cleanup,
+            session_branch=session_branch,
+            start_wave=start_wave,
+            use_tmux=not no_tmux,
+            directives=directives or None,
+            tdd=tdd,
+        )
+    )
 
 
 @main.command()
@@ -269,7 +306,9 @@ def preview(plan_path: Path):
 
     waves = plan.independent_groups
     for wave_idx, wave in enumerate(waves):
-        console.print(f"[bold cyan]Wave {wave_idx + 1}[/bold cyan] ({len(wave)} tasks, run in parallel)")
+        console.print(
+            f"[bold cyan]Wave {wave_idx + 1}[/bold cyan] ({len(wave)} tasks, run in parallel)"
+        )
         for task in wave:
             console.print(f"  • [bold]{task.title}[/bold]")
             if task.files:
@@ -323,7 +362,9 @@ def clean(repo: Path | None):
     for line in result.stdout.splitlines():
         if line.startswith("worktree ") and ".workbench" in line:
             path = line.split("worktree ", 1)[1]
-            subprocess.run(["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True)
+            subprocess.run(
+                ["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True
+            )
             removed += 1
 
     # Clean up wb/ branches
@@ -343,7 +384,12 @@ def clean(repo: Path | None):
 
 @main.command()
 @click.option("--cleanup", is_flag=True, help="Also remove worktrees and branches.")
-@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
 def stop(cleanup: bool, repo: Path | None):
     """Stop all running workbench agents."""
     # Find tmux sessions with wb- prefix
@@ -355,10 +401,7 @@ def stop(cleanup: bool, repo: Path | None):
 
     wb_sessions = []
     if result.returncode == 0:
-        wb_sessions = [
-            line for line in result.stdout.splitlines()
-            if line.startswith("wb-")
-        ]
+        wb_sessions = [line for line in result.stdout.splitlines() if line.startswith("wb-")]
 
     if wb_sessions:
         for session_name in wb_sessions:
@@ -386,7 +429,9 @@ def stop(cleanup: bool, repo: Path | None):
         for line in result.stdout.splitlines():
             if line.startswith("worktree ") and ".workbench" in line:
                 path = line.split("worktree ", 1)[1]
-                subprocess.run(["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True)
+                subprocess.run(
+                    ["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True
+                )
                 removed += 1
 
         # Clean up wb/ branches
@@ -405,7 +450,12 @@ def stop(cleanup: bool, repo: Path | None):
 
 
 @main.command()
-@click.option("--agent", type=click.Choice(["claude", "cursor", "codex", "manual"]), default=None, help="Target agent platform.")
+@click.option(
+    "--agent",
+    type=click.Choice(["claude", "cursor", "codex", "manual"]),
+    default=None,
+    help="Target agent platform.",
+)
 @click.option("--symlink", is_flag=True, help="Symlink instead of copy (for development).")
 def init(agent: str | None, symlink: bool):
     """Install workbench skills for your agent platform."""
@@ -413,9 +463,19 @@ def init(agent: str | None, symlink: bool):
 
 
 @main.command()
-@click.option("--agent", type=click.Choice(["claude", "cursor", "codex", "manual"]), default=None, help="Target agent platform.")
+@click.option(
+    "--agent",
+    type=click.Choice(["claude", "cursor", "codex", "manual"]),
+    default=None,
+    help="Target agent platform.",
+)
 @click.option("--symlink", is_flag=True, help="Symlink skills instead of copy (for development).")
-@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None, help="Repo path (default: auto-detect).")
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
 def setup(agent: str | None, symlink: bool, repo: Path | None):
     """Set up a repo for workbench: create .workbench/ and install skills."""
     repo = repo or _find_repo_root()

@@ -24,8 +24,7 @@ class AgentAdapter(ABC):
 
 
 ALLOWED_TOOLS = (
-    "Edit,Write,Read,Glob,Grep,"
-    "Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)"
+    "Edit,Write,Read,Glob,Grep," "Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)"
 )
 
 
@@ -36,9 +35,13 @@ class ClaudeAdapter(AgentAdapter):
 
     def build_command(self, prompt: str, cwd: Path) -> list[str]:
         return [
-            "claude", "-p", prompt,
-            "--output-format", "json",
-            "--allowedTools", ALLOWED_TOOLS,
+            "claude",
+            "-p",
+            prompt,
+            "--output-format",
+            "json",
+            "--allowedTools",
+            ALLOWED_TOOLS,
         ]
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
@@ -58,8 +61,11 @@ class CodexAdapter(AgentAdapter):
 
     def build_command(self, prompt: str, cwd: Path) -> list[str]:
         return [
-            "codex", "-q", "--full-auto",
-            "--approval-mode", "full-auto",
+            "codex",
+            "-q",
+            "--full-auto",
+            "--approval-mode",
+            "full-auto",
             prompt,
         ]
 
@@ -79,9 +85,7 @@ class ConfigAdapter(AgentAdapter):
     json_cost_key: str = "cost_usd"
 
     def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        resolved_args = [
-            a.replace("{prompt}", prompt) for a in self.args
-        ]
+        resolved_args = [a.replace("{prompt}", prompt) for a in self.args]
         return [self.command, *resolved_args]
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
@@ -118,8 +122,7 @@ def _load_yaml_config(config_path: Path) -> dict[str, Any]:
         # Fall back to a basic parser if PyYAML isn't installed.
         # For robustness, we require PyYAML for YAML configs.
         raise ImportError(
-            "PyYAML is required for custom agent configs. "
-            "Install it with: pip install pyyaml"
+            "PyYAML is required for custom agent configs. " "Install it with: pip install pyyaml"
         )
     with open(config_path) as f:
         return yaml.safe_load(f) or {}

@@ -26,9 +26,13 @@ class TestClaudeAdapter:
     def test_build_command(self, tmp_path):
         cmd = self.adapter.build_command("do something", tmp_path)
         assert cmd == [
-            "claude", "-p", "do something",
-            "--output-format", "json",
-            "--allowedTools", ALLOWED_TOOLS,
+            "claude",
+            "-p",
+            "do something",
+            "--output-format",
+            "json",
+            "--allowedTools",
+            ALLOWED_TOOLS,
         ]
 
     def test_parse_output_valid_json(self):
@@ -63,8 +67,11 @@ class TestCodexAdapter:
     def test_build_command(self, tmp_path):
         cmd = self.adapter.build_command("fix bug", tmp_path)
         assert cmd == [
-            "codex", "-q", "--full-auto",
-            "--approval-mode", "full-auto",
+            "codex",
+            "-q",
+            "--full-auto",
+            "--approval-mode",
+            "full-auto",
             "fix bug",
         ]
 
@@ -212,10 +219,7 @@ class TestGetAdapter:
         """Config entry for 'claude' should override the built-in ClaudeAdapter."""
         config_file = tmp_path / "agents.yaml"
         config_file.write_text(
-            "agents:\n"
-            "  claude:\n"
-            "    command: custom-claude\n"
-            "    args: ['{prompt}']\n"
+            "agents:\n" "  claude:\n" "    command: custom-claude\n" "    args: ['{prompt}']\n"
         )
         adapter = get_adapter("claude", config_path=config_file)
         assert isinstance(adapter, ConfigAdapter)

@@ -39,11 +39,13 @@ async def test_run_plan_tdd_mode(tmp_path):
         captured_kwargs.update(kwargs)
         return []
 
-    with patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"), \
-         patch("workbench.orchestrator.create_worktree") as mock_wt, \
-         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline), \
-         patch("workbench.orchestrator.merge_into_session") as mock_merge, \
-         patch("workbench.orchestrator.get_main_branch", return_value="main"):
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
 
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
@@ -70,11 +72,13 @@ async def test_run_plan_tdd_false_by_default(tmp_path):
         captured_kwargs.update(kwargs)
         return []
 
-    with patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"), \
-         patch("workbench.orchestrator.create_worktree") as mock_wt, \
-         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline), \
-         patch("workbench.orchestrator.merge_into_session") as mock_merge, \
-         patch("workbench.orchestrator.get_main_branch", return_value="main"):
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
 
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)

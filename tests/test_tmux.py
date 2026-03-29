@@ -10,10 +10,10 @@ import pytest
 
 from workbench.tmux import _sanitize_session_name, check_tmux_available, run_in_tmux
 
-
 # ---------------------------------------------------------------------------
 # check_tmux_available
 # ---------------------------------------------------------------------------
+
 
 class TestCheckTmuxAvailable:
     def test_returns_true_when_tmux_found(self):
@@ -33,6 +33,7 @@ class TestCheckTmuxAvailable:
 # ---------------------------------------------------------------------------
 # _sanitize_session_name
 # ---------------------------------------------------------------------------
+
 
 class TestSanitizeSessionName:
     def test_replaces_slashes(self):
@@ -61,6 +62,7 @@ class TestSanitizeSessionName:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_process(returncode=0):
     """Create a mock asyncio.subprocess.Process."""
     proc = AsyncMock()
@@ -79,6 +81,7 @@ def _setup_tmpdir():
 # run_in_tmux – success path
 # ---------------------------------------------------------------------------
 
+
 class TestRunInTmuxSuccess:
     @pytest.mark.asyncio
     async def test_returns_exitcode_and_output(self, tmp_path):
@@ -93,8 +96,10 @@ class TestRunInTmuxSuccess:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test-session",
                 ["echo", "hello", "world"],
@@ -118,8 +123,10 @@ class TestRunInTmuxSuccess:
             calls.append(args)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "my-session",
                 ["ls"],
@@ -132,8 +139,8 @@ class TestRunInTmuxSuccess:
         tmux_cmds = [c for c in calls if c[0] == "tmux"]
         assert len(tmux_cmds) == 3
         assert tmux_cmds[0][1] == "kill-session"  # stale cleanup
-        assert tmux_cmds[1][1] == "new-session"   # create session
-        assert tmux_cmds[2][1] == "kill-session"   # final cleanup
+        assert tmux_cmds[1][1] == "new-session"  # create session
+        assert tmux_cmds[2][1] == "kill-session"  # final cleanup
 
     @pytest.mark.asyncio
     async def test_writes_run_script(self, tmp_path):
@@ -154,8 +161,10 @@ class TestRunInTmuxSuccess:
                     f.write("0")
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["echo", "hello"],
@@ -185,8 +194,10 @@ class TestRunInTmuxSuccess:
                     f.write("0")
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["ls"],
@@ -210,8 +221,10 @@ class TestRunInTmuxSuccess:
             calls.append(args)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "path/to session",
                 ["ls"],
@@ -237,8 +250,10 @@ class TestRunInTmuxSuccess:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test",
                 ["false"],
@@ -255,6 +270,7 @@ class TestRunInTmuxSuccess:
 # run_in_tmux – timeout
 # ---------------------------------------------------------------------------
 
+
 class TestRunInTmuxTimeout:
     @pytest.mark.asyncio
     async def test_timeout_returns_error(self, tmp_path):
@@ -264,8 +280,10 @@ class TestRunInTmuxTimeout:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test-timeout",
                 ["sleep", "9999"],
@@ -288,8 +306,10 @@ class TestRunInTmuxTimeout:
             calls.append(args)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test-timeout",
                 ["sleep", "9999"],
@@ -309,8 +329,10 @@ class TestRunInTmuxTimeout:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["sleep", "9999"],
@@ -326,6 +348,7 @@ class TestRunInTmuxTimeout:
 # run_in_tmux – edge cases
 # ---------------------------------------------------------------------------
 
+
 class TestRunInTmuxSessionCreateFailure:
     @pytest.mark.asyncio
     async def test_returns_error_on_session_create_failure(self, tmp_path):
@@ -340,8 +363,10 @@ class TestRunInTmuxSessionCreateFailure:
                 return _make_mock_process(1)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test",
                 ["ls"],
@@ -365,8 +390,10 @@ class TestRunInTmuxSessionCreateFailure:
                 return _make_mock_process(1)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["ls"],
@@ -388,8 +415,10 @@ class TestRunInTmuxExitcodeParsingEdgeCases:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test",
                 ["true"],
@@ -412,8 +441,10 @@ class TestRunInTmuxEdgeCases:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             rc, output = await run_in_tmux(
                 "test",
                 ["true"],
@@ -434,8 +465,10 @@ class TestRunInTmuxEdgeCases:
         async def fake_exec(*args, **kwargs):
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["true"],
@@ -458,8 +491,10 @@ class TestRunInTmuxEdgeCases:
             calls.append(args)
             return _make_mock_process(0)
 
-        with patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec), \
-             patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir):
+        with (
+            patch("workbench.tmux.asyncio.create_subprocess_exec", side_effect=fake_exec),
+            patch("workbench.tmux.tempfile.mkdtemp", return_value=real_tmpdir),
+        ):
             await run_in_tmux(
                 "test",
                 ["ls"],

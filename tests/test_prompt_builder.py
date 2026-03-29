@@ -11,7 +11,6 @@ from workbench.agents import DEFAULT_DIRECTIVES, Role, build_prompt
 from workbench.plan_parser import Task, parse_plan
 from workbench.worktree import Worktree
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -63,11 +62,7 @@ def test_parse_plan_extracts_conventions(tmp_path: Path):
 
 def test_parse_plan_no_context(tmp_path: Path):
     plan_md = tmp_path / "plan.md"
-    plan_md.write_text(
-        "# My Plan\n\n"
-        "## Task: Do something\n\n"
-        "Description here.\n"
-    )
+    plan_md.write_text("# My Plan\n\n" "## Task: Do something\n\n" "Description here.\n")
     plan = parse_plan(plan_md)
     assert plan.context == ""
     assert plan.conventions == ""

@@ -191,17 +191,7 @@ Sessions are named `wb-task-<N>-<role>`.
 
 ## Development
 
-```bash
-pip install -e ".[dev]"
-pytest                    # 114 tests
-```
-
-Version is derived from git tags via `setuptools-scm`. Published to PyPI as [`wbcli`](https://pypi.org/project/wbcli/). To release:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0    # triggers CI → PyPI + GitHub Release
-```
+See [CONTRIBUTING.md](CONTRIBUTING.md) for setup, code style, testing, and release instructions.
 
 ## License
 
