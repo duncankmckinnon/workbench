@@ -50,9 +50,16 @@ def get_main_branch(repo: Path) -> str:
     return "master"
 
 
-def create_session_branch(repo: Path) -> str:
-    """Create a clean session branch off main (workbench-1, workbench-2, etc)."""
-    base = get_main_branch(repo)
+def create_session_branch(repo: Path, local: bool = False, base: str | None = None) -> str:
+    """Create a clean session branch off a base branch (workbench-1, workbench-2, etc).
+
+    Args:
+        repo: Path to the git repository.
+        local: If True, branch from the local ref. If False (default), fetch
+            from origin first and prefer origin/<base>.
+        base: Base branch to branch from. Defaults to main/master.
+    """
+    base = base or get_main_branch(repo)
 
     # Find the next available session number
     result = subprocess.run(
@@ -74,8 +81,26 @@ def create_session_branch(repo: Path) -> str:
     next_num = max(existing, default=0) + 1
     session_branch = f"workbench-{next_num}"
 
+    if local:
+        branch_point = base
+    else:
+        # Fetch latest from remote so we branch from up-to-date main
+        subprocess.run(
+            ["git", "fetch", "origin", base],
+            cwd=repo,
+            capture_output=True,
+        )
+
+        # Prefer origin/base if it exists, otherwise fall back to local base
+        ref_check = subprocess.run(
+            ["git", "rev-parse", "--verify", f"origin/{base}"],
+            cwd=repo,
+            capture_output=True,
+        )
+        branch_point = f"origin/{base}" if ref_check.returncode == 0 else base
+
     subprocess.run(
-        ["git", "branch", session_branch, base],
+        ["git", "branch", session_branch, branch_point],
         cwd=repo,
         capture_output=True,
         text=True,

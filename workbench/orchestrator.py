@@ -127,6 +127,8 @@ async def run_plan(
     use_tmux: bool = True,
     directives: dict[Role, str] | None = None,
     tdd: bool = False,
+    local: bool = False,
+    base_branch: str | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -136,7 +138,7 @@ async def run_plan(
 
     # Use existing session branch or create a new one
     if session_branch is None:
-        session_branch = create_session_branch(repo)
+        session_branch = create_session_branch(repo, local=local, base=base_branch)
 
     console.print(f"\n[bold]Plan:[/bold] {plan.title}")
     console.print(f"[bold]Tasks:[/bold] {len(plan.tasks)} across {len(waves)} wave(s)")
