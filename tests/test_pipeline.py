@@ -7,8 +7,9 @@ from unittest.mock import AsyncMock, call, patch
 
 import pytest
 
-from workbench.agents import TDD_DIRECTIVES, AgentResult, Role, TaskStatus, run_pipeline
+from workbench.agents import DEFAULT_DIRECTIVES, TDD_DIRECTIVES, AgentResult, Role, TaskStatus, run_pipeline
 from workbench.plan_parser import Task
+from workbench.profile import Profile, RoleConfig
 from workbench.worktree import Worktree
 
 
@@ -243,3 +244,135 @@ class TestTDDVerificationFailsThenFixes:
             Role.TESTER,
             Role.REVIEWER,
         ]
+
+
+# ---------------------------------------------------------------------------
+# Profile integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestPipelineUsesProfileAgent:
+    def test_pipeline_uses_profile_agent(self, sample_task, sample_worktree, tmp_path):
+        """Profile with reviewer.agent='gemini' should pass that agent to run_agent for the reviewer role."""
+        profile = Profile.default()
+        profile.reviewer.agent = "gemini"
+
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            captured_calls.append({"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            return _pass_result(args[0])
+
+        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        # Find the reviewer call
+        reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
+        assert len(reviewer_calls) == 1
+        # The reviewer should use the profile's agent
+        assert reviewer_calls[0]["agent_cmd"] == "gemini"
+
+        # Other roles should still use default "claude"
+        impl_calls = [c for c in captured_calls if c["role"] == Role.IMPLEMENTOR]
+        assert len(impl_calls) == 1
+        assert impl_calls[0]["agent_cmd"] == "claude"
+
+
+class TestPipelineUsesProfileDirective:
+    def test_pipeline_uses_profile_directive(self, sample_task, sample_worktree, tmp_path):
+        """Profile with custom tester directive should pass it through to run_agent."""
+        profile = Profile.default()
+        custom_directive = "Custom tester directive from profile"
+        profile.tester.directive = custom_directive
+
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            captured_calls.append({"role": args[0], **kwargs})
+            return _pass_result(args[0])
+
+        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        # The tester call should use the profile's directive
+        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
+        assert len(tester_calls) == 1
+        assert tester_calls[0]["directive"] == custom_directive
+
+
+class TestPipelineCLIDirectiveOverridesProfile:
+    def test_pipeline_cli_directive_overrides_profile(
+        self, sample_task, sample_worktree, tmp_path
+    ):
+        """CLI directive takes priority over profile directive for the same role."""
+        profile = Profile.default()
+        profile.tester.directive = "Profile tester directive"
+        cli_tester_directive = "CLI tester directive wins"
+
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            captured_calls.append({"role": args[0], **kwargs})
+            return _pass_result(args[0])
+
+        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                    directives={Role.TESTER: cli_tester_directive},
+                )
+            )
+
+        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
+        assert len(tester_calls) == 1
+        # CLI directive should win over profile
+        assert tester_calls[0]["directive"] == cli_tester_directive
+
+
+class TestPipelineProfileNoneUsesDefaults:
+    def test_pipeline_profile_none_uses_defaults(self, sample_task, sample_worktree, tmp_path):
+        """profile=None should behave the same as before — default directives, default agent."""
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            captured_calls.append({"role": args[0], **kwargs})
+            return _pass_result(args[0])
+
+        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=None,
+                )
+            )
+
+        # All calls should use default agent_cmd
+        for c in captured_calls:
+            assert c.get("agent_cmd", "claude") == "claude"
+
+        # Directives should be None (letting run_agent apply defaults)
+        impl_calls = [c for c in captured_calls if c["role"] == Role.IMPLEMENTOR]
+        assert impl_calls[0].get("directive") is None
