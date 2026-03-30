@@ -299,6 +299,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
 | `--local` | Install skills to repo-local paths instead of global |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
+| `--profile` | Also create a profile.yaml with the detected agent |
 
 ### `wb setup`
 
@@ -306,6 +307,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 |---|---|
 | `--agent NAME` | Target platform (auto-detected if omitted) |
 | `--symlink` | Symlink skills instead of copy |
+| `--profile` | Also create a profile.yaml with the detected agent |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb stop`

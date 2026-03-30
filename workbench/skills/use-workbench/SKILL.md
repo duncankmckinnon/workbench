@@ -322,8 +322,10 @@ In TDD mode, the tester writes comprehensive failing tests first. The implemento
 - `wb stop --cleanup` — also remove worktrees and branches
 - `wb clean` — remove all workbench worktrees
 - `wb setup` — prepare a repo for workbench use
+- `wb setup --profile` — also create a profile.yaml with the detected agent
 - `wb init` — install workbench skills for your agent platform
 - `wb init --agent gemini` — install skills for Gemini CLI
+- `wb init --agent gemini --profile` — install skills and create profile with gemini as default
 - `wb init --agent claude --local` — install to repo-local .claude/skills/ + .agents/skills/
 - `wb init --agent gemini --local` — install to repo-local .agents/skills/
 - `wb profile init` — create profile.yaml from defaults

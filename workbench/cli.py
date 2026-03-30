@@ -58,7 +58,7 @@ def _discover_skills(skills_dir: Path) -> list[tuple[str, Path]]:
 def _detect_agent() -> str:
     """Auto-detect the agent platform from PATH."""
     found = []
-    for name in ("claude", "codex", "cursor"):
+    for name in ("claude", "gemini", "codex", "cursor"):
         if shutil.which(name):
             found.append(name)
 
@@ -580,9 +580,30 @@ def stop(cleanup: bool, repo: Path | None):
 @click.option(
     "--local", is_flag=True, help="Install skills at project level instead of user level."
 )
-def init(agent: str | None, symlink: bool, local: bool):
+@click.option(
+    "--profile", "create_profile", is_flag=True, help="Also create a profile.yaml with the detected agent."
+)
+def init(agent: str | None, symlink: bool, local: bool, create_profile: bool):
     """Install workbench skills for your agent platform."""
-    _install_skills(agent, symlink, local=local)
+    resolved_agent = agent or _detect_agent()
+    _install_skills(resolved_agent, symlink, local=local)
+
+
+    if create_profile:
+        repo = _find_repo_root() if local else None
+        target_dir = Path.home() / ".workbench" if not local else repo / ".workbench"
+        target = target_dir / "profile.yaml"
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if target.exists():
+            if not click.confirm(f"{target} already exists. Overwrite?"):
+                return
+        p = Profile.default()
+        if resolved_agent != "claude":
+            for role_name in Profile._ROLE_NAMES:
+                getattr(p, role_name).agent = resolved_agent
+        p.save(target)
+        console.print(f"Created profile: {target}")
 
 
 @main.command()
@@ -599,7 +620,10 @@ def init(agent: str | None, symlink: bool, local: bool):
     default=None,
     help="Repo path (default: auto-detect).",
 )
-def setup(agent: str | None, symlink: bool, repo: Path | None):
+@click.option(
+    "--profile", "create_profile", is_flag=True, help="Also create a profile.yaml with the detected agent."
+)
+def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: bool):
     """Set up a repo for workbench: create .workbench/ and install skills."""
     repo = repo or _find_repo_root()
     wb_dir = repo / ".workbench"
@@ -609,7 +633,22 @@ def setup(agent: str | None, symlink: bool, repo: Path | None):
         wb_dir.mkdir(exist_ok=True)
         console.print(f"Created {wb_dir}/")
 
-    _install_skills(agent, symlink, local=True, repo=repo)
+    resolved_agent = agent or _detect_agent()
+    _install_skills(resolved_agent, symlink, local=True, repo=repo)
+
+    if create_profile:
+        target = wb_dir / "profile.yaml"
+        if target.exists():
+            if not click.confirm(f"{target} already exists. Overwrite?"):
+                console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
+                return
+        p = Profile.default()
+        if resolved_agent != "claude":
+            for role_name in Profile._ROLE_NAMES:
+                getattr(p, role_name).agent = resolved_agent
+        p.save(target)
+        console.print(f"Created profile: {target}")
+
     console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
 
 
