@@ -77,15 +77,31 @@ class Profile:
     def save(self, path: Path) -> None:
         """Write the current profile state to a YAML file."""
         path.parent.mkdir(parents=True, exist_ok=True)
+
+        # Use a custom representer for clean multiline block scalars
+        class _Dumper(yaml.SafeDumper):
+            pass
+
+        def _str_representer(dumper: yaml.Dumper, data: str) -> yaml.ScalarNode:
+            if "\n" in data:
+                return dumper.represent_scalar("tag:yaml.org,2002:str", data, style="|")
+            return dumper.represent_scalar("tag:yaml.org,2002:str", data)
+
+        _Dumper.add_representer(str, _str_representer)
+
         roles_dict: dict[str, Any] = {}
         for role_name in self._ROLE_NAMES:
             cfg: RoleConfig = getattr(self, role_name)
             roles_dict[role_name] = {
                 "agent": cfg.agent,
-                "directive": cfg.directive,
+                "directive": cfg.directive.strip(),
             }
         data = {"roles": roles_dict}
-        path.write_text(yaml.dump(data, default_flow_style=False))
+        path.write_text(
+            yaml.dump(
+                data, Dumper=_Dumper, default_flow_style=False, sort_keys=False, allow_unicode=True
+            )
+        )
 
     @staticmethod
     def _profile_filename(name: str | None = None) -> str:
