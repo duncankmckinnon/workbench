@@ -101,7 +101,11 @@ def _install_to_agents_skills(skills: list[tuple[str, Path]], repo: Path, symlin
 
 
 def _install_skills(
-    agent: str | None, symlink: bool, local: bool = False, repo: Path | None = None
+    agent: str | None,
+    symlink: bool,
+    local: bool = False,
+    repo: Path | None = None,
+    update: bool = False,
 ) -> None:
     """Install bundled skill files for the given agent platform."""
     agent = agent or _detect_agent()
@@ -128,7 +132,7 @@ def _install_skills(
             src_dir = src.parent
             dest_dir = target_dir / name
             dest = dest_dir / "SKILL.md"
-            if dest.exists() and not symlink:
+            if dest.exists() and not symlink and not update:
                 if dest.read_text() == src.read_text():
                     console.print(f"  [dim]Skipping /{name} (already up to date)[/dim]")
                     continue
@@ -160,7 +164,7 @@ def _install_skills(
             src_dir = src.parent
             dest_dir = target_dir / name
             dest = dest_dir / "SKILL.md"
-            if dest.exists() and not symlink:
+            if dest.exists() and not symlink and not update:
                 if dest.read_text() == src.read_text():
                     console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
                     continue
@@ -186,7 +190,7 @@ def _install_skills(
         target_dir.mkdir(parents=True, exist_ok=True)
         for name, src in skills:
             dest = target_dir / f"{name}.md"
-            if dest.exists() and not symlink:
+            if dest.exists() and not symlink and not update:
                 if dest.read_text() == src.read_text():
                     console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
                     continue
@@ -305,6 +309,12 @@ def main():
     help="Named profile to use (resolves profile.<name>.yaml).",
 )
 @click.option(
+    "--name",
+    "session_name",
+    default=None,
+    help="Name the session branch (creates workbench-<name> instead of workbench-<N>).",
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -339,6 +349,7 @@ def run(
     base: str | None,
     profile_path: Path | None,
     profile_name: str | None,
+    session_name: str | None,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -408,6 +419,7 @@ def run(
             base_branch=base,
             profile_path=profile_path,
             profile_name=profile_name,
+            session_name=session_name,
         )
     )
 
@@ -586,10 +598,11 @@ def stop(cleanup: bool, repo: Path | None):
     is_flag=True,
     help="Also create a profile.yaml with the detected agent.",
 )
-def init(agent: str | None, symlink: bool, local: bool, create_profile: bool):
+@click.option("--update", is_flag=True, help="Force-update skills to the latest version.")
+def init(agent: str | None, symlink: bool, local: bool, create_profile: bool, update: bool):
     """Install workbench skills for your agent platform."""
     resolved_agent = agent or _detect_agent()
-    _install_skills(resolved_agent, symlink, local=local)
+    _install_skills(resolved_agent, symlink, local=local, update=update)
 
     if create_profile:
         repo = _find_repo_root() if local else None
@@ -628,7 +641,8 @@ def init(agent: str | None, symlink: bool, local: bool, create_profile: bool):
     is_flag=True,
     help="Also create a profile.yaml with the detected agent.",
 )
-def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: bool):
+@click.option("--update", is_flag=True, help="Force-update skills to the latest version.")
+def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: bool, update: bool):
     """Set up a repo for workbench: create .workbench/ and install skills."""
     repo = repo or _find_repo_root()
     wb_dir = repo / ".workbench"
@@ -639,7 +653,7 @@ def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: b
         console.print(f"Created {wb_dir}/")
 
     resolved_agent = agent or _detect_agent()
-    _install_skills(resolved_agent, symlink, local=True, repo=repo)
+    _install_skills(resolved_agent, symlink, local=True, repo=repo, update=update)
 
     if create_profile:
         target = wb_dir / "profile.yaml"

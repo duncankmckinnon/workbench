@@ -309,26 +309,48 @@ With `--tdd`, the pipeline becomes: **test (write failing) → implement (make p
 
 In TDD mode, the tester writes comprehensive failing tests first. The implementor then writes code to make all tests pass and reports whether the tests are comprehensive. Normal test verification and review follow.
 
+## Updating workbench
+
+To update workbench and its skills to the latest version:
+
+```bash
+pip install --upgrade wbcli    # upgrade the package
+wb init --update               # overwrite skill files with the latest version
+```
+
+If skills are installed locally (project-level), also run:
+
+```bash
+wb init --update --local       # update project-level skills
+```
+
+If using `--symlink`, skill files stay in sync automatically — no `--update` needed.
+
 ## Key commands
 
 - `wb run <plan>` — execute a plan with parallel agents
-- `wb preview <plan>` — dry-run to see parsed tasks and waves
-- `wb status` — show active worktrees
+- `wb run plan.md --name auth-feature` — name the session branch
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
 - `wb run plan.md --base feature-x` — branch from a specific branch
 - `wb run plan.md --local` — branch from local ref instead of fetching
-- `wb run plan.md -b workbench-3 -w 2` — resume session from wave 2
+- `wb run plan.md -b my-session -w 2` — resume session from wave 2
+- `wb run plan.md --profile-name fast` — use a named profile
+- `wb preview <plan>` — dry-run to see parsed tasks and waves
+- `wb status` — show active worktrees
 - `wb stop` — kill all active agent sessions
 - `wb stop --cleanup` — also remove worktrees and branches
 - `wb clean` — remove all workbench worktrees
 - `wb setup` — prepare a repo for workbench use
 - `wb setup --profile` — also create a profile.yaml with the detected agent
+- `wb setup --update` — force-update skills to the latest version
 - `wb init` — install workbench skills for your agent platform
 - `wb init --agent gemini` — install skills for Gemini CLI
 - `wb init --agent gemini --profile` — install skills and create profile with gemini as default
+- `wb init --update` — force-update skills to the latest version
 - `wb init --agent claude --local` — install to repo-local .claude/skills/ + .agents/skills/
 - `wb init --agent gemini --local` — install to repo-local .agents/skills/
 - `wb profile init` — create profile.yaml from defaults
+- `wb profile init --name fast --set reviewer.agent=gemini` — create a named profile with overrides
 - `wb profile show` — print resolved profile
 - `wb profile set <key> <value>` — update a profile field
 - `wb profile diff` — show differences from defaults

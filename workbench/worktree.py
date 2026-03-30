@@ -50,36 +50,49 @@ def get_main_branch(repo: Path) -> str:
     return "master"
 
 
-def create_session_branch(repo: Path, local: bool = False, base: str | None = None) -> str:
-    """Create a clean session branch off a base branch (workbench-1, workbench-2, etc).
+def create_session_branch(
+    repo: Path,
+    local: bool = False,
+    base: str | None = None,
+    session_name: str | None = None,
+) -> str:
+    """Create a clean session branch off a base branch.
+
+    Branch naming:
+        - With session_name: ``workbench-<name>``
+        - Without: ``workbench-<N>`` where N auto-increments.
 
     Args:
         repo: Path to the git repository.
         local: If True, branch from the local ref. If False (default), fetch
             from origin first and prefer origin/<base>.
         base: Base branch to branch from. Defaults to main/master.
+        session_name: Optional name for the session branch.
     """
     base = base or get_main_branch(repo)
 
-    # Find the next available session number
-    result = subprocess.run(
-        ["git", "branch", "--list", "workbench-*"],
-        cwd=repo,
-        capture_output=True,
-        text=True,
-    )
-    existing = []
-    for line in result.stdout.strip().split("\n"):
-        name = line.strip().lstrip("* ")
-        if name.startswith("workbench-"):
-            try:
-                num = int(name.split("-", 1)[1])
-                existing.append(num)
-            except ValueError:
-                pass
+    if session_name:
+        session_branch = session_name
+    else:
+        # Find the next available session number
+        result = subprocess.run(
+            ["git", "branch", "--list", "workbench-*"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        existing = []
+        for line in result.stdout.strip().split("\n"):
+            name = line.strip().lstrip("* ")
+            if name.startswith("workbench-"):
+                try:
+                    num = int(name.split("-", 1)[1])
+                    existing.append(num)
+                except ValueError:
+                    pass
 
-    next_num = max(existing, default=0) + 1
-    session_branch = f"workbench-{next_num}"
+        next_num = max(existing, default=0) + 1
+        session_branch = f"workbench-{next_num}"
 
     if local:
         branch_point = base
