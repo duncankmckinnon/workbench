@@ -132,6 +132,7 @@ async def run_plan(
     base_branch: str | None = None,
     profile_path: Path | None = None,
     profile_name: str | None = None,
+    session_name: str | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -142,7 +143,9 @@ async def run_plan(
 
     # Use existing session branch or create a new one
     if session_branch is None:
-        session_branch = create_session_branch(repo, local=local, base=base_branch)
+        session_branch = create_session_branch(
+            repo, local=local, base=base_branch, session_name=session_name
+        )
 
     console.print(f"\n[bold]Plan:[/bold] {plan.title}")
     console.print(f"[bold]Tasks:[/bold] {len(plan.tasks)} across {len(waves)} wave(s)")

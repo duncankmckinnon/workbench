@@ -284,6 +284,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--no-tmux` | Run agents as subprocesses instead of tmux |
 | `--base BRANCH` | Base branch to start from (default: `main`) |
 | `--local` | Branch from local ref instead of fetching origin |
+| `--name NAME` | Name the session branch (creates `<name>` instead of `workbench-<N>`) |
 | `-b NAME` / `--session-branch` | Resume an existing session branch |
 | `-w N` / `--start-wave` | Skip already-completed waves |
 | `--cleanup` | Remove worktrees after completion |
@@ -300,6 +301,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--local` | Install skills to repo-local paths instead of global |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |
+| `--update` | Force-update skills to the latest version |
 
 ### `wb setup`
 
@@ -308,6 +310,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--agent NAME` | Target platform (auto-detected if omitted) |
 | `--symlink` | Symlink skills instead of copy |
 | `--profile` | Also create a profile.yaml with the detected agent |
+| `--update` | Force-update skills to the latest version |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb stop`
