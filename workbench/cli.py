@@ -581,13 +581,15 @@ def stop(cleanup: bool, repo: Path | None):
     "--local", is_flag=True, help="Install skills at project level instead of user level."
 )
 @click.option(
-    "--profile", "create_profile", is_flag=True, help="Also create a profile.yaml with the detected agent."
+    "--profile",
+    "create_profile",
+    is_flag=True,
+    help="Also create a profile.yaml with the detected agent.",
 )
 def init(agent: str | None, symlink: bool, local: bool, create_profile: bool):
     """Install workbench skills for your agent platform."""
     resolved_agent = agent or _detect_agent()
     _install_skills(resolved_agent, symlink, local=local)
-
 
     if create_profile:
         repo = _find_repo_root() if local else None
@@ -621,7 +623,10 @@ def init(agent: str | None, symlink: bool, local: bool, create_profile: bool):
     help="Repo path (default: auto-detect).",
 )
 @click.option(
-    "--profile", "create_profile", is_flag=True, help="Also create a profile.yaml with the detected agent."
+    "--profile",
+    "create_profile",
+    is_flag=True,
+    help="Also create a profile.yaml with the detected agent.",
 )
 def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: bool):
     """Set up a repo for workbench: create .workbench/ and install skills."""
