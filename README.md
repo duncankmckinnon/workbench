@@ -144,15 +144,30 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 ### Create a profile
 
 ```bash
-wb profile init              # create .workbench/profile.yaml from defaults
-wb profile init --global     # create ~/.workbench/profile.yaml
+wb profile init                                            # create .workbench/profile.yaml from defaults
+wb profile init --global                                   # create ~/.workbench/profile.yaml
+wb profile init --set reviewer.agent=gemini                # create with inline overrides
+wb profile init --set reviewer.agent=gemini --set tester.directive_extend="Run with -x"
 ```
+
+### Named profiles
+
+Create multiple profiles for different workflows:
+
+```bash
+wb profile init --name fast --set reviewer.agent=gemini --set implementor.agent=codex
+wb profile init --name security --set reviewer.directive="Focus only on security vulnerabilities."
+wb run plan.md --profile-name fast                         # use a named profile
+```
+
+Named profiles are stored as `profile.<name>.yaml` alongside the default `profile.yaml`.
 
 ### Customize roles
 
 ```bash
-wb profile set reviewer.agent gemini
+wb profile set reviewer.agent gemini                       # update default profile
 wb profile set tester.directive_extend "Run pytest with -x flag."
+wb profile set reviewer.agent codex --name fast            # update a named profile
 ```
 
 Or edit `.workbench/profile.yaml` directly:
@@ -166,14 +181,38 @@ roles:
     directive_extend: "Also check edge cases for null inputs."
 ```
 
+Use `directive` to replace the default instructions, or `directive_extend` to append to them.
+
+### Profile fields
+
+| Role | Description |
+|---|---|
+| `implementor` | Writes code to fulfill the task |
+| `tester` | Runs and writes tests, reports PASS/FAIL |
+| `reviewer` | Reviews the diff for correctness and quality |
+| `fixer` | Addresses feedback from failed tests or reviews |
+| `merger` | Resolves merge conflicts between parallel branches |
+
+Each role supports these fields:
+
+| Field | Description |
+|---|---|
+| `agent` | CLI command to use for this role (default: `claude`) |
+| `directive` | Full replacement for the role's default instructions |
+| `directive_extend` | Text appended to the default instructions (cannot be combined with `directive`) |
+
 ### View and compare
 
 ```bash
-wb profile show              # print resolved profile
-wb profile diff              # show differences from defaults
+wb profile show                    # print resolved profile
+wb profile show --name fast        # show a named profile
+wb profile diff                    # show differences from defaults
+wb profile diff --name fast        # diff a named profile
 ```
 
-Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags.
+### Merge order
+
+Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags. Named profiles (`--profile-name`) replace the default filename at each level.
 
 ## TDD mode
 
@@ -250,6 +289,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--cleanup` | Remove worktrees after completion |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 | `--profile PATH` | Use a specific profile.yaml |
+| `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
 ### `wb init`
@@ -293,12 +333,15 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | Flag | Description |
 |---|---|
 | `--global` | Create in `~/.workbench/` instead of `.workbench/` |
+| `--name NAME` | Create a named profile (`profile.<name>.yaml`) |
+| `--set KEY=VALUE` | Set role fields inline (repeatable) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb profile show`
 
 | Flag | Description |
 |---|---|
+| `--name NAME` | Show a named profile |
 | `--profile PATH` | Path to a specific profile.yaml |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
@@ -306,13 +349,15 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 
 | Flag | Description |
 |---|---|
-| `--global` | Update `~/.workbench/profile.yaml` instead of local |
+| `--global` | Update `~/.workbench/` instead of local |
+| `--name NAME` | Update a named profile |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb profile diff`
 
 | Flag | Description |
 |---|---|
+| `--name NAME` | Diff a named profile |
 | `--profile PATH` | Path to a specific profile.yaml |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 

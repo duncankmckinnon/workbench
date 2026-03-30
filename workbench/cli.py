@@ -300,6 +300,11 @@ def main():
     help="Path to a profile.yaml to use.",
 )
 @click.option(
+    "--profile-name",
+    default=None,
+    help="Named profile to use (resolves profile.<name>.yaml).",
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -333,6 +338,7 @@ def run(
     local: bool,
     base: str | None,
     profile_path: Path | None,
+    profile_name: str | None,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -401,6 +407,7 @@ def run(
             local=local,
             base_branch=base,
             profile_path=profile_path,
+            profile_name=profile_name,
         )
     )
 
@@ -620,14 +627,24 @@ def profile():
 @click.option(
     "--global", "use_global", is_flag=True, help="Create in ~/.workbench/ instead of .workbench/."
 )
+@click.option("--name", default=None, help="Named profile (creates profile.<name>.yaml).")
+@click.option(
+    "--set",
+    "overrides",
+    multiple=True,
+    help="Set role fields inline (e.g. --set reviewer.agent=gemini).",
+)
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def profile_init(use_global: bool, repo: Path | None):
-    """Create a default profile.yaml."""
+def profile_init(
+    use_global: bool, name: str | None, overrides: tuple[str, ...], repo: Path | None
+):
+    """Create a profile.yaml from defaults with optional inline overrides."""
+    filename = Profile._profile_filename(name)
     if use_global:
-        target = Path.home() / ".workbench" / "profile.yaml"
+        target = Path.home() / ".workbench" / filename
     else:
         repo = repo or Path.cwd()
-        target = repo / ".workbench" / "profile.yaml"
+        target = repo / ".workbench" / filename
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -635,22 +652,50 @@ def profile_init(use_global: bool, repo: Path | None):
         if not click.confirm(f"{target} already exists. Overwrite?"):
             return
 
-    Profile.default().save(target)
+    p = Profile.default()
+
+    # Apply --set overrides
+    for override in overrides:
+        if "=" not in override:
+            raise click.ClickException(
+                f"Invalid --set format: {override}. Use <role>.<field>=<value>"
+            )
+        key, value = override.split("=", 1)
+        parts = key.split(".")
+        if len(parts) != 2:
+            raise click.ClickException(f"Key must be <role>.<field>, got: {key}")
+        role_name, field_name = parts
+        if role_name not in _VALID_ROLES:
+            raise click.ClickException(f"Unknown role: {role_name}")
+        if field_name not in _VALID_FIELDS:
+            raise click.ClickException(f"Unknown field: {field_name}")
+        cfg: RoleConfig = getattr(p, role_name)
+        if field_name == "directive_extend":
+            cfg.directive = cfg.directive + "\n\n" + value
+        else:
+            setattr(cfg, field_name, value)
+
+    p.save(target)
     console.print(f"Created {target}")
 
 
 @profile.command("show")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--name", default=None, help="Named profile to resolve.")
 @click.option(
     "--profile",
     "profile_path",
     default=None,
     type=click.Path(exists=True, path_type=Path),
 )
-def profile_show(repo: Path | None, profile_path: Path | None):
+def profile_show(repo: Path | None, name: str | None, profile_path: Path | None):
     """Show the resolved profile for each role."""
     repo = repo or Path.cwd()
-    resolved = Profile.resolve(repo, profile_path=Path(profile_path) if profile_path else None)
+    resolved = Profile.resolve(
+        repo,
+        profile_path=Path(profile_path) if profile_path else None,
+        profile_name=name,
+    )
 
     console.print(f"{'Role':<15} {'Agent':<12} {'Directive'}")
     console.print("-" * 60)
@@ -664,8 +709,9 @@ def profile_show(repo: Path | None, profile_path: Path | None):
 @click.argument("key")
 @click.argument("value")
 @click.option("--global", "use_global", is_flag=True)
+@click.option("--name", default=None, help="Named profile to update.")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def profile_set(key: str, value: str, use_global: bool, repo: Path | None):
+def profile_set(key: str, value: str, use_global: bool, name: str | None, repo: Path | None):
     """Set a profile field (e.g. reviewer.agent gemini)."""
     parts = key.split(".")
     if len(parts) != 2:
@@ -682,11 +728,12 @@ def profile_set(key: str, value: str, use_global: bool, repo: Path | None):
             f"Unknown field: {field_name}. Valid fields: {', '.join(_VALID_FIELDS)}"
         )
 
+    filename = Profile._profile_filename(name)
     if use_global:
-        target = Path.home() / ".workbench" / "profile.yaml"
+        target = Path.home() / ".workbench" / filename
     else:
         repo = repo or Path.cwd()
-        target = repo / ".workbench" / "profile.yaml"
+        target = repo / ".workbench" / filename
 
     target.parent.mkdir(parents=True, exist_ok=True)
 
@@ -708,16 +755,21 @@ def profile_set(key: str, value: str, use_global: bool, repo: Path | None):
 
 @profile.command("diff")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--name", default=None, help="Named profile to compare.")
 @click.option(
     "--profile",
     "profile_path",
     default=None,
     type=click.Path(exists=True, path_type=Path),
 )
-def profile_diff(repo: Path | None, profile_path: Path | None):
+def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None):
     """Compare resolved profile against defaults."""
     repo = repo or Path.cwd()
-    resolved = Profile.resolve(repo, profile_path=Path(profile_path) if profile_path else None)
+    resolved = Profile.resolve(
+        repo,
+        profile_path=Path(profile_path) if profile_path else None,
+        profile_name=name,
+    )
     default = Profile.default()
 
     diffs = []
