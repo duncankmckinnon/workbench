@@ -131,10 +131,11 @@ async def run_plan(
     local: bool = False,
     base_branch: str | None = None,
     profile_path: Path | None = None,
+    profile_name: str | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
-    profile = Profile.resolve(repo, profile_path=profile_path)
+    profile = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
     waves = plan.independent_groups
     all_states: list[TaskState] = []
     state_map: dict[str, TaskState] = {}

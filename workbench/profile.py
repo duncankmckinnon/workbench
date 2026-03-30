@@ -87,22 +87,39 @@ class Profile:
         data = {"roles": roles_dict}
         path.write_text(yaml.dump(data, default_flow_style=False))
 
-    @classmethod
-    def resolve(cls, repo: Path, profile_path: Path | None = None) -> Profile:
-        """Merge profiles in priority order: default -> global -> local -> explicit."""
-        profile = cls.default()
+    @staticmethod
+    def _profile_filename(name: str | None = None) -> str:
+        """Return the profile filename for a given name."""
+        if name:
+            return f"profile.{name}.yaml"
+        return "profile.yaml"
 
-        # Global: ~/.workbench/profile.yaml
-        global_path = Path.home() / ".workbench" / "profile.yaml"
+    @classmethod
+    def resolve(
+        cls,
+        repo: Path,
+        profile_path: Path | None = None,
+        profile_name: str | None = None,
+    ) -> Profile:
+        """Merge profiles in priority order: default -> global -> local -> explicit.
+
+        When profile_name is provided, look for profile.<name>.yaml instead of
+        profile.yaml. An explicit profile_path always takes highest priority.
+        """
+        profile = cls.default()
+        filename = cls._profile_filename(profile_name)
+
+        # Global: ~/.workbench/profile.yaml (or profile.<name>.yaml)
+        global_path = Path.home() / ".workbench" / filename
         if global_path.exists():
             profile._merge_from_yaml(global_path)
 
-        # Local: <repo>/.workbench/profile.yaml
-        local_path = repo / ".workbench" / "profile.yaml"
+        # Local: <repo>/.workbench/profile.yaml (or profile.<name>.yaml)
+        local_path = repo / ".workbench" / filename
         if local_path.exists():
             profile._merge_from_yaml(local_path)
 
-        # Explicit
+        # Explicit path (highest priority)
         if profile_path is not None and profile_path.exists():
             profile._merge_from_yaml(profile_path)
 

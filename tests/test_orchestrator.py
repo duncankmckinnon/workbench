@@ -131,6 +131,6 @@ async def test_run_plan_with_profile_path(tmp_path):
         )
 
     # Profile.resolve should have been called with the repo and profile_path
-    mock_resolve.assert_called_once_with(repo, profile_path=profile_path)
+    mock_resolve.assert_called_once_with(repo, profile_path=profile_path, profile_name=None)
     # The resolved profile should be passed to run_pipeline
     assert captured_kwargs.get("profile") is fake_profile

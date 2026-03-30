@@ -249,6 +249,15 @@ Use `-b workbench-N` (or `--session-branch`) to resume a previous session. This 
 
 Profiles configure which agent CLI and instructions are used for each pipeline role. When no profile exists, built-in defaults apply.
 
+### Roles and fields
+
+Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
+
+Each role supports:
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, or any custom CLI.
+- `directive` — Full replacement for the role's default instructions.
+- `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
+
 ### YAML format
 
 Create or edit `.workbench/profile.yaml`:
@@ -260,23 +269,39 @@ roles:
     directive: "Focus on security and correctness."
   tester:
     directive_extend: "Also check edge cases for null inputs."
+  implementor:
+    agent: codex
 ```
 
-Use `directive_extend` to append to the default directive without replacing it.
+Only include roles and fields you want to override — everything else uses built-in defaults.
+
+### Named profiles
+
+Store multiple configurations as `profile.<name>.yaml`:
+
+```bash
+wb profile init --name fast --set reviewer.agent=gemini --set implementor.agent=codex
+wb run plan.md --profile-name fast
+```
 
 ### Profile CLI commands
 
 ```bash
-wb profile init              # create .workbench/profile.yaml from defaults
-wb profile init --global     # create ~/.workbench/profile.yaml
-wb profile show              # print resolved profile
-wb profile set reviewer.agent gemini
-wb profile diff              # show differences from defaults
+wb profile init                                        # create profile.yaml from defaults
+wb profile init --global                               # create in ~/.workbench/
+wb profile init --set reviewer.agent=gemini            # create with inline overrides
+wb profile init --name fast --set reviewer.agent=gemini  # create a named profile
+wb profile show                                        # print resolved profile
+wb profile show --name fast                            # show a named profile
+wb profile set reviewer.agent gemini                   # update a field
+wb profile set reviewer.agent codex --name fast        # update a named profile
+wb profile diff                                        # show differences from defaults
+wb profile diff --name fast                            # diff a named profile
 ```
 
 ### Merge order
 
-Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags.
+Profiles merge in order: built-in defaults < `~/.workbench/profile.yaml` < `.workbench/profile.yaml` < `--profile` flag < CLI flags. Named profiles (`--profile-name`) replace the default filename at each level.
 
 ## TDD Mode
 
