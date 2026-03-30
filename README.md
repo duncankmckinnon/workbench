@@ -43,6 +43,7 @@ wb init --agent manual             # print paths for manual setup
 wb init --agent claude --local     # install to <repo>/.claude/skills/ + .agents/skills/
 wb init --agent gemini --local     # install to <repo>/.agents/skills/
 wb init --symlink                  # symlink instead of copy (stays in sync with updates)
+wb init --update                   # force-update skills to the latest installed version
 ```
 
 If the skill file already exists and is unchanged, it's skipped. If it differs, you'll be prompted before overwriting.
@@ -284,7 +285,6 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--no-tmux` | Run agents as subprocesses instead of tmux |
 | `--base BRANCH` | Base branch to start from (default: `main`) |
 | `--local` | Branch from local ref instead of fetching origin |
-| `--name NAME` | Name the session branch (creates `<name>` instead of `workbench-<N>`) |
 | `-b NAME` / `--session-branch` | Resume an existing session branch |
 | `-w N` / `--start-wave` | Skip already-completed waves |
 | `--cleanup` | Remove worktrees after completion |
