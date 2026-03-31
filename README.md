@@ -288,6 +288,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `-b NAME` / `--session-branch` | Resume an existing session branch |
 | `-w N` / `--start-wave` | Skip already-completed waves |
 | `--cleanup` | Remove worktrees after completion |
+| `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 | `--profile PATH` | Use a specific profile.yaml |
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |

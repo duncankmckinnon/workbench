@@ -330,6 +330,7 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 
 - `wb run <plan>` — execute a plan with parallel agents
 - `wb run plan.md --name auth-feature` — name the session branch
+- `wb run plan.md --keep-branches` — keep task branches after merging
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
 - `wb run plan.md --base feature-x` — branch from a specific branch
 - `wb run plan.md --local` — branch from local ref instead of fetching
