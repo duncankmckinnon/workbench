@@ -114,22 +114,27 @@ def test_run_without_tmux_shows_error(git_repo, tmp_path):
 # ---------------------------------------------------------------------------
 
 
-def test_init_manual_prints_skill_paths():
+# ---------------------------------------------------------------------------
+# wb setup — global (user-level skill install)
+# ---------------------------------------------------------------------------
+
+
+def test_setup_global_manual_prints_skill_paths():
     runner = CliRunner()
-    result = runner.invoke(main, ["init", "--agent", "manual"])
+    result = runner.invoke(main, ["setup", "--global", "--agent", "manual"])
     assert result.exit_code == 0
     assert "Skill files directory:" in result.output
     assert "use-workbench" in result.output
 
 
-def test_init_claude_copies_skills(tmp_path):
-    """wb init --agent claude should copy skill folders to ~/.claude/skills/."""
+def test_setup_global_claude_copies_skills(tmp_path):
+    """wb setup --global --agent claude should copy skill folders to ~/.claude/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["init", "--agent", "claude"])
+        result = runner.invoke(main, ["setup", "--global", "--agent", "claude"])
 
     assert result.exit_code == 0
     skills_dir = fake_home / ".claude" / "skills"
@@ -138,14 +143,14 @@ def test_init_claude_copies_skills(tmp_path):
     assert "Copied" in result.output
 
 
-def test_init_claude_symlinks(tmp_path):
-    """wb init --agent claude --symlink should symlink skill dirs."""
+def test_setup_global_claude_symlinks(tmp_path):
+    """wb setup --global --agent claude --symlink should symlink skill dirs."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["init", "--agent", "claude", "--symlink"])
+        result = runner.invoke(main, ["setup", "--global", "--agent", "claude", "--symlink"])
 
     assert result.exit_code == 0
     dest = fake_home / ".claude" / "skills" / "use-workbench"
@@ -153,11 +158,11 @@ def test_init_claude_symlinks(tmp_path):
     assert "Linked" in result.output
 
 
-def test_init_codex_appends_to_instructions(tmp_path, monkeypatch):
-    """wb init --agent codex should append skills to .codex/instructions.md."""
+def test_setup_global_codex_appends_to_instructions(tmp_path, monkeypatch):
+    """wb setup --global --agent codex should append skills to .codex/instructions.md."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["init", "--agent", "codex"])
+    result = runner.invoke(main, ["setup", "--global", "--agent", "codex"])
 
     assert result.exit_code == 0
     instructions = tmp_path / ".codex" / "instructions.md"
@@ -167,10 +172,9 @@ def test_init_codex_appends_to_instructions(tmp_path, monkeypatch):
     assert "Appended" in result.output
 
 
-def test_init_codex_skips_duplicates(tmp_path, monkeypatch):
-    """wb init --agent codex should skip skills whose name appears in instructions.md."""
+def test_setup_global_codex_skips_duplicates(tmp_path, monkeypatch):
+    """wb setup --global --agent codex should skip duplicate skills."""
     monkeypatch.chdir(tmp_path)
-    # Pre-populate instructions.md with the marker so the check triggers
     codex_dir = tmp_path / ".codex"
     codex_dir.mkdir()
     (codex_dir / "instructions.md").write_text(
@@ -178,17 +182,17 @@ def test_init_codex_skips_duplicates(tmp_path, monkeypatch):
     )
 
     runner = CliRunner()
-    result = runner.invoke(main, ["init", "--agent", "codex"])
+    result = runner.invoke(main, ["setup", "--global", "--agent", "codex"])
 
     assert result.exit_code == 0
     assert "Skipping" in result.output
 
 
-def test_init_cursor_copies_to_project(tmp_path, monkeypatch):
-    """wb init --agent cursor should copy to .cursor/rules/ in cwd."""
+def test_setup_global_cursor_copies_to_project(tmp_path, monkeypatch):
+    """wb setup --global --agent cursor should copy to .cursor/rules/ in cwd."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
-    result = runner.invoke(main, ["init", "--agent", "cursor"])
+    result = runner.invoke(main, ["setup", "--global", "--agent", "cursor"])
 
     assert result.exit_code == 0
     rules_dir = tmp_path / ".cursor" / "rules"
@@ -196,8 +200,49 @@ def test_init_cursor_copies_to_project(tmp_path, monkeypatch):
     assert (rules_dir / "use-workbench.md").exists()
 
 
+def test_setup_global_gemini_copies_skills(tmp_path):
+    """wb setup --global --agent gemini should copy skill folders to ~/.agents/skills/."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini"])
+
+    assert result.exit_code == 0
+    skills_dir = fake_home / ".agents" / "skills"
+    assert skills_dir.is_dir()
+    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
+    assert "Copied" in result.output
+
+
+def test_setup_global_gemini_symlinks(tmp_path):
+    """wb setup --global --agent gemini --symlink should create symlink at ~/.agents/skills/."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini", "--symlink"])
+
+    assert result.exit_code == 0
+    dest = fake_home / ".agents" / "skills" / "use-workbench"
+    assert dest.is_symlink()
+    assert "Linked" in result.output
+
+
+def test_setup_agent_choice_includes_gemini():
+    """The --agent option should accept 'gemini' as a valid choice."""
+    runner = CliRunner()
+    fake_home = Path("/tmp/test_gemini_choice")
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini"])
+
+    assert "Invalid value" not in (result.output or "")
+
+
 # ---------------------------------------------------------------------------
-# wb setup
+# wb setup — local (project-level, default)
 # ---------------------------------------------------------------------------
 
 
@@ -224,151 +269,87 @@ def test_setup_existing_workbench_dir(git_repo):
     assert "Already exists" in result.output
 
 
-# ---------------------------------------------------------------------------
-# wb init --agent gemini (cross-client skills)
-# ---------------------------------------------------------------------------
-
-
-def test_init_gemini_copies_skills(tmp_path):
-    """wb init --agent gemini should copy skill folders to ~/.agents/skills/."""
-    runner = CliRunner()
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-
-    with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["init", "--agent", "gemini"])
-
-    assert result.exit_code == 0
-    skills_dir = fake_home / ".agents" / "skills"
-    assert skills_dir.is_dir()
-    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
-    assert "Copied" in result.output
-
-
-def test_init_gemini_symlinks(tmp_path):
-    """wb init --agent gemini --symlink should create symlink at ~/.agents/skills/."""
-    runner = CliRunner()
-    fake_home = tmp_path / "home"
-    fake_home.mkdir()
-
-    with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["init", "--agent", "gemini", "--symlink"])
-
-    assert result.exit_code == 0
-    dest = fake_home / ".agents" / "skills" / "use-workbench"
-    assert dest.is_symlink()
-    assert "Linked" in result.output
-
-
-# ---------------------------------------------------------------------------
-# wb init --local (cross-client skill install)
-# ---------------------------------------------------------------------------
-
-
-def test_init_claude_local(tmp_path, git_repo):
-    """wb init --agent claude --local installs to <repo>/.claude/skills/ and <repo>/.agents/skills/."""
+def test_setup_claude_local(tmp_path, git_repo):
+    """wb setup --agent claude installs to <repo>/.claude/skills/ and <repo>/.agents/skills/."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "claude", "--local"])
+        result = runner.invoke(main, ["setup", "--agent", "claude"])
 
     assert result.exit_code == 0
-    # Should install to repo-level .claude/skills/
     claude_skill = git_repo / ".claude" / "skills" / "use-workbench" / "SKILL.md"
     assert claude_skill.exists()
-    # Should also install to .agents/skills/ for cross-client discoverability
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
     assert "cross-client" in result.output.lower()
 
 
-def test_init_gemini_local(tmp_path, git_repo):
-    """wb init --agent gemini --local installs to <repo>/.agents/skills/."""
+def test_setup_gemini_local(tmp_path, git_repo):
+    """wb setup --agent gemini installs to <repo>/.agents/skills/."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "gemini", "--local"])
+        result = runner.invoke(main, ["setup", "--agent", "gemini"])
 
     assert result.exit_code == 0
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
 
 
-def test_init_cursor_local_noop(tmp_path, monkeypatch, git_repo):
-    """wb init --agent cursor --local is a no-op (cursor is always project-level), prints note."""
+def test_setup_cursor_local(tmp_path, monkeypatch, git_repo):
+    """wb setup --agent cursor installs to .cursor/rules/ and .agents/skills/."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "cursor", "--local"])
+        result = runner.invoke(main, ["setup", "--agent", "cursor"])
 
     assert result.exit_code == 0
-    # Cursor should still install to .cursor/rules/ as normal
     rules_dir = tmp_path / ".cursor" / "rules"
     assert rules_dir.is_dir()
-    # Should also install to .agents/skills/ for cross-client discoverability
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
 
 
-def test_init_codex_local_noop(tmp_path, monkeypatch, git_repo):
-    """wb init --agent codex --local is a no-op (codex is always project-level), prints note."""
+def test_setup_codex_local(tmp_path, monkeypatch, git_repo):
+    """wb setup --agent codex installs to .codex/instructions.md and .agents/skills/."""
     monkeypatch.chdir(tmp_path)
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "codex", "--local"])
+        result = runner.invoke(main, ["setup", "--agent", "codex"])
 
     assert result.exit_code == 0
-    # Codex should still append to .codex/instructions.md as normal
     instructions = tmp_path / ".codex" / "instructions.md"
     assert instructions.exists()
-    # Should also install to .agents/skills/ for cross-client discoverability
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
 
 
-def test_init_local_requires_repo(tmp_path, monkeypatch):
-    """wb init --local should fail when repo root cannot be found."""
-    monkeypatch.chdir(tmp_path)
-    runner = CliRunner()
-
-    with patch("workbench.cli._find_repo_root", side_effect=SystemExit(1)):
-        result = runner.invoke(main, ["init", "--agent", "claude", "--local"])
-
-    assert result.exit_code != 0
-
-
-def test_init_claude_local_symlinks(git_repo):
-    """wb init --agent claude --local --symlink should symlink at repo level."""
+def test_setup_claude_local_symlinks(git_repo):
+    """wb setup --agent claude --symlink should symlink at repo level."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "claude", "--local", "--symlink"])
+        result = runner.invoke(main, ["setup", "--agent", "claude", "--symlink"])
 
     assert result.exit_code == 0
     dest = git_repo / ".claude" / "skills" / "use-workbench"
     assert dest.is_symlink()
-    # Cross-client dir should also be created
     agents_dest = git_repo / ".agents" / "skills" / "use-workbench"
     assert agents_dest.exists()
 
 
-def test_init_gemini_local_symlinks(git_repo):
-    """wb init --agent gemini --local --symlink should symlink at repo level."""
+def test_setup_gemini_local_symlinks(git_repo):
+    """wb setup --agent gemini --symlink should symlink at repo level."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["init", "--agent", "gemini", "--local", "--symlink"])
+        result = runner.invoke(main, ["setup", "--agent", "gemini", "--symlink"])
 
     assert result.exit_code == 0
     dest = git_repo / ".agents" / "skills" / "use-workbench"
     assert dest.is_symlink()
-
-
-# ---------------------------------------------------------------------------
-# wb setup cross-client skill install
-# ---------------------------------------------------------------------------
 
 
 def test_setup_installs_cross_client_skills(git_repo):
@@ -378,26 +359,22 @@ def test_setup_installs_cross_client_skills(git_repo):
         result = runner.invoke(main, ["setup", "--agent", "claude"])
 
     assert result.exit_code == 0
-    # setup is always project-scoped, so should install to .agents/skills/
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
 
 
 # ---------------------------------------------------------------------------
-# wb init --agent choice includes gemini
+# wb init (deprecated, delegates to setup)
 # ---------------------------------------------------------------------------
 
 
-def test_init_agent_choice_includes_gemini():
-    """The --agent option should accept 'gemini' as a valid choice."""
+def test_init_deprecated_shows_warning():
+    """wb init should show deprecation warning."""
     runner = CliRunner()
-    # Just verify that gemini is accepted without "invalid choice" error
-    fake_home = Path("/tmp/test_gemini_choice")
+    fake_home = Path("/tmp/test_init_deprecated")
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["init", "--agent", "gemini"])
-
-    # Should not fail with "Invalid value for '--agent'"
-    assert "Invalid value" not in (result.output or "")
+        result = runner.invoke(main, ["init", "--agent", "manual"])
+    assert "deprecated" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------

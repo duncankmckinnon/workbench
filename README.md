@@ -29,24 +29,22 @@ pip install wbcli
 wb setup
 ```
 
-This creates a `.workbench/` directory in your repo and installs the bundled skill file for your agent platform. The skill teaches your agent how to write effective workbench plans and use the cli to configure and execute them.
-
-You can also run setup in two steps:
+This creates a `.workbench/` directory in your repo and installs the bundled skill file for your agent platform. The skill teaches your agent how to write effective workbench plans and use the CLI to configure and execute them.
 
 ```bash
-wb init                            # install skills only (auto-detects agent platform)
-wb init --agent claude             # install to ~/.claude/skills/
-wb init --agent gemini             # install to ~/.agents/skills/
-wb init --agent codex              # install as skill in .codex/instructions.md
-wb init --agent cursor             # install as skill in .cursor/rules/
-wb init --agent manual             # print paths for manual setup
-wb init --agent claude --local     # install to <repo>/.claude/skills/ + .agents/skills/
-wb init --agent gemini --local     # install to <repo>/.agents/skills/
-wb init --symlink                  # symlink instead of copy (stays in sync with updates)
-wb init --update                   # force-update skills to the latest installed version
+wb setup                           # auto-detect agent, install skills locally
+wb setup --agent claude            # install to <repo>/.claude/skills/ + .agents/skills/
+wb setup --agent gemini            # install to <repo>/.agents/skills/
+wb setup --agent manual            # print paths for manual setup
+wb setup --global                  # install skills to user-level paths only (no .workbench/)
+wb setup --global --agent claude   # install to ~/.claude/skills/
+wb setup --global --agent gemini   # install to ~/.agents/skills/
+wb setup --symlink                 # symlink instead of copy (stays in sync with updates)
+wb setup --update                  # force-update skills to the latest installed version
+wb setup --profile                 # also create a profile.yaml with the detected agent
 ```
 
-If the skill file already exists and is unchanged, it's skipped. If it differs, you'll be prompted before overwriting.
+If the skill file already exists and is unchanged, it's skipped. If it differs, you'll be prompted before overwriting. Use `--update` to force-overwrite.
 
 ### 2. Write a plan
 
@@ -262,11 +260,10 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 |---|---|
 | `wb run <plan>` | Execute a plan with parallel agents |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
+| `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
 | `wb stop` | Kill all running agent tmux sessions |
 | `wb clean` | Remove all workbench worktrees and `wb/` branches |
-| `wb init` | Install skills for an agent platform |
-| `wb setup` | Create `.workbench/` and install skills |
 | `wb profile init` | Create profile.yaml from defaults |
 | `wb profile show` | Show resolved profile |
 | `wb profile set <key> <value>` | Update a profile field |
@@ -294,22 +291,13 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
-### `wb init`
-
-| Flag | Description |
-|---|---|
-| `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
-| `--local` | Install skills to repo-local paths instead of global |
-| `--symlink` | Symlink instead of copy (stays in sync with package updates) |
-| `--profile` | Also create a profile.yaml with the detected agent |
-| `--update` | Force-update skills to the latest version |
-
 ### `wb setup`
 
 | Flag | Description |
 |---|---|
-| `--agent NAME` | Target platform (auto-detected if omitted) |
-| `--symlink` | Symlink skills instead of copy |
+| `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
+| `--global` | Install skills to user-level paths only (skip `.workbench/` creation) |
+| `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |
 | `--update` | Force-update skills to the latest version |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
