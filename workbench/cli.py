@@ -260,7 +260,11 @@ def main():
 @click.option("--max-retries", "-r", default=2, help="Max fix attempts per failed stage.")
 @click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, etc).")
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
-@click.option("--keep-branches", is_flag=True, help="Keep task branches after merging (default: auto-delete on success).")
+@click.option(
+    "--keep-branches",
+    is_flag=True,
+    help="Keep task branches after merging (default: auto-delete on success).",
+)
 @click.option(
     "--repo",
     type=click.Path(exists=True, path_type=Path),
@@ -672,7 +676,9 @@ def setup(
 
 
 @main.command(deprecated=True, hidden=True)
-@click.option("--agent", type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]), default=None)
+@click.option(
+    "--agent", type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]), default=None
+)
 @click.option("--symlink", is_flag=True)
 @click.option("--local", is_flag=True)
 @click.option("--profile", "create_profile", is_flag=True)
