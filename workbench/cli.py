@@ -261,6 +261,11 @@ def main():
 @click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, etc).")
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
+    "--keep-branches",
+    is_flag=True,
+    help="Keep task branches after merging (default: auto-delete on success).",
+)
+@click.option(
     "--repo",
     type=click.Path(exists=True, path_type=Path),
     default=None,
@@ -340,6 +345,7 @@ def run(
     max_retries: int,
     agent: str,
     cleanup: bool,
+    keep_branches: bool,
     repo: Path | None,
     session_branch: str | None,
     start_wave: int,
@@ -420,6 +426,7 @@ def run(
             profile_path=profile_path,
             profile_name=profile_name,
             session_name=session_name,
+            keep_branches=keep_branches,
         )
     )
 
@@ -590,45 +597,11 @@ def stop(cleanup: bool, repo: Path | None):
 )
 @click.option("--symlink", is_flag=True, help="Symlink instead of copy (for development).")
 @click.option(
-    "--local", is_flag=True, help="Install skills at project level instead of user level."
-)
-@click.option(
-    "--profile",
-    "create_profile",
+    "--global",
+    "use_global",
     is_flag=True,
-    help="Also create a profile.yaml with the detected agent.",
+    help="Install skills to user-level paths only (skip .workbench/ creation).",
 )
-@click.option("--update", is_flag=True, help="Force-update skills to the latest version.")
-def init(agent: str | None, symlink: bool, local: bool, create_profile: bool, update: bool):
-    """Install workbench skills for your agent platform."""
-    resolved_agent = agent or _detect_agent()
-    _install_skills(resolved_agent, symlink, local=local, update=update)
-
-    if create_profile:
-        repo = _find_repo_root() if local else None
-        target_dir = Path.home() / ".workbench" if not local else repo / ".workbench"
-        target = target_dir / "profile.yaml"
-        target.parent.mkdir(parents=True, exist_ok=True)
-
-        if target.exists():
-            if not click.confirm(f"{target} already exists. Overwrite?"):
-                return
-        p = Profile.default()
-        if resolved_agent != "claude":
-            for role_name in Profile._ROLE_NAMES:
-                getattr(p, role_name).agent = resolved_agent
-        p.save(target)
-        console.print(f"Created profile: {target}")
-
-
-@main.command()
-@click.option(
-    "--agent",
-    type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]),
-    default=None,
-    help="Target agent platform.",
-)
-@click.option("--symlink", is_flag=True, help="Symlink skills instead of copy (for development).")
 @click.option(
     "--repo",
     type=click.Path(exists=True, path_type=Path),
@@ -642,33 +615,88 @@ def init(agent: str | None, symlink: bool, local: bool, create_profile: bool, up
     help="Also create a profile.yaml with the detected agent.",
 )
 @click.option("--update", is_flag=True, help="Force-update skills to the latest version.")
-def setup(agent: str | None, symlink: bool, repo: Path | None, create_profile: bool, update: bool):
-    """Set up a repo for workbench: create .workbench/ and install skills."""
-    repo = repo or _find_repo_root()
-    wb_dir = repo / ".workbench"
-    if wb_dir.exists():
-        console.print(f"Already exists: {wb_dir}/")
-    else:
-        wb_dir.mkdir(exist_ok=True)
-        console.print(f"Created {wb_dir}/")
+def setup(
+    agent: str | None,
+    symlink: bool,
+    use_global: bool,
+    repo: Path | None,
+    create_profile: bool,
+    update: bool,
+):
+    """Set up workbench: create .workbench/, install skills, and optionally create a profile.
 
+    By default, installs skills at both user-level and project-level paths.
+    Use --global to only install skills to user-level paths (no .workbench/ creation).
+    """
     resolved_agent = agent or _detect_agent()
-    _install_skills(resolved_agent, symlink, local=True, repo=repo, update=update)
 
-    if create_profile:
-        target = wb_dir / "profile.yaml"
-        if target.exists():
-            if not click.confirm(f"{target} already exists. Overwrite?"):
-                console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
-                return
-        p = Profile.default()
-        if resolved_agent != "claude":
-            for role_name in Profile._ROLE_NAMES:
-                getattr(p, role_name).agent = resolved_agent
-        p.save(target)
-        console.print(f"Created profile: {target}")
+    if use_global:
+        # Global-only: install skills to user-level paths, no .workbench/ creation
+        _install_skills(resolved_agent, symlink, local=False, update=update)
 
-    console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
+        if create_profile:
+            target_dir = Path.home() / ".workbench"
+            target = target_dir / "profile.yaml"
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if target.exists():
+                if not click.confirm(f"{target} already exists. Overwrite?"):
+                    return
+            p = Profile.default()
+            if resolved_agent != "claude":
+                for role_name in Profile._ROLE_NAMES:
+                    getattr(p, role_name).agent = resolved_agent
+            p.save(target)
+            console.print(f"Created profile: {target}")
+    else:
+        # Local setup: create .workbench/ and install skills at project level
+        repo = repo or _find_repo_root()
+        wb_dir = repo / ".workbench"
+        if wb_dir.exists():
+            console.print(f"Already exists: {wb_dir}/")
+        else:
+            wb_dir.mkdir(exist_ok=True)
+            console.print(f"Created {wb_dir}/")
+
+        _install_skills(resolved_agent, symlink, local=True, repo=repo, update=update)
+
+        if create_profile:
+            target = wb_dir / "profile.yaml"
+            if target.exists():
+                if not click.confirm(f"{target} already exists. Overwrite?"):
+                    console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
+                    return
+            p = Profile.default()
+            if resolved_agent != "claude":
+                for role_name in Profile._ROLE_NAMES:
+                    getattr(p, role_name).agent = resolved_agent
+            p.save(target)
+            console.print(f"Created profile: {target}")
+
+        console.print(f"\n[bold green]Repo is ready for workbench.[/bold green]")
+
+
+@main.command(deprecated=True, hidden=True)
+@click.option(
+    "--agent", type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]), default=None
+)
+@click.option("--symlink", is_flag=True)
+@click.option("--local", is_flag=True)
+@click.option("--profile", "create_profile", is_flag=True)
+@click.option("--update", is_flag=True)
+def init(agent: str | None, symlink: bool, local: bool, create_profile: bool, update: bool):
+    """Deprecated: use 'wb setup' instead."""
+    console.print("[yellow]'wb init' is deprecated. Use 'wb setup' instead.[/yellow]\n")
+    # Delegate to setup logic
+    ctx = click.get_current_context()
+    ctx.invoke(
+        setup,
+        agent=agent,
+        symlink=symlink,
+        use_global=not local,
+        repo=None,
+        create_profile=create_profile,
+        update=update,
+    )
 
 
 _VALID_ROLES = Profile._ROLE_NAMES

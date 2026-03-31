@@ -128,23 +128,23 @@ class TestReadmeCliReference:
 
 
 class TestReadmeInstallSection:
-    """Install section must show --local flag and gemini agent options."""
+    """Install section must show setup command with agent and global options."""
 
-    def test_init_local_flag_documented(self):
+    def test_setup_global_flag_documented(self):
         content = _read(README)
-        assert "--local" in content
+        assert "--global" in content
 
-    def test_init_gemini_documented(self):
+    def test_setup_gemini_documented(self):
         content = _read(README)
-        assert "wb init --agent gemini" in content
+        assert "wb setup --agent gemini" in content or "setup --global --agent gemini" in content
 
-    def test_init_claude_local_documented(self):
+    def test_setup_claude_documented(self):
         content = _read(README)
-        assert "--agent claude --local" in content or "--local" in content
+        assert "--agent claude" in content
 
-    def test_init_gemini_local_documented(self):
+    def test_setup_update_documented(self):
         content = _read(README)
-        assert "--agent gemini --local" in content
+        assert "--update" in content
 
 
 # ---------------------------------------------------------------------------
@@ -242,9 +242,9 @@ class TestSkillInstallSection:
         content = _read(SKILL_MD)
         assert ".agents/skills/" in content or ".agents/skills" in content
 
-    def test_init_gemini_documented(self):
+    def test_setup_gemini_documented(self):
         content = _read(SKILL_MD)
-        assert "wb init --agent gemini" in content or "--agent gemini" in content
+        assert "wb setup --agent gemini" in content or "setup --global --agent gemini" in content
 
 
 # ---------------------------------------------------------------------------

@@ -27,6 +27,15 @@ class Worktree:
         )
 
 
+def delete_branch(repo: Path, branch: str) -> None:
+    """Delete a local branch. Silently ignores errors (e.g. branch doesn't exist)."""
+    subprocess.run(
+        ["git", "branch", "-D", branch],
+        cwd=repo,
+        capture_output=True,
+    )
+
+
 def get_main_branch(repo: Path) -> str:
     """Detect the main/default branch."""
     result = subprocess.run(

@@ -315,13 +315,13 @@ To update workbench and its skills to the latest version:
 
 ```bash
 pip install --upgrade wbcli    # upgrade the package
-wb init --update               # overwrite skill files with the latest version
+wb setup --update              # overwrite project-level skill files with the latest version
 ```
 
-If skills are installed locally (project-level), also run:
+For user-level skills:
 
 ```bash
-wb init --update --local       # update project-level skills
+wb setup --global --update     # update user-level skills
 ```
 
 If using `--symlink`, skill files stay in sync automatically — no `--update` needed.
@@ -330,6 +330,7 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 
 - `wb run <plan>` — execute a plan with parallel agents
 - `wb run plan.md --name auth-feature` — name the session branch
+- `wb run plan.md --keep-branches` — keep task branches after merging
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
 - `wb run plan.md --base feature-x` — branch from a specific branch
 - `wb run plan.md --local` — branch from local ref instead of fetching
@@ -340,15 +341,13 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb stop` — kill all active agent sessions
 - `wb stop --cleanup` — also remove worktrees and branches
 - `wb clean` — remove all workbench worktrees
-- `wb setup` — prepare a repo for workbench use
+- `wb setup` — create .workbench/, install skills locally, prepare repo
+- `wb setup --agent gemini` — install skills for Gemini CLI
 - `wb setup --profile` — also create a profile.yaml with the detected agent
 - `wb setup --update` — force-update skills to the latest version
-- `wb init` — install workbench skills for your agent platform
-- `wb init --agent gemini` — install skills for Gemini CLI
-- `wb init --agent gemini --profile` — install skills and create profile with gemini as default
-- `wb init --update` — force-update skills to the latest version
-- `wb init --agent claude --local` — install to repo-local .claude/skills/ + .agents/skills/
-- `wb init --agent gemini --local` — install to repo-local .agents/skills/
+- `wb setup --global` — install skills to user-level paths (no .workbench/ creation)
+- `wb setup --global --agent claude` — install to ~/.claude/skills/
+- `wb setup --global --agent gemini` — install to ~/.agents/skills/
 - `wb profile init` — create profile.yaml from defaults
 - `wb profile init --name fast --set reviewer.agent=gemini` — create a named profile with overrides
 - `wb profile show` — print resolved profile

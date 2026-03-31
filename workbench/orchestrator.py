@@ -21,6 +21,7 @@ from .worktree import (
     complete_merge,
     create_session_branch,
     create_worktree,
+    delete_branch,
     get_main_branch,
     merge_into_session,
 )
@@ -133,6 +134,7 @@ async def run_plan(
     profile_path: Path | None = None,
     profile_name: str | None = None,
     session_name: str | None = None,
+    keep_branches: bool = False,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -286,6 +288,8 @@ async def run_plan(
                 result = merge_into_session(repo, session_branch, state.worktree.branch)
                 if result.success:
                     console.print(f"  [green]✓[/green] {state.worktree.branch} — {result.message}")
+                    if not keep_branches:
+                        delete_branch(repo, state.worktree.branch)
                 elif result.conflicts and result.merge_dir:
                     # Conflicts detected — dispatch merge resolver agent
                     console.print(
@@ -321,6 +325,8 @@ async def run_plan(
                                 f"{merge_finish.message}"
                             )
                             state.status = TaskStatus.DONE
+                            if not keep_branches:
+                                delete_branch(repo, state.worktree.branch)
                         else:
                             console.print(
                                 f"  [red]✗[/red] {state.worktree.branch} — "
