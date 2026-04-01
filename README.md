@@ -48,41 +48,50 @@ If the skill file already exists and is unchanged, it's skipped. If it differs, 
 
 ### 2. Write a plan
 
-Create a markdown file with tasks for workbench to execute:
+Create a markdown file (e.g. `plan.md`) with tasks for workbench to execute:
 
 ```markdown
-# Add user authentication
+# Plan title
 
 ## Context
 
-FastAPI app with SQLAlchemy ORM. Auth should use JWT tokens.
+<Background about the project, what's being built, and why.
+Injected into every agent's prompt so each task has full context.>
 
 ## Conventions
 
-- Python 3.12, type hints on all signatures
-- Tests: pytest, run with `pytest tests/ -v`
-- Imports: stdlib → third-party → local
+<Project-specific patterns agents must follow: language version,
+test framework, import style, naming conventions, etc.
+Also injected into every agent's prompt.>
 
-## Task: JWT tokens
-Files: src/auth/tokens.py, tests/test_tokens.py
+## Task: Short title
+Files: path/to/file.py, path/to/other.py
 
-Create `create_token(user_id: str) -> str` and `verify_token(token: str) -> dict`.
-Tokens expire after 24h. Secret from `AUTH_SECRET` env var.
+<Detailed description of what to implement. Each task runs in an
+isolated git worktree — the agent only sees this description,
+not the rest of the plan. Be specific and self-contained.>
 
-## Task: Auth middleware
-Files: src/auth/middleware.py, tests/test_middleware.py
-Depends: jwt-tokens
+## Task: Another task
+Files: path/to/different.py
+Depends: short-title
 
-FastAPI dependency `require_auth(request: Request) -> User` that extracts
-Bearer token from Authorization header and verifies it.
+<This task depends on "Short title" (referenced by its slug).
+It won't start until the dependency completes. Describe the
+interfaces from the earlier task that this task needs.>
 ```
 
-Key plan elements:
-- `## Context` and `## Conventions` are injected into every agent's prompt
-- `## Task: <title>` defines each unit of work
-- `Files:` declares file ownership (prevents parallel conflicts)
-- `Depends:` references other tasks by slug (title → lowercase, non-alphanumeric → `-`)
-- Tasks without dependencies run in the earliest wave
+**Plan sections:**
+
+| Section | Purpose |
+|---|---|
+| `# Title` | Plan name (shown in status output) |
+| `## Context` | Project background — injected into every agent's prompt |
+| `## Conventions` | Code style rules — injected into every agent's prompt |
+| `## Task: <title>` | A unit of work, becomes an independent agent session |
+| `Files:` | File ownership — prevents parallel tasks from conflicting |
+| `Depends:` | Task slugs this depends on (title → lowercase, non-alphanumeric → `-`) |
+
+Tasks without dependencies run in the earliest wave. Keep titles short (2-4 words) — they become dependency slugs.
 
 Use `wb preview plan.md` to dry-run and verify tasks and waves before executing.
 
@@ -95,7 +104,7 @@ wb run plan.md
 Workbench parses the plan, groups tasks into dependency waves, creates isolated git worktrees, and dispatches agents in parallel. Each task goes through:
 
 ```
-implement → test → review → fix (retry up to --max-retries)
+implement → test → fix  → review → fix (retry up to --max-retries)
 ```
 
 After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent.
@@ -116,10 +125,9 @@ When you run `wb run plan.md`, workbench creates this branch structure:
 
 ```
 main (or --base branch)
- └── workbench-N                ← session branch (all work merges here)
-      ├── wb/task-1-jwt-tokens       ← worktree branch for task 1
-      ├── wb/task-2-auth-middleware   ← worktree branch for task 2
-      └── wb/task-3-api-endpoints    ← worktree branch for task 3
+ └── workbench-N (or --name)         ← session branch (all work merges here)
+      ├── wb/task-1-short-title       ← worktree branch for task 1
+      ├── wb/task-2-another-task   ← worktree branch for task 2
 ```
 
 Each task gets its own branch and worktree. Tasks in the same wave run in parallel. After a wave completes, successful task branches are merged into the session branch. If merge conflicts arise between parallel branches, a merger agent resolves them automatically. The next wave then branches from the updated session branch.
@@ -128,13 +136,14 @@ When all waves finish, the session branch (`workbench-N`) contains the combined 
 
 By default, workbench fetches `origin/main` and creates the session branch from the latest remote state.
 
-| Flag | Base | Source | Use case |
-|------|------|--------|----------|
-| *(default)* | `main` | `origin/main` (fetched) | Start from latest remote |
-| `--local` | `main` | local `main` | Build on unpushed local work |
-| `--base <branch>` | `<branch>` | `origin/<branch>` (fetched) | Branch from a specific remote branch |
-| `--base <branch> --local` | `<branch>` | local `<branch>` | Branch from a local feature branch |
-| `-b workbench-3` | *(existing)* | *(existing)* | Resume a previous session |
+| Flag | Session branch | Base | Source | Use case |
+|------|----------------|------|--------|----------|
+| *(default)* | `workbench-N` | `main` | `origin/main` (fetched) | Start from latest remote |
+| `--name my-feature` | `my-feature` | `main` | `origin/main` (fetched) | Named session branch |
+| `--local` | `workbench-N` | `main` | local `main` | Build on unpushed local work |
+| `--base <branch>` | `workbench-N` | `<branch>` | `origin/<branch>` (fetched) | Branch from a specific remote branch |
+| `--base <branch> --local` | `workbench-N` | `<branch>` | local `<branch>` | Branch from a local feature branch |
+| `-b my-session` | `my-session` | *(existing)* | *(existing)* | Resume a previous session |
 
 ## Profiles
 
