@@ -497,6 +497,7 @@ def clean(repo: Path | None):
         text=True,
     )
 
+    # Phase 1: Remove worktrees
     removed = 0
     for line in result.stdout.splitlines():
         if line.startswith("worktree ") and ".workbench" in line:
@@ -506,19 +507,21 @@ def clean(repo: Path | None):
             )
             removed += 1
 
-    # Clean up wb/ branches
+    # Prune stale worktree references before touching branches
+    subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True)
+
+    # Phase 2: Collect branches to delete, then delete in one pass
     result = subprocess.run(
         ["git", "branch", "--list", "wb/*"],
         cwd=repo,
         capture_output=True,
         text=True,
     )
-    for line in result.stdout.splitlines():
-        branch = line.strip()
-        if branch:
-            subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
+    branches = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    for branch in branches:
+        subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
-    console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+    console.print(f"[green]Cleaned up {removed} worktree(s) and {len(branches)} branch(es).[/green]")
 
 
 @main.command()
@@ -573,6 +576,8 @@ def stop(cleanup: bool, repo: Path | None):
                 )
                 removed += 1
 
+        subprocess.run(["git", "worktree", "prune"], cwd=repo, capture_output=True)
+
         # Clean up wb/ branches
         result = subprocess.run(
             ["git", "branch", "--list", "wb/*"],
@@ -580,12 +585,11 @@ def stop(cleanup: bool, repo: Path | None):
             capture_output=True,
             text=True,
         )
-        for line in result.stdout.splitlines():
-            branch = line.strip()
-            if branch:
-                subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
+        branches = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+        for branch in branches:
+            subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
-        console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+        console.print(f"[green]Cleaned up {removed} worktree(s) and {len(branches)} branch(es).[/green]")
 
 
 @main.command()
