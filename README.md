@@ -11,9 +11,30 @@ Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks,
 
 ## Requirements
 
-- Python 3.11+
-- tmux (recommended — `brew install tmux` / `apt install tmux`). Use `--no-tmux` without it.
-- An agent CLI: [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default), [Gemini CLI](https://github.com/google-gemini/gemini-cli), [Codex](https://github.com/openai/codex), or any custom CLI.
+**Required:**
+
+- **Python 3.11+**
+  - macOS: `brew install python` or [python.org](https://www.python.org/downloads/)
+  - Linux: `apt install python3` / `dnf install python3`
+  - Windows: [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3.13`
+
+- **Git**
+  - macOS: `xcode-select --install` or `brew install git`
+  - Linux: `apt install git` / `dnf install git`
+  - Windows: [git-scm.com](https://git-scm.com/downloads) or `winget install Git.Git`
+
+- **An agent CLI** — at least one of:
+  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
+  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+  - [Codex](https://github.com/openai/codex)
+  - Any custom CLI via `.workbench/agents.yaml`
+
+**Optional:**
+
+- **tmux** — enables live monitoring of agent sessions. Use `--no-tmux` to run without it.
+  - macOS: `brew install tmux`
+  - Linux: `apt install tmux` / `dnf install tmux`
+  - Windows: available via WSL
 
 ## Install
 
