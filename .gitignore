@@ -21,3 +21,7 @@ workbench/_version.py
 .idea/
 .vscode/
 *.swp
+
+# agents
+.agents/
+.claude/
