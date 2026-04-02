@@ -69,16 +69,36 @@ class TestCodexAdapter:
         cmd = self.adapter.build_command("fix bug", tmp_path)
         assert cmd == [
             "codex",
-            "-q",
+            "exec",
             "--full-auto",
-            "--approval-mode",
-            "full-auto",
+            "--json",
             "fix bug",
         ]
 
-    def test_parse_output_strips_whitespace(self):
-        text, cost = self.adapter.parse_output("  hello world  \n")
-        assert text == "hello world"
+    def test_parse_output_ndjson_assistant_message(self):
+        lines = [
+            json.dumps({"type": "message", "role": "user", "content": "fix bug"}),
+            json.dumps({"type": "message", "role": "assistant", "content": "done"}),
+        ]
+        raw = "\n".join(lines)
+        text, cost = self.adapter.parse_output(raw)
+        assert text == "done"
+        assert cost == {}
+
+    def test_parse_output_no_assistant_message_falls_back(self):
+        raw = "plain text output"
+        text, cost = self.adapter.parse_output(raw)
+        assert text == "plain text output"
+        assert cost == {}
+
+    def test_parse_output_multiple_assistant_messages_takes_last(self):
+        lines = [
+            json.dumps({"type": "message", "role": "assistant", "content": "first"}),
+            json.dumps({"type": "message", "role": "assistant", "content": "second"}),
+        ]
+        raw = "\n".join(lines)
+        text, cost = self.adapter.parse_output(raw)
+        assert text == "second"
         assert cost == {}
 
     def test_is_agent_adapter(self):

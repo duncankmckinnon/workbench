@@ -55,17 +55,50 @@ class ClaudeAdapter(AgentAdapter):
 
 
 class CodexAdapter(AgentAdapter):
-    """Adapter for the Codex CLI."""
+    """Adapter for the Codex CLI (OpenAI).
+
+    Uses `codex exec` for non-interactive execution with JSON output.
+    """
 
     name = "codex"
 
     def build_command(self, prompt: str, cwd: Path) -> list[str]:
         return [
             "codex",
-            "-q",
+            "exec",
             "--full-auto",
-            "--approval-mode",
-            "full-auto",
+            "--json",
+            prompt,
+        ]
+
+    def parse_output(self, raw: str) -> tuple[str, dict]:
+        # codex exec --json outputs newline-delimited JSON events
+        # The last message event contains the assistant's response
+        lines = raw.strip().split("\n")
+        last_message = ""
+        for line in reversed(lines):
+            try:
+                data = json.loads(line)
+                if data.get("type") == "message" and data.get("role") == "assistant":
+                    last_message = data.get("content", "")
+                    break
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return (last_message or raw.strip(), {})
+
+
+class CursorAdapter(AgentAdapter):
+    """Adapter for the Cursor CLI (cursor-agent).
+
+    Cursor provides a headless agent mode via `cursor-agent`.
+    """
+
+    name = "cursor"
+
+    def build_command(self, prompt: str, cwd: Path) -> list[str]:
+        return [
+            "cursor-agent",
+            "--prompt",
             prompt,
         ]
 
