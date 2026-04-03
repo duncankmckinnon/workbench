@@ -15,14 +15,22 @@ class Worktree:
     branch: str
     task_id: str
 
+    @property
+    def repo(self) -> Path:
+        """Derive the repo root from the worktree path (.workbench/<id> lives under repo)."""
+        return self.path.parent.parent
+
     def cleanup(self):
         """Remove the worktree and delete the branch."""
+        repo = self.repo
         subprocess.run(
             ["git", "worktree", "remove", str(self.path), "--force"],
+            cwd=repo,
             capture_output=True,
         )
         subprocess.run(
             ["git", "branch", "-D", self.branch],
+            cwd=repo,
             capture_output=True,
         )
 
