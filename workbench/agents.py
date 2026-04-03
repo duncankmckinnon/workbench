@@ -190,8 +190,7 @@ def build_prompt(
             Role.REVIEWER: "Diff to review",
             Role.FIXER: "Current changes",
         }[role]
-        max_len = 6000 if role == Role.FIXER else 8000
-        parts.append(f"## {label}\n\n```diff\n{diff[:max_len]}\n```")
+        parts.append(f"## {label}\n\n```diff\n{diff}\n```")
 
     # 7. Feedback (fixer only)
     if role == Role.FIXER and extra_context:
@@ -479,7 +478,7 @@ async def run_pipeline(
             # Test failed with feedback — send to fixer
             if attempt <= max_retries:
                 _notify(TaskStatus.FIXING)
-                feedback = test_result.feedback or test_result.output[:2000]
+                feedback = test_result.feedback or test_result.output
                 fix_agent, fix_directive = _resolve_for_role(Role.FIXER)
                 fix_result = await run_agent(
                     Role.FIXER,
@@ -535,7 +534,7 @@ async def run_pipeline(
             # Review failed with feedback — send to fixer
             if attempt <= max_retries:
                 _notify(TaskStatus.FIXING)
-                feedback = review_result.feedback or review_result.output[:2000]
+                feedback = review_result.feedback or review_result.output
                 review_fix_agent, review_fix_directive = _resolve_for_role(Role.FIXER)
                 fix_result = await run_agent(
                     Role.FIXER,
