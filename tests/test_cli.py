@@ -960,3 +960,129 @@ class TestRunWithProfile:
 
         # click.Path(exists=True) should reject nonexistent files
         assert result.exit_code != 0
+
+
+# ---------------------------------------------------------------------------
+# wb run --retry-failed / --fail-fast / --only-failed flags
+# ---------------------------------------------------------------------------
+
+
+def _run_cli_with_capture(git_repo, tmp_path, extra_args):
+    """Helper to invoke `wb run` with a fake run_plan that captures kwargs.
+
+    Returns (CliRunner result, kwargs dict passed to run_plan).
+    """
+    import asyncio
+
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_run_plan(**kwargs):
+            return []
+
+        mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux"] + extra_args)
+
+        # Extract kwargs from the mock's call record
+        captured = dict(mock_run_plan.call_args.kwargs) if mock_run_plan.called else {}
+
+    return result, captured
+
+
+def test_run_retry_failed_flag(git_repo, tmp_path):
+    """--retry-failed should pass retry_failed=True to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--retry-failed"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("retry_failed") is True
+
+
+def test_run_fail_fast_flag(git_repo, tmp_path):
+    """--fail-fast should pass fail_fast=True to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--fail-fast"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("fail_fast") is True
+
+
+def test_run_only_failed_requires_session_branch(git_repo, tmp_path):
+    """--only-failed without --session-branch should error."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux", "--only-failed"])
+
+    assert result.exit_code != 0
+    assert "--only-failed requires --session-branch" in result.output
+
+
+def test_run_only_failed_with_session_branch(git_repo, tmp_path):
+    """--only-failed with --session-branch should pass both to run_plan."""
+    result, captured = _run_cli_with_capture(
+        git_repo, tmp_path, ["--only-failed", "-b", "workbench-1"]
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("only_failed") is True
+    assert captured.get("session_branch") == "workbench-1"
+
+
+def test_run_flags_default_to_false(git_repo, tmp_path):
+    """Without flags, retry_failed, fail_fast, and only_failed default to False."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert captured.get("retry_failed") is False
+    assert captured.get("fail_fast") is False
+    assert captured.get("only_failed") is False
+
+
+# ---------------------------------------------------------------------------
+# wb merge
+# ---------------------------------------------------------------------------
+
+
+def test_merge_requires_session_branch(git_repo):
+    """wb merge without -b should error."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["merge"])
+
+    assert result.exit_code != 0
+
+
+def test_merge_passes_args(git_repo):
+    """wb merge -b workbench-1 should pass correct args to merge_unmerged."""
+    import asyncio
+
+    runner = CliRunner()
+
+    with (
+        patch("workbench.cli.merge_unmerged") as mock_merge,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_merge(**kwargs):
+            pass
+
+        mock_merge.side_effect = lambda **kwargs: fake_merge(**kwargs)
+        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(
+            main, ["merge", "-b", "workbench-1", "--no-tmux"]
+        )
+
+        captured = dict(mock_merge.call_args.kwargs) if mock_merge.called else {}
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("session_branch") == "workbench-1"
+    assert captured.get("use_tmux") is False

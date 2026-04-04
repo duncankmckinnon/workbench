@@ -12,7 +12,7 @@ import click
 import yaml
 from rich.console import Console
 
-from .orchestrator import run_plan
+from .orchestrator import merge_unmerged, run_plan
 from .plan_parser import parse_plan
 from .profile import Profile, RoleConfig
 from .tmux import check_tmux_available
@@ -320,6 +320,21 @@ def main():
     help="Name the session branch (creates workbench-<name> instead of workbench-<N>).",
 )
 @click.option(
+    "--retry-failed",
+    is_flag=True,
+    help="Automatically retry tasks that failed due to transient errors (not exhausted retries).",
+)
+@click.option(
+    "--fail-fast",
+    is_flag=True,
+    help="Stop after the first wave that has any failed tasks.",
+)
+@click.option(
+    "--only-failed",
+    is_flag=True,
+    help="Re-run only previously failed tasks (skip tasks already merged into session branch). Requires --session-branch.",
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -356,6 +371,9 @@ def run(
     profile_path: Path | None,
     profile_name: str | None,
     session_name: str | None,
+    retry_failed: bool,
+    fail_fast: bool,
+    only_failed: bool,
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -379,6 +397,9 @@ def run(
 
     if tdd and skip_test:
         raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
+
+    if only_failed and not session_branch:
+        raise click.ClickException("--only-failed requires --session-branch (-b).")
 
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
@@ -427,6 +448,9 @@ def run(
             profile_name=profile_name,
             session_name=session_name,
             keep_branches=keep_branches,
+            retry_failed=retry_failed,
+            fail_fast=fail_fast,
+            only_failed=only_failed,
         )
     )
 
@@ -586,6 +610,68 @@ def stop(cleanup: bool, repo: Path | None):
                 subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
 
         console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+
+
+@main.command()
+@click.option(
+    "--session-branch",
+    "-b",
+    required=True,
+    help="Session branch to merge into (e.g. workbench-1).",
+)
+@click.option("--agent", default="claude", help="Agent CLI command for merge conflict resolution.")
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
+@click.option(
+    "--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions."
+)
+@click.option(
+    "--keep-branches",
+    is_flag=True,
+    help="Keep task branches after merging (default: auto-delete on success).",
+)
+def merge(
+    session_branch: str,
+    agent: str,
+    repo: Path | None,
+    no_tmux: bool,
+    keep_branches: bool,
+):
+    """Merge completed-but-unmerged task branches into the session branch.
+
+    \b
+    Reads .workbench/status.json to find tasks that completed their pipeline
+    but haven't been merged yet. Attempts each merge, using a resolver agent
+    for conflicts.
+
+    \b
+    Example:
+      wb merge -b workbench-1
+      wb merge -b workbench-1 --agent gemini
+    """
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    asyncio.run(
+        merge_unmerged(
+            repo=repo,
+            session_branch=session_branch,
+            agent_cmd=agent,
+            use_tmux=not no_tmux,
+            keep_branches=keep_branches,
+        )
+    )
 
 
 @main.command()

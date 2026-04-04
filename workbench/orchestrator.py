@@ -15,6 +15,7 @@ from rich.text import Text
 from .agents import AgentResult, Role, TaskStatus, run_merge_resolver, run_pipeline
 from .plan_parser import Plan, Task
 from .profile import Profile
+from .session_status import SessionStatus
 from .worktree import (
     Worktree,
     cleanup_merge_worktree,
@@ -23,6 +24,7 @@ from .worktree import (
     create_worktree,
     delete_branch,
     get_main_branch,
+    get_merged_branches,
     merge_into_session,
 )
 
@@ -135,6 +137,9 @@ async def run_plan(
     profile_name: str | None = None,
     session_name: str | None = None,
     keep_branches: bool = False,
+    retry_failed: bool = False,
+    fail_fast: bool = False,
+    only_failed: bool = False,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -149,6 +154,23 @@ async def run_plan(
             repo, local=local, base=base_branch, session_name=session_name
         )
 
+    # Initialize session status tracking
+    session_status = SessionStatus(session_branch=session_branch)
+
+    # --only-failed: load prior session status and skip completed tasks
+    skipped_task_ids: set[str] = set()
+    if only_failed:
+        prior = SessionStatus.load(repo)
+        if prior and prior.session_branch == session_branch:
+            skipped_task_ids = prior.completed_task_ids()
+            # Carry forward completed records
+            for tid in skipped_task_ids:
+                session_status.tasks[tid] = prior.tasks[tid]
+        if skipped_task_ids:
+            console.print(
+                f"[dim]--only-failed: skipping {len(skipped_task_ids)} completed task(s)[/dim]"
+            )
+
     console.print(f"\n[bold]Plan:[/bold] {plan.title}")
     console.print(f"[bold]Tasks:[/bold] {len(plan.tasks)} across {len(waves)} wave(s)")
     console.print(f"[bold]Concurrency:[/bold] {max_concurrent}")
@@ -156,6 +178,10 @@ async def run_plan(
     console.print(f"[bold]Repo:[/bold] {repo}")
     console.print(f"[bold]Session branch:[/bold] {session_branch}")
     console.print(f"[bold]tmux:[/bold] {'enabled' if use_tmux else 'disabled'}")
+    if retry_failed:
+        console.print("[bold]Retry failed:[/bold] enabled (one retry pass per wave)")
+    if fail_fast:
+        console.print("[bold]Fail fast:[/bold] enabled (stop on first wave with failures)")
     if tdd:
         console.print("[bold]Mode:[/bold] test-driven development (tests first)")
     if directives:
@@ -186,16 +212,21 @@ async def run_plan(
             f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n"
         )
 
-        # Initialize state for this wave
+        # Initialize state for this wave (skip already-merged tasks for --only-failed)
         wave_states: list[TaskState] = []
         for task in wave:
             state = TaskState(task=task)
+            if task.id in skipped_task_ids:
+                state.status = TaskStatus.DONE
             wave_states.append(state)
             all_states.append(state)
             state_map[task.id] = state
 
         # Create worktrees for all tasks in wave, branching from session branch
+        # Skip tasks pre-marked DONE by --only-failed
         for state in wave_states:
+            if state.status == TaskStatus.DONE:
+                continue
             try:
                 wt = create_worktree(
                     repo, state.task.id, state.task.slug, base_branch=session_branch
@@ -223,7 +254,7 @@ async def run_plan(
         sem = asyncio.Semaphore(max_concurrent)
 
         async def _run_task(state: TaskState):
-            if state.status == TaskStatus.FAILED:
+            if state.status in (TaskStatus.FAILED, TaskStatus.DONE):
                 return
 
             async with sem:
@@ -262,6 +293,15 @@ async def run_plan(
                 else:
                     state.status = TaskStatus.DONE
 
+                # Persist task outcome immediately (lock-protected for concurrency)
+                await session_status.update_task(
+                    repo=repo,
+                    task_id=state.task.id,
+                    status=state.status.value,
+                    branch=state.worktree.branch if state.worktree else None,
+                    last_agent=results[-1].role.value if results else "",
+                )
+
         # Run with live status display
         tasks = [_run_task(s) for s in wave_states]
 
@@ -278,7 +318,10 @@ async def run_plan(
             await asyncio.gather(*tasks, _update_display())
 
         # After the wave: merge all successful task branches into the session branch
-        done_states = [s for s in wave_states if s.status == TaskStatus.DONE]
+        # Exclude tasks that were pre-skipped by --only-failed (no worktree)
+        done_states = [
+            s for s in wave_states if s.status == TaskStatus.DONE and s.worktree is not None
+        ]
         if done_states:
             console.print(
                 f"\n[bold]Merging {len(done_states)} branch(es) into {session_branch}...[/bold]\n"
@@ -288,6 +331,7 @@ async def run_plan(
                 result = merge_into_session(repo, session_branch, state.worktree.branch)
                 if result.success:
                     console.print(f"  [green]✓[/green] {state.worktree.branch} — {result.message}")
+                    await session_status.update_merged(repo, state.task.id)
                     if not keep_branches:
                         delete_branch(repo, state.worktree.branch)
                 elif result.conflicts and result.merge_dir:
@@ -325,6 +369,7 @@ async def run_plan(
                                 f"{merge_finish.message}"
                             )
                             state.status = TaskStatus.DONE
+                            await session_status.update_merged(repo, state.task.id)
                             if not keep_branches:
                                 delete_branch(repo, state.worktree.branch)
                         else:
@@ -349,6 +394,108 @@ async def run_plan(
                     state.status = TaskStatus.FAILED
 
             console.print()
+
+        # --retry-failed: re-run tasks that failed due to transient errors.
+        # A task is retryable if it crashed before exhausting its fix cycles
+        # (i.e. fix_count < max_retries). Tasks that went through all retries
+        # and still failed need human intervention, not another blind run.
+        if retry_failed:
+            retryable = [
+                s
+                for s in wave_states
+                if s.status == TaskStatus.FAILED
+                and s.worktree is not None
+                and s.fix_count < max_retries
+            ]
+
+            if retryable:
+                console.print(
+                    f"[bold yellow]Retrying {len(retryable)} failed task(s)...[/bold yellow]\n"
+                )
+
+                # Reset state for retry
+                for state in retryable:
+                    state.status = TaskStatus.PENDING
+                    state.results.clear()
+                    state.started_at = None
+                    state.finished_at = None
+
+                    # Clean up old worktree and branch, create fresh ones
+                    if state.worktree:
+                        state.worktree.cleanup()
+                        state.worktree = None
+                    try:
+                        wt = create_worktree(
+                            repo,
+                            state.task.id,
+                            state.task.slug,
+                            base_branch=session_branch,
+                        )
+                        state.worktree = wt
+                    except Exception as e:
+                        state.status = TaskStatus.FAILED
+                        state.results.append(
+                            AgentResult(
+                                task_id=state.task.id,
+                                role=Role.IMPLEMENTOR,
+                                status=TaskStatus.FAILED,
+                                output=f"Retry worktree creation failed: {e}",
+                            )
+                        )
+
+                retry_tasks = [_run_task(s) for s in retryable]
+
+                with Live(
+                    _status_table(all_states), console=console, refresh_per_second=1
+                ) as live:
+
+                    async def _update_retry_display():
+                        while not all(
+                            s.status in (TaskStatus.DONE, TaskStatus.FAILED)
+                            for s in retryable
+                        ):
+                            live.update(_status_table(all_states))
+                            await asyncio.sleep(1)
+                        live.update(_status_table(all_states))
+
+                    await asyncio.gather(*retry_tasks, _update_retry_display())
+
+                # Merge any newly successful retried tasks
+                retry_done = [s for s in retryable if s.status == TaskStatus.DONE]
+                if retry_done:
+                    console.print(
+                        f"\n[bold]Merging {len(retry_done)} retried branch(es) "
+                        f"into {session_branch}...[/bold]\n"
+                    )
+                    for state in retry_done:
+                        result = merge_into_session(
+                            repo, session_branch, state.worktree.branch
+                        )
+                        if result.success:
+                            console.print(
+                                f"  [green]✓[/green] {state.worktree.branch} — "
+                                f"{result.message}"
+                            )
+                            await session_status.update_merged(repo, state.task.id)
+                            if not keep_branches:
+                                delete_branch(repo, state.worktree.branch)
+                        else:
+                            console.print(
+                                f"  [red]✗[/red] {state.worktree.branch} — "
+                                f"{result.message}"
+                            )
+                            state.status = TaskStatus.FAILED
+                    console.print()
+
+        # --fail-fast: stop processing further waves if any task failed
+        if fail_fast:
+            wave_failed = [s for s in wave_states if s.status == TaskStatus.FAILED]
+            if wave_failed:
+                console.print(
+                    f"[bold red]--fail-fast: {len(wave_failed)} task(s) failed in "
+                    f"wave {wave_num}, stopping.[/bold red]\n"
+                )
+                break
 
     # Summary
     console.print("\n[bold]━━━ Summary ━━━[/bold]\n")
@@ -379,3 +526,113 @@ async def run_plan(
         console.print("\n[dim]Worktrees cleaned up.[/dim]")
 
     return all_states
+
+
+async def merge_unmerged(
+    repo: Path,
+    session_branch: str,
+    agent_cmd: str = "claude",
+    use_tmux: bool = True,
+    keep_branches: bool = False,
+) -> SessionStatus:
+    """Merge all completed-but-unmerged task branches into the session branch.
+
+    Reads status.json, finds tasks with status=done and merged=False,
+    and attempts to merge each one. Uses a merge resolver agent for conflicts.
+    """
+    console = Console()
+
+    status = SessionStatus.load(repo)
+    if status is None:
+        console.print("[red]No status.json found. Run 'wb run' first.[/red]")
+        return SessionStatus(session_branch=session_branch)
+
+    if status.session_branch != session_branch:
+        console.print(
+            f"[red]status.json is for session '{status.session_branch}', "
+            f"not '{session_branch}'.[/red]"
+        )
+        return status
+
+    # Find tasks that completed but haven't been merged
+    unmerged = {
+        tid: rec
+        for tid, rec in status.tasks.items()
+        if rec.status == "done" and not rec.merged and rec.branch
+    }
+
+    if not unmerged:
+        console.print("[dim]No unmerged tasks found.[/dim]")
+        return status
+
+    # Pre-check: skip branches already merged via git (manual merge)
+    already_merged = get_merged_branches(repo, session_branch)
+
+    console.print(
+        f"\n[bold]Merging {len(unmerged)} branch(es) into {session_branch}...[/bold]\n"
+    )
+
+    for tid, rec in unmerged.items():
+        if rec.branch in already_merged:
+            console.print(
+                f"  [green]✓[/green] {rec.branch} — already merged"
+            )
+            await status.update_merged(repo, tid)
+            if not keep_branches:
+                delete_branch(repo, rec.branch)
+            continue
+
+        result = merge_into_session(repo, session_branch, rec.branch)
+        if result.success:
+            console.print(f"  [green]✓[/green] {rec.branch} — {result.message}")
+            await status.update_merged(repo, tid)
+            if not keep_branches:
+                delete_branch(repo, rec.branch)
+        elif result.conflicts and result.merge_dir:
+            console.print(
+                f"  [blue]⚡[/blue] {rec.branch} — "
+                f"{result.message} Resolving..."
+            )
+            for cf in result.conflicts:
+                console.print(f"      [dim]{cf}[/dim]")
+
+            resolver_result = await run_merge_resolver(
+                task_branch=rec.branch,
+                session_branch=session_branch,
+                merge_dir=result.merge_dir,
+                conflicts=result.conflicts,
+                repo=repo,
+                agent_cmd=agent_cmd,
+                use_tmux=use_tmux,
+            )
+
+            if resolver_result.passed:
+                merge_finish = complete_merge(
+                    result.merge_dir, repo, session_branch, rec.branch
+                )
+                if merge_finish.success:
+                    console.print(
+                        f"  [green]✓[/green] {rec.branch} — {merge_finish.message}"
+                    )
+                    await status.update_merged(repo, tid)
+                    if not keep_branches:
+                        delete_branch(repo, rec.branch)
+                else:
+                    console.print(
+                        f"  [red]✗[/red] {rec.branch} — {merge_finish.message}"
+                    )
+                    cleanup_merge_worktree(repo, result.merge_dir)
+            else:
+                console.print(
+                    f"  [red]✗[/red] {rec.branch} — Merge resolver failed"
+                )
+                cleanup_merge_worktree(repo, result.merge_dir)
+        else:
+            console.print(f"  [red]✗[/red] {rec.branch} — {result.message}")
+
+    # Summary
+    merged_count = sum(1 for rec in status.tasks.values() if rec.merged)
+    total = len(status.tasks)
+    console.print(f"\n[bold]{merged_count}/{total} task(s) merged into {session_branch}[/bold]")
+
+    return status

@@ -7,6 +7,7 @@ from workbench.worktree import (
     create_worktree,
     get_diff,
     get_main_branch,
+    get_merged_branches,
     merge_into_session,
 )
 
@@ -227,3 +228,41 @@ def test_complete_merge_unresolved(git_repo):
     finally:
         wt1.cleanup()
         wt2.cleanup()
+
+
+def test_get_merged_branches_empty(git_repo):
+    """Session branch with no merges returns only the base branches."""
+    session = create_session_branch(git_repo)
+    merged = get_merged_branches(git_repo, session)
+    # main and the session branch itself are merged into session
+    assert "main" in merged
+    assert session in merged
+
+
+def test_get_merged_branches_after_merge(git_repo):
+    """After merging a task branch, it appears in get_merged_branches."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "merged-feat", base_branch=session)
+    try:
+        _commit_file(wt.path, "feat.txt", "content", "add feature")
+        result = merge_into_session(git_repo, session, wt.branch)
+        assert result.success
+
+        merged = get_merged_branches(git_repo, session)
+        assert wt.branch in merged
+    finally:
+        wt.cleanup()
+
+
+def test_get_merged_branches_excludes_unmerged(git_repo):
+    """A task branch that hasn't been merged should not appear."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "unmerged-feat", base_branch=session)
+    try:
+        _commit_file(wt.path, "feat.txt", "content", "add feature")
+
+        merged = get_merged_branches(git_repo, session)
+        # The branch has diverged, so it should NOT be in the merged set
+        assert wt.branch not in merged
+    finally:
+        wt.cleanup()

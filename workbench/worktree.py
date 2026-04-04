@@ -333,6 +333,25 @@ def cleanup_merge_worktree(repo: Path, merge_dir: Path) -> None:
     )
 
 
+def get_merged_branches(repo: Path, session_branch: str) -> set[str]:
+    """Return the set of branch names already merged into the session branch.
+
+    Used by --only-failed to skip tasks whose branches were already merged.
+    """
+    result = subprocess.run(
+        ["git", "branch", "--merged", session_branch],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    merged = set()
+    for line in result.stdout.strip().split("\n"):
+        branch = line.strip().lstrip("*+ ")
+        if branch:
+            merged.add(branch)
+    return merged
+
+
 def get_diff(worktree: Worktree, base_branch: str) -> str:
     """Get the diff of changes made in a worktree."""
     result = subprocess.run(
