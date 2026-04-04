@@ -128,9 +128,59 @@ Workbench parses the plan, groups tasks into dependency waves, creates isolated 
 implement → test → fix  → review → fix (retry up to --max-retries)
 ```
 
-After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent.
+After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status.json` as each task completes.
 
-### 4. Monitor progress
+### 4. Handle failures
+
+If some tasks fail, you have options:
+
+```bash
+# Re-run the same plan, skipping tasks that already succeeded
+wb run plan.md -b workbench-1 --only-failed
+
+# Auto-retry tasks that crashed (not those that exhausted fix retries)
+wb run plan.md --retry-failed
+
+# Stop immediately if any task in a wave fails
+wb run plan.md --fail-fast
+
+# Combine: retry crashes, then stop if still failing
+wb run plan.md --retry-failed --fail-fast
+```
+
+`--retry-failed` distinguishes between transient failures (agent crash, timeout) and deliberate failures (exhausted all fix cycles). Only transient failures are retried.
+
+`--only-failed` reads `.workbench/status.json` to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
+
+You can also re-run specific tasks by ID or slug:
+
+```bash
+# Re-run a single task in an existing session
+wb run plan.md -b workbench-1 --task task-2
+
+# Re-run multiple specific tasks
+wb run plan.md -b workbench-1 --task task-1 --task task-3
+
+# Re-run a task by its slug (title converted to lowercase-dashes)
+wb run plan.md -b workbench-1 --task my-feature-name
+
+# Run specific tasks in a new session (no -b needed)
+wb run plan.md --task task-2
+```
+
+`--task` accepts task IDs (e.g. `task-2`) or slugs (e.g. `my-feature-name`). Only the specified tasks run — all other tasks are left untouched. If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved in `status.json`.
+
+### 5. Merge unmerged branches
+
+If a run was interrupted or some merges failed due to conflicts, use `wb merge` to attempt merging without re-running pipelines:
+
+```bash
+wb merge -b workbench-1
+```
+
+This reads `.workbench/status.json`, finds tasks with `status=done` that haven't been merged yet, and attempts each merge. Conflicts are handled by a merge resolver agent. Branches that were already merged manually (via git) are detected and skipped.
+
+### 6. Monitor progress
 
 A live status table shows task progress in the terminal. With tmux (default), you can also attach to watch any agent work:
 
@@ -289,6 +339,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | Command | Description |
 |---|---|
 | `wb run <plan>` | Execute a plan with parallel agents |
+| `wb merge -b <branch>` | Merge completed-but-unmerged task branches |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
 | `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
@@ -314,6 +365,10 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--local` | Branch from local ref instead of fetching origin |
 | `-b NAME` / `--session-branch` | Resume an existing session branch |
 | `-w N` / `--start-wave` | Skip already-completed waves |
+| `--retry-failed` | Auto-retry tasks that crashed (not those that exhausted fix retries) |
+| `--fail-fast` | Stop after the first wave with any failed tasks |
+| `--only-failed` | Skip completed tasks from a prior run (requires `-b`) |
+| `--task ID` | Run only specific tasks by ID or slug (repeatable) |
 | `--cleanup` | Remove worktrees after completion |
 | `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
@@ -330,6 +385,16 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |
 | `--update` | Force-update skills to the latest version |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb merge`
+
+| Flag | Description |
+|---|---|
+| `-b NAME` / `--session-branch` | Session branch to merge into (required) |
+| `--agent CMD` | Agent CLI for conflict resolution (default: `claude`) |
+| `--no-tmux` | Run resolver agents as subprocesses instead of tmux |
+| `--keep-branches` | Keep task branches after merging |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb stop`
