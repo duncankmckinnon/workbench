@@ -1077,9 +1077,7 @@ def test_merge_passes_args(git_repo):
         mock_merge.side_effect = lambda **kwargs: fake_merge(**kwargs)
         mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
 
-        result = runner.invoke(
-            main, ["merge", "-b", "workbench-1", "--no-tmux"]
-        )
+        result = runner.invoke(main, ["merge", "-b", "workbench-1", "--no-tmux"])
 
         captured = dict(mock_merge.call_args.kwargs) if mock_merge.called else {}
 

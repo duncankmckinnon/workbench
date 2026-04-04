@@ -31,7 +31,9 @@ class TestSessionStatus:
     def test_save_and_load(self, tmp_path):
         (tmp_path / ".workbench").mkdir()
         ss = SessionStatus(session_branch="workbench-1")
-        ss.record_task("task-1", status="done", branch="wb/feat-a", merged=True, last_agent="tester")
+        ss.record_task(
+            "task-1", status="done", branch="wb/feat-a", merged=True, last_agent="tester"
+        )
         ss.record_task("task-2", status="failed", branch="wb/feat-b", last_agent="implementor")
         ss.save(tmp_path)
 

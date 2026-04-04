@@ -483,8 +483,7 @@ async def run_plan(
 
                     async def _update_retry_display():
                         while not all(
-                            s.status in (TaskStatus.DONE, TaskStatus.FAILED)
-                            for s in retryable
+                            s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in retryable
                         ):
                             live.update(_status_table(all_states))
                             await asyncio.sleep(1)
@@ -500,9 +499,7 @@ async def run_plan(
                         f"into {session_branch}...[/bold]\n"
                     )
                     for state in retry_done:
-                        result = merge_into_session(
-                            repo, session_branch, state.worktree.branch
-                        )
+                        result = merge_into_session(repo, session_branch, state.worktree.branch)
                         if result.success:
                             console.print(
                                 f"  [green]✓[/green] {state.worktree.branch} — "
@@ -513,8 +510,7 @@ async def run_plan(
                                 delete_branch(repo, state.worktree.branch)
                         else:
                             console.print(
-                                f"  [red]✗[/red] {state.worktree.branch} — "
-                                f"{result.message}"
+                                f"  [red]✗[/red] {state.worktree.branch} — " f"{result.message}"
                             )
                             state.status = TaskStatus.FAILED
                     console.print()
@@ -600,15 +596,11 @@ async def merge_unmerged(
     # Pre-check: skip branches already merged via git (manual merge)
     already_merged = get_merged_branches(repo, session_branch)
 
-    console.print(
-        f"\n[bold]Merging {len(unmerged)} branch(es) into {session_branch}...[/bold]\n"
-    )
+    console.print(f"\n[bold]Merging {len(unmerged)} branch(es) into {session_branch}...[/bold]\n")
 
     for tid, rec in unmerged.items():
         if rec.branch in already_merged:
-            console.print(
-                f"  [green]✓[/green] {rec.branch} — already merged"
-            )
+            console.print(f"  [green]✓[/green] {rec.branch} — already merged")
             await status.update_merged(repo, tid)
             if not keep_branches:
                 delete_branch(repo, rec.branch)
@@ -621,10 +613,7 @@ async def merge_unmerged(
             if not keep_branches:
                 delete_branch(repo, rec.branch)
         elif result.conflicts and result.merge_dir:
-            console.print(
-                f"  [blue]⚡[/blue] {rec.branch} — "
-                f"{result.message} Resolving..."
-            )
+            console.print(f"  [blue]⚡[/blue] {rec.branch} — " f"{result.message} Resolving...")
             for cf in result.conflicts:
                 console.print(f"      [dim]{cf}[/dim]")
 
@@ -639,25 +628,17 @@ async def merge_unmerged(
             )
 
             if resolver_result.passed:
-                merge_finish = complete_merge(
-                    result.merge_dir, repo, session_branch, rec.branch
-                )
+                merge_finish = complete_merge(result.merge_dir, repo, session_branch, rec.branch)
                 if merge_finish.success:
-                    console.print(
-                        f"  [green]✓[/green] {rec.branch} — {merge_finish.message}"
-                    )
+                    console.print(f"  [green]✓[/green] {rec.branch} — {merge_finish.message}")
                     await status.update_merged(repo, tid)
                     if not keep_branches:
                         delete_branch(repo, rec.branch)
                 else:
-                    console.print(
-                        f"  [red]✗[/red] {rec.branch} — {merge_finish.message}"
-                    )
+                    console.print(f"  [red]✗[/red] {rec.branch} — {merge_finish.message}")
                     cleanup_merge_worktree(repo, result.merge_dir)
             else:
-                console.print(
-                    f"  [red]✗[/red] {rec.branch} — Merge resolver failed"
-                )
+                console.print(f"  [red]✗[/red] {rec.branch} — Merge resolver failed")
                 cleanup_merge_worktree(repo, result.merge_dir)
         else:
             console.print(f"  [red]✗[/red] {rec.branch} — {result.message}")

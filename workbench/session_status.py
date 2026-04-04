@@ -94,9 +94,7 @@ class SessionStatus:
         if not path.exists():
             return None
         data = json.loads(path.read_text())
-        tasks = {
-            tid: TaskRecord.from_dict(rec) for tid, rec in data.get("tasks", {}).items()
-        }
+        tasks = {tid: TaskRecord.from_dict(rec) for tid, rec in data.get("tasks", {}).items()}
         return cls(session_branch=data["session_branch"], tasks=tasks)
 
     # -- task-level updates ---------------------------------------------------

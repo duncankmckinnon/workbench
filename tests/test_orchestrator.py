@@ -10,9 +10,9 @@ import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus
 from workbench.orchestrator import merge_unmerged, run_plan
-from workbench.session_status import SessionStatus
 from workbench.plan_parser import Plan, Task
 from workbench.profile import Profile
+from workbench.session_status import SessionStatus
 
 
 def _make_plan(title: str = "Test Plan", tasks: list[Task] | None = None) -> Plan:
@@ -275,7 +275,10 @@ async def test_retry_failed_retries_crashed_task(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, retry_failed=True,
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            retry_failed=True,
         )
 
     # task-2's pipeline should have been called twice (initial + retry)
@@ -353,7 +356,11 @@ async def test_retry_failed_skips_exhausted_retries(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, retry_failed=True, max_retries=2,
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            retry_failed=True,
+            max_retries=2,
         )
 
     # Pipeline should only be called once (no retry — exhausted retries)
@@ -666,7 +673,11 @@ async def test_retry_failed_with_fail_fast(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, retry_failed=True, fail_fast=True,
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            retry_failed=True,
+            fail_fast=True,
         )
 
     # Should have been called twice (initial + one retry)
@@ -894,9 +905,7 @@ async def test_merge_unmerged_wrong_session(tmp_path):
     status.record_task("task-1", status="done", branch="wb/feat-a")
     status.save(repo)
 
-    with (
-        patch("workbench.orchestrator.merge_into_session") as mock_merge,
-    ):
+    with (patch("workbench.orchestrator.merge_into_session") as mock_merge,):
         result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
 
     mock_merge.assert_not_called()
@@ -957,7 +966,10 @@ async def test_task_filter_runs_only_matching_tasks(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, task_filter={"task-2"},
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            task_filter={"task-2"},
         )
 
     # Only task-2 should have run
@@ -993,7 +1005,10 @@ async def test_task_filter_by_slug(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, task_filter={"good-task"},
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            task_filter={"good-task"},
         )
 
     assert pipeline_calls == ["task-1"]
@@ -1010,7 +1025,9 @@ async def test_task_filter_preserves_other_status(tmp_path):
 
     # Pre-seed status with task-1 done+merged
     prior = SessionStatus(session_branch="workbench-1")
-    prior.record_task("task-1", status="done", branch="wb/good-task", merged=True, last_agent="reviewer")
+    prior.record_task(
+        "task-1", status="done", branch="wb/good-task", merged=True, last_agent="reviewer"
+    )
     prior.save(repo)
 
     async def fake_pipeline(**kwargs):
@@ -1110,7 +1127,10 @@ async def test_task_filter_multiple(tmp_path):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         results = await run_plan(
-            plan=plan, repo=repo, use_tmux=False, task_filter={"task-1", "task-3"},
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            task_filter={"task-1", "task-3"},
         )
 
     assert sorted(pipeline_calls) == ["task-1", "task-3"]
