@@ -160,7 +160,8 @@ async def test_run_plan_deletes_branches_after_merge(tmp_path):
 
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
-    mock_delete.assert_called_once_with(repo, "wb/task-1-test-task")
+    # Post-merge delete should have been called with the worktree's branch name
+    mock_delete.assert_any_call(repo, "wb/task-1-test-task")
 
 
 @pytest.mark.asyncio
@@ -185,7 +186,9 @@ async def test_run_plan_keeps_branches_when_flag_set(tmp_path):
 
         await run_plan(plan=plan, repo=repo, use_tmux=False, keep_branches=True)
 
-    mock_delete.assert_not_called()
+    # Post-merge delete should NOT have been called with the worktree branch
+    for call in mock_delete.call_args_list:
+        assert call.args[1] != "wb/task-1-test-task", "Branch should be kept after merge"
 
 
 @pytest.mark.asyncio
@@ -212,7 +215,9 @@ async def test_run_plan_keeps_branches_on_failed_merge(tmp_path):
 
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
-    mock_delete.assert_not_called()
+    # Post-merge delete should NOT have been called with the worktree branch
+    for call in mock_delete.call_args_list:
+        assert call.args[1] != "wb/task-1-test-task", "Branch should be kept on failed merge"
 
 
 # ---------------------------------------------------------------------------
@@ -919,3 +924,194 @@ async def test_merge_unmerged_persists_status(tmp_path):
     # Reload from disk and verify
     reloaded = SessionStatus.load(repo)
     assert reloaded.tasks["task-1"].merged is True
+
+
+# ---------------------------------------------------------------------------
+# --task filter
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_task_filter_runs_only_matching_tasks(tmp_path):
+    """--task should run only the specified task."""
+    plan = _make_two_task_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/bad-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(
+            plan=plan, repo=repo, use_tmux=False, task_filter={"task-2"},
+        )
+
+    # Only task-2 should have run
+    assert pipeline_calls == ["task-2"]
+    # Only task-2 should be in results
+    assert len(results) == 1
+    assert results[0].task.id == "task-2"
+
+
+@pytest.mark.asyncio
+async def test_task_filter_by_slug(tmp_path):
+    """--task should accept task slugs as well as IDs."""
+    plan = _make_two_task_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/good-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(
+            plan=plan, repo=repo, use_tmux=False, task_filter={"good-task"},
+        )
+
+    assert pipeline_calls == ["task-1"]
+    assert len(results) == 1
+    assert results[0].task.id == "task-1"
+
+
+@pytest.mark.asyncio
+async def test_task_filter_preserves_other_status(tmp_path):
+    """--task re-run should not modify status of non-filtered tasks."""
+    plan = _make_two_task_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+
+    # Pre-seed status with task-1 done+merged
+    prior = SessionStatus(session_branch="workbench-1")
+    prior.record_task("task-1", status="done", branch="wb/good-task", merged=True, last_agent="reviewer")
+    prior.save(repo)
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/bad-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            task_filter={"task-2"},
+        )
+
+    # task-1's prior status should be preserved
+    status = SessionStatus.load(repo)
+    assert status.tasks["task-1"].status == "done"
+    assert status.tasks["task-1"].merged is True
+    assert status.tasks["task-1"].last_agent == "reviewer"
+    # task-2 should be newly recorded
+    assert "task-2" in status.tasks
+
+
+@pytest.mark.asyncio
+async def test_task_filter_none_runs_all(tmp_path):
+    """task_filter=None should run all tasks (default behavior)."""
+    plan = _make_two_task_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert sorted(pipeline_calls) == ["task-1", "task-2"]
+    assert len(results) == 2
+
+
+@pytest.mark.asyncio
+async def test_task_filter_multiple(tmp_path):
+    """--task with multiple values should run all specified tasks."""
+    plan = _make_plan(
+        title="Three Tasks",
+        tasks=[
+            Task(id="task-1", title="Alpha", description="a", files=[], depends_on=[]),
+            Task(id="task-2", title="Beta", description="b", files=[], depends_on=[]),
+            Task(id="task-3", title="Gamma", description="c", files=[], depends_on=[]),
+        ],
+    )
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(
+            plan=plan, repo=repo, use_tmux=False, task_filter={"task-1", "task-3"},
+        )
+
+    assert sorted(pipeline_calls) == ["task-1", "task-3"]
+    assert len(results) == 2

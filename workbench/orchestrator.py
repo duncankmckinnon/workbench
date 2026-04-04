@@ -140,6 +140,7 @@ async def run_plan(
     retry_failed: bool = False,
     fail_fast: bool = False,
     only_failed: bool = False,
+    task_filter: set[str] | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -157,15 +158,29 @@ async def run_plan(
     # Initialize session status tracking
     session_status = SessionStatus(session_branch=session_branch)
 
-    # --only-failed: load prior session status and skip completed tasks
+    # Resolve --task filter: accept task IDs or slugs
+    filtered_task_ids: set[str] | None = None
+    if task_filter:
+        filtered_task_ids = set()
+        for task in plan.tasks:
+            if task.id in task_filter or task.slug in task_filter:
+                filtered_task_ids.add(task.id)
+        unmatched = task_filter - filtered_task_ids - {t.slug for t in plan.tasks}
+        if unmatched:
+            console.print(f"[yellow]Warning: no tasks matched: {', '.join(unmatched)}[/yellow]")
+
+    # Load prior session status to carry forward records for non-targeted tasks
+    prior = SessionStatus.load(repo)
+    if prior and prior.session_branch == session_branch:
+        for tid, rec in prior.tasks.items():
+            if filtered_task_ids is None or tid not in filtered_task_ids:
+                # Carry forward — this task is not being re-run
+                session_status.tasks[tid] = rec
+
+    # --only-failed: skip completed tasks
     skipped_task_ids: set[str] = set()
-    if only_failed:
-        prior = SessionStatus.load(repo)
-        if prior and prior.session_branch == session_branch:
-            skipped_task_ids = prior.completed_task_ids()
-            # Carry forward completed records
-            for tid in skipped_task_ids:
-                session_status.tasks[tid] = prior.tasks[tid]
+    if only_failed and prior and prior.session_branch == session_branch:
+        skipped_task_ids = prior.completed_task_ids()
         if skipped_task_ids:
             console.print(
                 f"[dim]--only-failed: skipping {len(skipped_task_ids)} completed task(s)[/dim]"
@@ -182,6 +197,9 @@ async def run_plan(
         console.print("[bold]Retry failed:[/bold] enabled (one retry pass per wave)")
     if fail_fast:
         console.print("[bold]Fail fast:[/bold] enabled (stop on first wave with failures)")
+    if filtered_task_ids is not None:
+        names = [t.title for t in plan.tasks if t.id in filtered_task_ids]
+        console.print(f"[bold]Task filter:[/bold] {', '.join(names)}")
     if tdd:
         console.print("[bold]Mode:[/bold] test-driven development (tests first)")
     if directives:
@@ -212,9 +230,13 @@ async def run_plan(
             f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n"
         )
 
-        # Initialize state for this wave (skip already-merged tasks for --only-failed)
+        # Initialize state for this wave
+        # --task: filtered-out tasks are excluded entirely
+        # --only-failed: completed tasks are pre-marked DONE
         wave_states: list[TaskState] = []
         for task in wave:
+            if filtered_task_ids is not None and task.id not in filtered_task_ids:
+                continue
             state = TaskState(task=task)
             if task.id in skipped_task_ids:
                 state.status = TaskStatus.DONE
@@ -227,6 +249,16 @@ async def run_plan(
         for state in wave_states:
             if state.status == TaskStatus.DONE:
                 continue
+            # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
+            old_worktree_path = repo / ".workbench" / state.task.id
+            if old_worktree_path.exists():
+                Worktree(
+                    path=old_worktree_path,
+                    branch=f"wb/{state.task.slug}",
+                    task_id=state.task.id,
+                ).cleanup()
+            else:
+                delete_branch(repo, f"wb/{state.task.slug}")
             try:
                 wt = create_worktree(
                     repo, state.task.id, state.task.slug, base_branch=session_branch

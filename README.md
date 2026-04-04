@@ -152,6 +152,24 @@ wb run plan.md --retry-failed --fail-fast
 
 `--only-failed` reads `.workbench/status.json` to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
 
+You can also re-run specific tasks by ID or slug:
+
+```bash
+# Re-run a single task in an existing session
+wb run plan.md -b workbench-1 --task task-2
+
+# Re-run multiple specific tasks
+wb run plan.md -b workbench-1 --task task-1 --task task-3
+
+# Re-run a task by its slug (title converted to lowercase-dashes)
+wb run plan.md -b workbench-1 --task my-feature-name
+
+# Run specific tasks in a new session (no -b needed)
+wb run plan.md --task task-2
+```
+
+`--task` accepts task IDs (e.g. `task-2`) or slugs (e.g. `my-feature-name`). Only the specified tasks run — all other tasks are left untouched. If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved in `status.json`.
+
 ### 5. Merge unmerged branches
 
 If a run was interrupted or some merges failed due to conflicts, use `wb merge` to attempt merging without re-running pipelines:
@@ -350,6 +368,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--retry-failed` | Auto-retry tasks that crashed (not those that exhausted fix retries) |
 | `--fail-fast` | Stop after the first wave with any failed tasks |
 | `--only-failed` | Skip completed tasks from a prior run (requires `-b`) |
+| `--task ID` | Run only specific tasks by ID or slug (repeatable) |
 | `--cleanup` | Remove worktrees after completion |
 | `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |

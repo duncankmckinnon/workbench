@@ -1086,3 +1086,31 @@ def test_merge_passes_args(git_repo):
     assert result.exit_code == 0, result.output
     assert captured.get("session_branch") == "workbench-1"
     assert captured.get("use_tmux") is False
+
+
+# ---------------------------------------------------------------------------
+# wb run --task
+# ---------------------------------------------------------------------------
+
+
+def test_run_task_filter_single(git_repo, tmp_path):
+    """--task should pass task_filter to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--task", "task-2"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("task_filter") == {"task-2"}
+
+
+def test_run_task_filter_multiple(git_repo, tmp_path):
+    """Multiple --task flags should pass all values."""
+    result, captured = _run_cli_with_capture(
+        git_repo, tmp_path, ["--task", "task-1", "--task", "task-3"]
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("task_filter") == {"task-1", "task-3"}
+
+
+def test_run_task_filter_none_by_default(git_repo, tmp_path):
+    """Without --task, task_filter should be None."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert captured.get("task_filter") is None

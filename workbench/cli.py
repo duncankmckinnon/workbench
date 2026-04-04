@@ -335,6 +335,12 @@ def main():
     help="Re-run only previously failed tasks (skip tasks already merged into session branch). Requires --session-branch.",
 )
 @click.option(
+    "--task",
+    "task_ids",
+    multiple=True,
+    help="Run only specific tasks (by ID or slug). Repeatable: --task task-1 --task task-2.",
+)
+@click.option(
     "--implementor-directive",
     default=None,
     type=str,
@@ -374,6 +380,7 @@ def run(
     retry_failed: bool,
     fail_fast: bool,
     only_failed: bool,
+    task_ids: tuple[str, ...],
     implementor_directive: str | None,
     tester_directive: str | None,
     reviewer_directive: str | None,
@@ -451,6 +458,7 @@ def run(
             retry_failed=retry_failed,
             fail_fast=fail_fast,
             only_failed=only_failed,
+            task_filter=set(task_ids) if task_ids else None,
         )
     )
 
