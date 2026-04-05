@@ -376,9 +376,7 @@ def test_setup_install_all_on_confirm(tmp_path):
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude"], input="y\n"
-        )
+        result = runner.invoke(main, ["setup", "--global", "--agent", "claude"], input="y\n")
 
     assert result.exit_code == 0
     skills_dir = fake_home / ".claude" / "skills"
@@ -430,9 +428,7 @@ def test_setup_update_skips_selection(tmp_path):
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude", "--update"]
-        )
+        result = runner.invoke(main, ["setup", "--global", "--agent", "claude", "--update"])
 
     assert result.exit_code == 0
     # All skills should be installed without prompting
@@ -1347,11 +1343,17 @@ def test_agents_add_with_json_format(git_repo):
         result = runner.invoke(
             main,
             [
-                "agents", "add", "my-agent",
-                "--command", "my-cli",
-                "--output-format", "json",
-                "--json-result-key", "output",
-                "--json-cost-key", "cost",
+                "agents",
+                "add",
+                "my-agent",
+                "--command",
+                "my-cli",
+                "--output-format",
+                "json",
+                "--json-result-key",
+                "output",
+                "--json-cost-key",
+                "cost",
             ],
         )
 
@@ -1367,15 +1369,11 @@ def test_agents_add_updates_existing(git_repo):
     """wb agents add for an existing agent should update it."""
     wb_dir = git_repo / ".workbench"
     wb_dir.mkdir(exist_ok=True)
-    (wb_dir / "agents.yaml").write_text(
-        "agents:\n  my-agent:\n    command: old-cli\n"
-    )
+    (wb_dir / "agents.yaml").write_text("agents:\n  my-agent:\n    command: old-cli\n")
 
     runner = CliRunner()
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(
-            main, ["agents", "add", "my-agent", "--command", "new-cli"]
-        )
+        result = runner.invoke(main, ["agents", "add", "my-agent", "--command", "new-cli"])
 
     assert result.exit_code == 0
     assert "Updated" in result.output

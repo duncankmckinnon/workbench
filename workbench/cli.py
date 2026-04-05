@@ -280,7 +280,11 @@ def main():
 @click.option("--skip-test", is_flag=True, help="Skip the testing phase.")
 @click.option("--skip-review", is_flag=True, help="Skip the review phase.")
 @click.option("--max-retries", "-r", default=2, help="Max fix attempts per failed stage.")
-@click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, codex, cursor, or custom).")
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI command (claude, gemini, codex, cursor, or custom).",
+)
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
     "--keep-branches",
@@ -649,7 +653,11 @@ def stop(cleanup: bool, repo: Path | None):
     required=True,
     help="Session branch to merge into (e.g. workbench-1).",
 )
-@click.option("--agent", default="claude", help="Agent CLI for merge conflict resolution (claude, gemini, codex, cursor, or custom).")
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI for merge conflict resolution (claude, gemini, codex, cursor, or custom).",
+)
 @click.option(
     "--repo",
     type=click.Path(exists=True, path_type=Path),
@@ -1106,9 +1114,7 @@ def agents_show(name: str, repo: Path | None):
     help="Output format (default: text).",
 )
 @click.option("--json-result-key", default="result", help="JSON key for result (default: result).")
-@click.option(
-    "--json-cost-key", default="cost_usd", help="JSON key for cost (default: cost_usd)."
-)
+@click.option("--json-cost-key", default="cost_usd", help="JSON key for cost (default: cost_usd).")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def agents_add(
     name: str,
@@ -1156,9 +1162,7 @@ def agents_remove(name: str, repo: Path | None):
 
     agents_cfg = data.get("agents", {})
     if name not in agents_cfg:
-        raise click.ClickException(
-            f"Agent '{name}' not found in {config_path}."
-        )
+        raise click.ClickException(f"Agent '{name}' not found in {config_path}.")
 
     del agents_cfg[name]
     data["agents"] = agents_cfg
