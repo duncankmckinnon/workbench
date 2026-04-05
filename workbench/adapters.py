@@ -22,6 +22,23 @@ class AgentAdapter(ABC):
     def parse_output(self, raw: str) -> tuple[str, dict]:
         """Parse agent stdout. Returns (output_text, cost_dict)."""
 
+    @classmethod
+    def to_config(cls) -> dict[str, Any]:
+        """Return a YAML-compatible config dict for this adapter."""
+        raise NotImplementedError(f"{cls.__name__} does not support to_config")
+
+    @classmethod
+    def from_config(cls, name: str, entry: dict[str, Any]) -> "ConfigAdapter":
+        """Create a ConfigAdapter from a YAML config dict."""
+        return ConfigAdapter(
+            name=name,
+            command=entry.get("command", name),
+            args=entry.get("args", ["{prompt}"]),
+            output_format=entry.get("output_format", "text"),
+            json_result_key=entry.get("json_result_key", "result"),
+            json_cost_key=entry.get("json_cost_key", "cost_usd"),
+        )
+
 
 ALLOWED_TOOLS = (
     "Edit,Write,Read,Glob,Grep," "Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)"
@@ -52,6 +69,16 @@ class ClaudeAdapter(AgentAdapter):
             return (result, cost)
         except (json.JSONDecodeError, TypeError):
             return (raw, {})
+
+    @classmethod
+    def to_config(cls) -> dict[str, Any]:
+        return {
+            "command": "claude",
+            "args": ["-p", "{prompt}", "--output-format", "json", "--allowedTools", ALLOWED_TOOLS],
+            "output_format": "json",
+            "json_result_key": "result",
+            "json_cost_key": "cost_usd",
+        }
 
 
 class CodexAdapter(AgentAdapter):
@@ -86,24 +113,45 @@ class CodexAdapter(AgentAdapter):
                 continue
         return (last_message or raw.strip(), {})
 
+    @classmethod
+    def to_config(cls) -> dict[str, Any]:
+        return {
+            "command": "codex",
+            "args": ["exec", "--full-auto", "--json", "{prompt}"],
+            "output_format": "json",
+            "json_result_key": "result",
+            "json_cost_key": "cost_usd",
+        }
+
 
 class CursorAdapter(AgentAdapter):
-    """Adapter for the Cursor CLI (cursor-agent).
+    """Adapter for the Cursor CLI (agent command).
 
-    Cursor provides a headless agent mode via `cursor-agent`.
+    Uses ``agent -p`` for non-interactive (print) mode.
+    See https://cursor.com/docs/cli/overview
     """
 
     name = "cursor"
 
     def build_command(self, prompt: str, cwd: Path) -> list[str]:
         return [
-            "cursor-agent",
-            "--prompt",
+            "agent",
+            "-p",
             prompt,
+            "--output-format",
+            "text",
         ]
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
         return (raw.strip(), {})
+
+    @classmethod
+    def to_config(cls) -> dict[str, Any]:
+        return {
+            "command": "agent",
+            "args": ["-p", "{prompt}", "--output-format", "text"],
+            "output_format": "text",
+        }
 
 
 @dataclass
@@ -132,6 +180,17 @@ class ConfigAdapter(AgentAdapter):
                 return (raw, {})
         return (raw.strip(), {})
 
+    def to_config(self) -> dict[str, Any]:
+        entry: dict[str, Any] = {
+            "command": self.command,
+            "args": self.args,
+            "output_format": self.output_format,
+        }
+        if self.output_format == "json":
+            entry["json_result_key"] = self.json_result_key
+            entry["json_cost_key"] = self.json_cost_key
+        return entry
+
 
 class GeminiAdapter(AgentAdapter):
     """Adapter for the Gemini CLI."""
@@ -158,6 +217,16 @@ class GeminiAdapter(AgentAdapter):
         except (json.JSONDecodeError, TypeError):
             return (raw, {})
 
+    @classmethod
+    def to_config(cls) -> dict[str, Any]:
+        return {
+            "command": "gemini",
+            "args": ["-p", "{prompt}", "--output-format", "json", "--approval-mode", "yolo"],
+            "output_format": "json",
+            "json_result_key": "response",
+            "json_cost_key": "stats",
+        }
+
 
 class GenericAdapter(AgentAdapter):
     """Fallback adapter for unknown agent commands."""
@@ -171,6 +240,19 @@ class GenericAdapter(AgentAdapter):
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
         return (raw.strip(), {})
+
+
+BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
+    "claude": ClaudeAdapter,
+    "codex": CodexAdapter,
+    "gemini": GeminiAdapter,
+    "cursor": CursorAdapter,
+}
+
+
+def default_agents_config() -> dict[str, dict[str, Any]]:
+    """Generate the default agents.yaml config from all built-in adapters."""
+    return {name: cls.to_config() for name, cls in BUILTIN_ADAPTERS.items()}
 
 
 def _load_yaml_config(config_path: Path) -> dict[str, Any]:
@@ -192,27 +274,15 @@ def get_adapter(agent_cmd: str, config_path: Path | None = None) -> AgentAdapter
 
     Resolution order:
     1. If config_path is provided and contains agent_cmd, use ConfigAdapter
-    2. Built-in adapters: "claude", "codex"
+    2. Built-in adapters: "claude", "codex", "gemini", "cursor"
     3. Fallback: GenericAdapter
     """
     if config_path is not None and config_path.exists():
         config = _load_yaml_config(config_path)
         agents = config.get("agents", {})
         if agent_cmd in agents:
-            entry = agents[agent_cmd]
-            return ConfigAdapter(
-                name=agent_cmd,
-                command=entry.get("command", agent_cmd),
-                args=entry.get("args", ["{prompt}"]),
-                output_format=entry.get("output_format", "text"),
-                json_result_key=entry.get("json_result_key", "result"),
-                json_cost_key=entry.get("json_cost_key", "cost_usd"),
-            )
+            return AgentAdapter.from_config(agent_cmd, agents[agent_cmd])
 
-    if agent_cmd == "claude":
-        return ClaudeAdapter()
-    if agent_cmd == "codex":
-        return CodexAdapter()
-    if agent_cmd == "gemini":
-        return GeminiAdapter()
+    if agent_cmd in BUILTIN_ADAPTERS:
+        return BUILTIN_ADAPTERS[agent_cmd]()
     return GenericAdapter(agent_cmd)

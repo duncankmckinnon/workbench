@@ -196,6 +196,54 @@ Each task goes through: **implement -> test -> review -> fix**
 
 Stages can be skipped with `--skip-test` or `--skip-review`.
 
+Task outcomes are tracked in `.workbench/status.json` as each task completes, enabling resume-from-failure workflows.
+
+## Handling Failures
+
+### Automatic retry
+
+```bash
+wb run plan.md --retry-failed
+```
+
+Re-runs tasks that crashed (agent error, timeout) after each wave. Tasks that exhausted their fix retries (`fix_count >= max_retries`) are left alone — they need plan or directive changes, not another blind run.
+
+### Fail fast
+
+```bash
+wb run plan.md --fail-fast
+```
+
+Stops after the first wave with any failed tasks. Composes with `--retry-failed` (retry first, then stop if still failing).
+
+### Re-run only failed tasks
+
+```bash
+wb run plan.md -b workbench-1 --only-failed
+```
+
+Reads `.workbench/status.json` to skip tasks that already completed. Requires `-b` to specify the session branch to resume.
+
+### Re-run specific tasks
+
+```bash
+wb run plan.md -b workbench-1 --task task-2
+wb run plan.md -b workbench-1 --task task-1 --task task-3
+wb run plan.md -b workbench-1 --task my-feature-name    # by slug
+```
+
+Runs only the specified tasks. All other tasks are left untouched — no worktrees, no pipelines, no status changes. Accepts task IDs or slugs (title converted to lowercase-dashes). If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved.
+
+`--task` works without `-b` too — it just creates a new session with only those tasks.
+
+### Merge unmerged branches
+
+```bash
+wb merge -b workbench-1
+```
+
+Merges completed-but-unmerged task branches without re-running pipelines. Uses a resolver agent for conflicts. Branches already merged via git are detected and skipped.
+
 ## Directive Overrides
 
 The instructions given to each agent role can be overridden from the CLI:
@@ -254,7 +302,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, or any custom CLI.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, `cursor`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 
@@ -336,6 +384,11 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb run plan.md --local` — branch from local ref instead of fetching
 - `wb run plan.md -b my-session -w 2` — resume session from wave 2
 - `wb run plan.md --profile-name fast` — use a named profile
+- `wb run plan.md --retry-failed` — auto-retry crashed tasks
+- `wb run plan.md --fail-fast` — stop on first wave failure
+- `wb run plan.md -b workbench-1 --only-failed` — re-run only failed tasks
+- `wb run plan.md -b workbench-1 --task task-2` — re-run a specific task
+- `wb merge -b workbench-1` — merge unmerged branches without re-running
 - `wb preview <plan>` — dry-run to see parsed tasks and waves
 - `wb status` — show active worktrees
 - `wb stop` — kill all active agent sessions
@@ -348,6 +401,10 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb setup --global` — install skills to user-level paths (no .workbench/ creation)
 - `wb setup --global --agent claude` — install to ~/.claude/skills/
 - `wb setup --global --agent gemini` — install to ~/.agents/skills/
+- `wb agents init` — create agents.yaml with built-in adapter configs
+- `wb agents list` — show built-in and custom agents
+- `wb agents add <name> --command <cmd>` — add a custom agent
+- `wb agents remove <name>` — remove a custom agent
 - `wb profile init` — create profile.yaml from defaults
 - `wb profile init --name fast --set reviewer.agent=gemini` — create a named profile with overrides
 - `wb profile show` — print resolved profile

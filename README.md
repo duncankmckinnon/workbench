@@ -27,6 +27,7 @@ Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks,
   - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
   - [Codex](https://github.com/openai/codex)
+  - [Cursor CLI](https://cursor.com/docs/cli/overview)
   - Any custom CLI via `.workbench/agents.yaml`
 
 **Optional:**
@@ -303,23 +304,52 @@ Pipeline becomes: **write tests → implement → verify tests → review → fi
 
 The tester writes comprehensive failing tests first. The implementor writes code to make them pass and reports whether the tests are comprehensive. Cannot be combined with `--skip-test`.
 
-## Custom agents
+## Agents
 
-Define adapters in `.workbench/agents.yaml`:
+Workbench ships with built-in adapters for Claude Code, Gemini CLI, Codex, and Cursor CLI. Use `--agent` to select one:
+
+```bash
+wb run plan.md --agent claude     # default
+wb run plan.md --agent gemini
+wb run plan.md --agent codex
+wb run plan.md --agent cursor
+```
+
+### Custom agents
+
+Define custom adapters via `wb agents add` or by editing `.workbench/agents.yaml` directly:
+
+```bash
+wb agents add my-agent --command my-cli --args "--headless,{prompt}" --output-format json
+wb run plan.md --agent my-agent
+```
+
+This creates an entry in `.workbench/agents.yaml`:
 
 ```yaml
 agents:
   my-agent:
-    command: my-agent-cli
+    command: my-cli
     args: ["--headless", "{prompt}"]
     output_format: json
     json_result_key: result
     json_cost_key: cost_usd
 ```
 
+The `{prompt}` placeholder in `args` is replaced with the agent's prompt at runtime. Set `output_format: json` to parse structured output with configurable result and cost keys.
+
+### Managing agents
+
 ```bash
-wb run plan.md --agent my-agent
+wb agents init                    # create agents.yaml with all built-in adapter configs
+wb agents list                    # show built-in and custom agents
+wb agents show my-agent           # show full config for an agent
+wb agents add my-agent --command my-cli --args "--headless,{prompt}"
+wb agents add my-agent --command new-cli   # update an existing agent
+wb agents remove my-agent         # remove a custom agent
 ```
+
+`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Gemini, Codex, Cursor). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
 
 ## Directive overrides
 
@@ -345,6 +375,11 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb status` | Show active worktrees |
 | `wb stop` | Kill all running agent tmux sessions |
 | `wb clean` | Remove all workbench worktrees and `wb/` branches |
+| `wb agents init` | Create agents.yaml with built-in adapter configs |
+| `wb agents list` | List built-in and custom agent adapters |
+| `wb agents show <name>` | Show details for an agent adapter |
+| `wb agents add <name>` | Add or update a custom agent adapter |
+| `wb agents remove <name>` | Remove a custom agent adapter |
 | `wb profile init` | Create profile.yaml from defaults |
 | `wb profile show` | Show resolved profile |
 | `wb profile set <key> <value>` | Update a profile field |
@@ -416,6 +451,47 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 |---|---|
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 | `--yes` | Skip confirmation prompt |
+
+### `wb agents init`
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb agents list`
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb agents show`
+
+Takes a single argument: the agent name.
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb agents add`
+
+Takes a single argument: the agent name.
+
+| Flag | Description |
+|---|---|
+| `--command CMD` | CLI command to invoke (required) |
+| `--args TEMPLATE` | Argument template, comma-separated (default: `{prompt}`) |
+| `--output-format FMT` | `text` or `json` (default: `text`) |
+| `--json-result-key KEY` | JSON key for result (default: `result`) |
+| `--json-cost-key KEY` | JSON key for cost (default: `cost_usd`) |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb agents remove`
+
+Takes a single argument: the agent name.
+
+| Flag | Description |
+|---|---|
+| `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb profile init`
 
