@@ -120,7 +120,29 @@ def _install_skills(
         console.print("[yellow]No bundled skill files found.[/yellow]")
         return
 
-    console.print(f"[bold]Installing {len(skills)} {label}(s) for {agent}...[/bold]\n")
+    # Let user select which skills to install (skip for --update or non-interactive)
+    ctx = click.get_current_context(silent=True)
+    is_interactive = ctx is None or ctx.color is not False
+    if not update and len(skills) > 1 and is_interactive:
+        console.print(f"[bold]Available {label}(s) for {agent}:[/bold]")
+        for name, src in skills:
+            console.print(f"  • {name}")
+        console.print()
+
+        try:
+            if not click.confirm("Install all skills?", default=True):
+                selected = []
+                for name, src in skills:
+                    if click.confirm(f"  Install {name}?", default=True):
+                        selected.append((name, src))
+                skills = selected
+                if not skills:
+                    console.print("[yellow]No skills selected.[/yellow]")
+                    return
+        except (click.Abort, EOFError):
+            pass  # non-interactive — install all
+
+    console.print(f"\n[bold]Installing {len(skills)} {label}(s) for {agent}...[/bold]\n")
 
     if agent == "claude":
         if local:
@@ -258,7 +280,7 @@ def main():
 @click.option("--skip-test", is_flag=True, help="Skip the testing phase.")
 @click.option("--skip-review", is_flag=True, help="Skip the review phase.")
 @click.option("--max-retries", "-r", default=2, help="Max fix attempts per failed stage.")
-@click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, etc).")
+@click.option("--agent", default="claude", help="Agent CLI command (claude, gemini, codex, cursor, or custom).")
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
     "--keep-branches",
@@ -627,7 +649,7 @@ def stop(cleanup: bool, repo: Path | None):
     required=True,
     help="Session branch to merge into (e.g. workbench-1).",
 )
-@click.option("--agent", default="claude", help="Agent CLI command for merge conflict resolution.")
+@click.option("--agent", default="claude", help="Agent CLI for merge conflict resolution (claude, gemini, codex, cursor, or custom).")
 @click.option(
     "--repo",
     type=click.Path(exists=True, path_type=Path),
@@ -968,6 +990,180 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
         console.print("Differences from defaults:")
         for line in diffs:
             console.print(line)
+
+
+BUILTIN_AGENTS = {
+    "claude": "Claude Code CLI (default)",
+    "gemini": "Gemini CLI",
+    "codex": "Codex CLI (OpenAI)",
+    "cursor": "Cursor CLI (agent command)",
+}
+
+
+def _agents_yaml_path(repo: Path) -> Path:
+    return repo / ".workbench" / "agents.yaml"
+
+
+def _load_agents_yaml(path: Path) -> dict:
+    if not path.exists():
+        return {}
+    return yaml.safe_load(path.read_text()) or {}
+
+
+def _save_agents_yaml(path: Path, data: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(yaml.dump(data, default_flow_style=False))
+
+
+@main.group()
+def agents():
+    """Manage agent adapters (.workbench/agents.yaml)."""
+    pass
+
+
+@agents.command("init")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def agents_init(repo: Path | None):
+    """Create agents.yaml with the default built-in agent configs."""
+    from .adapters import default_agents_config
+
+    repo = repo or _find_repo_root()
+    config_path = _agents_yaml_path(repo)
+
+    if config_path.exists():
+        if not click.confirm(f"{config_path} already exists. Overwrite?"):
+            return
+
+    data = {"agents": default_agents_config()}
+    _save_agents_yaml(config_path, data)
+    console.print(f"Created {config_path} with {len(data['agents'])} agent(s)")
+
+
+@agents.command("list")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def agents_list(repo: Path | None):
+    """List built-in and configured agents."""
+    repo = repo or _find_repo_root()
+    config_path = _agents_yaml_path(repo)
+    custom = _load_agents_yaml(config_path).get("agents", {})
+
+    console.print("[bold]Built-in agents:[/bold]")
+    for name, desc in BUILTIN_AGENTS.items():
+        console.print(f"  {name:<12} {desc}")
+
+    if custom:
+        console.print(f"\n[bold]Custom agents[/bold] ({config_path}):")
+        for name, entry in custom.items():
+            cmd = entry.get("command", name)
+            fmt = entry.get("output_format", "text")
+            console.print(f"  {name:<12} command={cmd}  format={fmt}")
+    else:
+        console.print(f"\n[dim]No custom agents configured.[/dim]")
+
+
+@agents.command("show")
+@click.argument("name")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def agents_show(name: str, repo: Path | None):
+    """Show details for an agent adapter."""
+    repo = repo or _find_repo_root()
+
+    if name in BUILTIN_AGENTS:
+        console.print(f"[bold]{name}[/bold] (built-in)")
+        console.print(f"  Description: {BUILTIN_AGENTS[name]}")
+        console.print(f"  Type: built-in adapter")
+        return
+
+    config_path = _agents_yaml_path(repo)
+    custom = _load_agents_yaml(config_path).get("agents", {})
+
+    if name not in custom:
+        raise click.ClickException(
+            f"Agent '{name}' not found. Use 'wb agents list' to see available agents."
+        )
+
+    entry = custom[name]
+    console.print(f"[bold]{name}[/bold] (custom)")
+    console.print(f"  command:         {entry.get('command', name)}")
+    console.print(f"  args:            {entry.get('args', ['{prompt}'])}")
+    console.print(f"  output_format:   {entry.get('output_format', 'text')}")
+    console.print(f"  json_result_key: {entry.get('json_result_key', 'result')}")
+    console.print(f"  json_cost_key:   {entry.get('json_cost_key', 'cost_usd')}")
+
+
+@agents.command("add")
+@click.argument("name")
+@click.option("--command", "cmd", required=True, help="CLI command to invoke.")
+@click.option(
+    "--args",
+    default="{prompt}",
+    help='Argument template (default: "{prompt}"). Use {prompt} as placeholder.',
+)
+@click.option(
+    "--output-format",
+    type=click.Choice(["text", "json"]),
+    default="text",
+    help="Output format (default: text).",
+)
+@click.option("--json-result-key", default="result", help="JSON key for result (default: result).")
+@click.option(
+    "--json-cost-key", default="cost_usd", help="JSON key for cost (default: cost_usd)."
+)
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def agents_add(
+    name: str,
+    cmd: str,
+    args: str,
+    output_format: str,
+    json_result_key: str,
+    json_cost_key: str,
+    repo: Path | None,
+):
+    """Add or update a custom agent adapter."""
+    repo = repo or _find_repo_root()
+    config_path = _agents_yaml_path(repo)
+    data = _load_agents_yaml(config_path)
+
+    if "agents" not in data:
+        data["agents"] = {}
+
+    # Parse args — support comma-separated or single string
+    args_list = [a.strip() for a in args.split(",") if a.strip()]
+
+    entry = {
+        "command": cmd,
+        "args": args_list,
+        "output_format": output_format,
+    }
+    if output_format == "json":
+        entry["json_result_key"] = json_result_key
+        entry["json_cost_key"] = json_cost_key
+
+    action = "Updated" if name in data["agents"] else "Added"
+    data["agents"][name] = entry
+    _save_agents_yaml(config_path, data)
+    console.print(f"{action} agent '{name}' in {config_path}")
+
+
+@agents.command("remove")
+@click.argument("name")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def agents_remove(name: str, repo: Path | None):
+    """Remove a custom agent adapter."""
+    repo = repo or _find_repo_root()
+    config_path = _agents_yaml_path(repo)
+    data = _load_agents_yaml(config_path)
+
+    agents_cfg = data.get("agents", {})
+    if name not in agents_cfg:
+        raise click.ClickException(
+            f"Agent '{name}' not found in {config_path}."
+        )
+
+    del agents_cfg[name]
+    data["agents"] = agents_cfg
+    _save_agents_yaml(config_path, data)
+    console.print(f"Removed agent '{name}' from {config_path}")
 
 
 if __name__ == "__main__":

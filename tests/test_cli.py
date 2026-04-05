@@ -140,6 +140,7 @@ def test_setup_global_claude_copies_skills(tmp_path):
     skills_dir = fake_home / ".claude" / "skills"
     assert skills_dir.is_dir()
     assert (skills_dir / "use-workbench" / "SKILL.md").exists()
+    assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
     assert "Copied" in result.output
 
 
@@ -361,6 +362,84 @@ def test_setup_installs_cross_client_skills(git_repo):
     assert result.exit_code == 0
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
+
+
+# ---------------------------------------------------------------------------
+# wb setup — skill selection
+# ---------------------------------------------------------------------------
+
+
+def test_setup_install_all_on_confirm(tmp_path):
+    """Answering 'y' to 'Install all?' should install all skills."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(
+            main, ["setup", "--global", "--agent", "claude"], input="y\n"
+        )
+
+    assert result.exit_code == 0
+    skills_dir = fake_home / ".claude" / "skills"
+    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
+    assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
+    assert (skills_dir / "install-workbench" / "SKILL.md").exists()
+
+
+def test_setup_select_individual_skills(tmp_path):
+    """Declining 'Install all?' should prompt per skill, installing only selected."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    # "n" for install all, then "y", "n", "y" for 3 skills
+    # Skills are sorted: configure-workbench, install-workbench, use-workbench
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(
+            main, ["setup", "--global", "--agent", "claude"], input="n\ny\nn\ny\n"
+        )
+
+    assert result.exit_code == 0
+    skills_dir = fake_home / ".claude" / "skills"
+    assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
+    assert not (skills_dir / "install-workbench" / "SKILL.md").exists()
+    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
+
+
+def test_setup_select_none_skips(tmp_path):
+    """Declining all individual skills should skip installation."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    # "n" for install all, then "n" for each skill
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(
+            main, ["setup", "--global", "--agent", "claude"], input="n\nn\nn\nn\n"
+        )
+
+    assert result.exit_code == 0
+    assert "No skills selected" in result.output
+
+
+def test_setup_update_skips_selection(tmp_path):
+    """--update should skip the selection prompt entirely."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(
+            main, ["setup", "--global", "--agent", "claude", "--update"]
+        )
+
+    assert result.exit_code == 0
+    # All skills should be installed without prompting
+    skills_dir = fake_home / ".claude" / "skills"
+    assert (skills_dir / "use-workbench" / "SKILL.md").exists()
+    assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
+    assert "Install all" not in result.output
 
 
 # ---------------------------------------------------------------------------
@@ -1112,3 +1191,224 @@ def test_run_task_filter_none_by_default(git_repo, tmp_path):
     result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
     assert result.exit_code == 0, result.output
     assert captured.get("task_filter") is None
+
+
+# ---------------------------------------------------------------------------
+# wb agents
+# ---------------------------------------------------------------------------
+
+
+def test_agents_init_creates_yaml(git_repo):
+    """wb agents init should create agents.yaml with all built-in configs."""
+    (git_repo / ".workbench").mkdir(exist_ok=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "init"])
+
+    assert result.exit_code == 0
+    assert "Created" in result.output
+
+    config = yaml.safe_load((git_repo / ".workbench" / "agents.yaml").read_text())
+    assert "claude" in config["agents"]
+    assert "gemini" in config["agents"]
+    assert "codex" in config["agents"]
+    assert "cursor" in config["agents"]
+    # Verify structure of one entry
+    assert config["agents"]["claude"]["command"] == "claude"
+    assert "{prompt}" in config["agents"]["claude"]["args"]
+
+
+def test_agents_init_prompts_on_overwrite(git_repo):
+    """wb agents init should prompt before overwriting existing file."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text("agents:\n  old: {}\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        # Decline overwrite
+        result = runner.invoke(main, ["agents", "init"], input="n\n")
+
+    assert result.exit_code == 0
+    # Original file should be unchanged
+    config = yaml.safe_load((wb_dir / "agents.yaml").read_text())
+    assert "old" in config["agents"]
+
+
+def test_agents_init_overwrites_on_confirm(git_repo):
+    """wb agents init should overwrite when user confirms."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text("agents:\n  old: {}\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "init"], input="y\n")
+
+    assert result.exit_code == 0
+    config = yaml.safe_load((wb_dir / "agents.yaml").read_text())
+    assert "old" not in config["agents"]
+    assert "claude" in config["agents"]
+
+
+def test_agents_list_shows_builtins(git_repo):
+    """wb agents list should show built-in agents."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "list"])
+
+    assert result.exit_code == 0
+    assert "claude" in result.output
+    assert "gemini" in result.output
+    assert "codex" in result.output
+
+
+def test_agents_list_shows_custom(git_repo):
+    """wb agents list should show custom agents from agents.yaml."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text(
+        "agents:\n  my-agent:\n    command: my-cli\n    output_format: json\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "list"])
+
+    assert result.exit_code == 0
+    assert "my-agent" in result.output
+    assert "my-cli" in result.output
+
+
+def test_agents_show_builtin(git_repo):
+    """wb agents show claude should show built-in details."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "show", "claude"])
+
+    assert result.exit_code == 0
+    assert "built-in" in result.output
+
+
+def test_agents_show_custom(git_repo):
+    """wb agents show should show custom agent details."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text(
+        "agents:\n  my-agent:\n    command: my-cli\n    args: ['--headless', '{prompt}']\n    output_format: json\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "show", "my-agent"])
+
+    assert result.exit_code == 0
+    assert "my-cli" in result.output
+    assert "json" in result.output
+
+
+def test_agents_show_not_found(git_repo):
+    """wb agents show for unknown agent should error."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "show", "nonexistent"])
+
+    assert result.exit_code != 0
+    assert "not found" in result.output
+
+
+def test_agents_add_creates_yaml(git_repo):
+    """wb agents add should create agents.yaml with the new agent."""
+    (git_repo / ".workbench").mkdir(exist_ok=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(
+            main,
+            ["agents", "add", "my-agent", "--command", "my-cli", "--args", "--headless,{prompt}"],
+        )
+
+    assert result.exit_code == 0
+    assert "Added" in result.output
+
+    config = yaml.safe_load((git_repo / ".workbench" / "agents.yaml").read_text())
+    assert "my-agent" in config["agents"]
+    assert config["agents"]["my-agent"]["command"] == "my-cli"
+    assert config["agents"]["my-agent"]["args"] == ["--headless", "{prompt}"]
+
+
+def test_agents_add_with_json_format(git_repo):
+    """wb agents add with --output-format json should include json keys."""
+    (git_repo / ".workbench").mkdir(exist_ok=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(
+            main,
+            [
+                "agents", "add", "my-agent",
+                "--command", "my-cli",
+                "--output-format", "json",
+                "--json-result-key", "output",
+                "--json-cost-key", "cost",
+            ],
+        )
+
+    assert result.exit_code == 0
+    config = yaml.safe_load((git_repo / ".workbench" / "agents.yaml").read_text())
+    entry = config["agents"]["my-agent"]
+    assert entry["output_format"] == "json"
+    assert entry["json_result_key"] == "output"
+    assert entry["json_cost_key"] == "cost"
+
+
+def test_agents_add_updates_existing(git_repo):
+    """wb agents add for an existing agent should update it."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text(
+        "agents:\n  my-agent:\n    command: old-cli\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(
+            main, ["agents", "add", "my-agent", "--command", "new-cli"]
+        )
+
+    assert result.exit_code == 0
+    assert "Updated" in result.output
+    config = yaml.safe_load((wb_dir / "agents.yaml").read_text())
+    assert config["agents"]["my-agent"]["command"] == "new-cli"
+
+
+def test_agents_remove(git_repo):
+    """wb agents remove should delete the agent from agents.yaml."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text(
+        "agents:\n  my-agent:\n    command: my-cli\n  other:\n    command: other-cli\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "remove", "my-agent"])
+
+    assert result.exit_code == 0
+    assert "Removed" in result.output
+    config = yaml.safe_load((wb_dir / "agents.yaml").read_text())
+    assert "my-agent" not in config["agents"]
+    assert "other" in config["agents"]
+
+
+def test_agents_remove_not_found(git_repo):
+    """wb agents remove for unknown agent should error."""
+    (git_repo / ".workbench").mkdir(exist_ok=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "remove", "nonexistent"])
+
+    assert result.exit_code != 0
+    assert "not found" in result.output
