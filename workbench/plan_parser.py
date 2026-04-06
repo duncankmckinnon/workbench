@@ -33,6 +33,10 @@ class Plan:
     conventions: str = ""
 
     @property
+    def slug(self) -> str:
+        return re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")
+
+    @property
     def independent_groups(self) -> list[list[Task]]:
         """Group tasks into waves based on dependencies.
 

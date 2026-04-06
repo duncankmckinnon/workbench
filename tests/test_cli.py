@@ -1134,8 +1134,8 @@ def test_merge_requires_session_branch(git_repo):
     assert result.exit_code != 0
 
 
-def test_merge_passes_args(git_repo):
-    """wb merge -b workbench-1 should pass correct args to merge_unmerged."""
+def test_merge_passes_args_without_plan(git_repo):
+    """wb merge -b workbench-1 should pass plan_slug=None to merge_unmerged."""
     import asyncio
 
     runner = CliRunner()
@@ -1158,7 +1158,40 @@ def test_merge_passes_args(git_repo):
 
     assert result.exit_code == 0, result.output
     assert captured.get("session_branch") == "workbench-1"
+    assert captured.get("plan_slug") is None
     assert captured.get("use_tmux") is False
+
+
+def test_merge_passes_args_with_plan(git_repo, tmp_path):
+    """wb merge -b workbench-1 --plan plan.md should pass plan_slug."""
+    import asyncio
+
+    plan = tmp_path / "plan.md"
+    plan.write_text("# My Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+
+    with (
+        patch("workbench.cli.merge_unmerged") as mock_merge,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_merge(**kwargs):
+            pass
+
+        mock_merge.side_effect = lambda **kwargs: fake_merge(**kwargs)
+        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(
+            main, ["merge", "-b", "workbench-1", "--plan", str(plan), "--no-tmux"]
+        )
+
+        captured = dict(mock_merge.call_args.kwargs) if mock_merge.called else {}
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("session_branch") == "workbench-1"
+    assert captured.get("plan_slug") == "my-plan"
 
 
 # ---------------------------------------------------------------------------

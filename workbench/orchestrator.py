@@ -156,7 +156,13 @@ async def run_plan(
         )
 
     # Initialize session status tracking
-    session_status = SessionStatus(session_branch=session_branch)
+    plan_slug = plan.slug
+    plan_source = str(plan.source)
+    session_status = SessionStatus(
+        plan_slug=plan_slug,
+        session_branch=session_branch,
+        plan_source=plan_source,
+    )
 
     # Resolve --task filter: accept task IDs or slugs
     filtered_task_ids: set[str] | None = None
@@ -170,8 +176,8 @@ async def run_plan(
             console.print(f"[yellow]Warning: no tasks matched: {', '.join(unmatched)}[/yellow]")
 
     # Load prior session status to carry forward records for non-targeted tasks
-    prior = SessionStatus.load(repo)
-    if prior and prior.session_branch == session_branch:
+    prior = SessionStatus.load(repo, plan_slug, session_branch)
+    if prior:
         for tid, rec in prior.tasks.items():
             if filtered_task_ids is None or tid not in filtered_task_ids:
                 # Carry forward — this task is not being re-run
@@ -179,7 +185,7 @@ async def run_plan(
 
     # --only-failed: skip completed tasks
     skipped_task_ids: set[str] = set()
-    if only_failed and prior and prior.session_branch == session_branch:
+    if only_failed and prior:
         skipped_task_ids = prior.completed_task_ids()
         if skipped_task_ids:
             console.print(
@@ -559,28 +565,30 @@ async def run_plan(
 async def merge_unmerged(
     repo: Path,
     session_branch: str,
+    plan_slug: str | None = None,
     agent_cmd: str = "claude",
     use_tmux: bool = True,
     keep_branches: bool = False,
 ) -> SessionStatus:
     """Merge all completed-but-unmerged task branches into the session branch.
 
-    Reads status.json, finds tasks with status=done and merged=False,
-    and attempts to merge each one. Uses a merge resolver agent for conflicts.
+    If ``plan_slug`` is provided, loads that specific status file.
+    Otherwise, scans all status files for the session branch.
     """
     console = Console()
 
-    status = SessionStatus.load(repo)
-    if status is None:
-        console.print("[red]No status.json found. Run 'wb run' first.[/red]")
-        return SessionStatus(session_branch=session_branch)
+    if plan_slug:
+        status = SessionStatus.load(repo, plan_slug, session_branch)
+    else:
+        try:
+            status = SessionStatus.find_by_session(repo, session_branch)
+        except ValueError as e:
+            console.print(f"[red]{e}[/red]")
+            return SessionStatus(plan_slug="", session_branch=session_branch)
 
-    if status.session_branch != session_branch:
-        console.print(
-            f"[red]status.json is for session '{status.session_branch}', "
-            f"not '{session_branch}'.[/red]"
-        )
-        return status
+    if status is None:
+        console.print("[red]No status found for this session. Run 'wb run' first.[/red]")
+        return SessionStatus(plan_slug=plan_slug or "", session_branch=session_branch)
 
     # Find tasks that completed but haven't been merged
     unmerged = {

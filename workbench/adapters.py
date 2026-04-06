@@ -3,36 +3,56 @@
 from __future__ import annotations
 
 import json
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+from abc import ABC
+from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from typing import Any
 
 
-class AgentAdapter(ABC):
-    """Abstraction for different agent CLI platforms."""
+class OutputFormat(StrEnum):
+    TEXT = "text"
+    JSON = "json"
 
-    name: str
 
-    @abstractmethod
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        """Return the full command list to invoke the agent."""
+@dataclass
+class AgentConfig:
+    """YAML-serializable configuration for an agent adapter."""
 
-    @abstractmethod
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        """Parse agent stdout. Returns (output_text, cost_dict)."""
+    command: str
+    args: list[str] = field(default_factory=lambda: ["{prompt}"])
+    output_format: OutputFormat = OutputFormat.TEXT
+    json_result_key: str = "result"
+    json_cost_key: str = "cost_usd"
+
+    def __post_init__(self) -> None:
+        # Coerce string to enum (raises ValueError for invalid values)
+        if isinstance(self.output_format, str):
+            self.output_format = OutputFormat(self.output_format)
+        if not self.command:
+            raise ValueError("command must not be empty")
+        if not self.args:
+            raise ValueError("args must not be empty")
+        if "{prompt}" not in self.args:
+            raise ValueError("args must contain '{prompt}' placeholder")
+
+    def to_dict(self) -> dict[str, Any]:
+        """Serialize to a YAML-compatible dict."""
+        entry: dict[str, Any] = {
+            "command": self.command,
+            "args": self.args,
+            "output_format": self.output_format.value,
+        }
+        if self.output_format == OutputFormat.JSON:
+            entry["json_result_key"] = self.json_result_key
+            entry["json_cost_key"] = self.json_cost_key
+        return entry
 
     @classmethod
-    def to_config(cls) -> dict[str, Any]:
-        """Return a YAML-compatible config dict for this adapter."""
-        raise NotImplementedError(f"{cls.__name__} does not support to_config")
-
-    @classmethod
-    def from_config(cls, name: str, entry: dict[str, Any]) -> "ConfigAdapter":
-        """Create a ConfigAdapter from a YAML config dict."""
-        return ConfigAdapter(
-            name=name,
-            command=entry.get("command", name),
+    def from_dict(cls, entry: dict[str, Any], default_command: str = "") -> AgentConfig:
+        """Deserialize from a YAML dict with defaults for missing fields."""
+        return cls(
+            command=entry.get("command", default_command),
             args=entry.get("args", ["{prompt}"]),
             output_format=entry.get("output_format", "text"),
             json_result_key=entry.get("json_result_key", "result"),
@@ -40,63 +60,99 @@ class AgentAdapter(ABC):
         )
 
 
-ALLOWED_TOOLS = (
-    "Edit,Write,Read,Glob,Grep," "Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)"
-)
+class AgentAdapter(ABC):
+    """Abstraction for different agent CLI platforms.
+
+    Each adapter holds an ``AgentConfig`` that describes its CLI invocation.
+    Built-in adapters set their config directly in ``__init__``.
+    Custom adapters are created from YAML via ``from_config()``.
+    """
+
+    name: str
+    config: AgentConfig
+
+    def parse_output(self, raw: str) -> tuple[str, dict]:
+        """Parse agent stdout. Returns (output_text, cost_dict).
+
+        Default implementation handles both text and JSON based on config.
+        Override for agents with non-standard output (e.g. NDJSON streams).
+        """
+        if self.config.output_format == OutputFormat.JSON:
+            try:
+                data = json.loads(raw)
+                result = data.get(self.config.json_result_key, raw)
+                cost = data.get(self.config.json_cost_key, {})
+                return (result, cost)
+            except (json.JSONDecodeError, TypeError):
+                return (raw, {})
+        return (raw.strip(), {})
+
+    def build_command(self, prompt: str, cwd: Path) -> list[str]:
+        """Build the CLI command from config, substituting the prompt."""
+        resolved_args = [a.replace("{prompt}", prompt) for a in self.config.args]
+        return [self.config.command, *resolved_args]
+
+    def to_config(self) -> dict[str, Any]:
+        """Serialize this adapter's config to a YAML-compatible dict."""
+        return self.config.to_dict()
+
+    @classmethod
+    def from_config(cls, name: str, entry: dict[str, Any]) -> ConfigAdapter:
+        """Create a ConfigAdapter from a YAML config dict."""
+        config = AgentConfig.from_dict(entry, default_command=name)
+        return ConfigAdapter(name=name, config=config)
+
+
+@dataclass
+class ConfigAdapter(AgentAdapter):
+    """Adapter driven by a YAML config entry from .workbench/agents.yaml."""
+
+    name: str
+    config: AgentConfig
 
 
 class ClaudeAdapter(AgentAdapter):
     """Adapter for the Claude Code CLI."""
 
     name = "claude"
+    ALLOWED_TOOLS = (
+        "Edit,Write,Read,Glob,Grep," "Bash(git *),Bash(uv run *),Bash(cd *),Bash(ls *),Bash(npx *)"
+    )
 
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        return [
-            "claude",
-            "-p",
-            prompt,
-            "--output-format",
-            "json",
-            "--allowedTools",
-            ALLOWED_TOOLS,
-        ]
-
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        try:
-            data = json.loads(raw)
-            result = data.get("result", raw)
-            cost = data.get("cost_usd", {})
-            return (result, cost)
-        except (json.JSONDecodeError, TypeError):
-            return (raw, {})
-
-    @classmethod
-    def to_config(cls) -> dict[str, Any]:
-        return {
-            "command": "claude",
-            "args": ["-p", "{prompt}", "--output-format", "json", "--allowedTools", ALLOWED_TOOLS],
-            "output_format": "json",
-            "json_result_key": "result",
-            "json_cost_key": "cost_usd",
-        }
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="claude",
+            args=[
+                "-p",
+                "{prompt}",
+                "--output-format",
+                "json",
+                "--allowedTools",
+                self.ALLOWED_TOOLS,
+            ],
+            output_format=OutputFormat.JSON,
+            json_result_key="result",
+            json_cost_key="cost_usd",
+        )
 
 
 class CodexAdapter(AgentAdapter):
     """Adapter for the Codex CLI (OpenAI).
 
-    Uses `codex exec` for non-interactive execution with JSON output.
+    Uses ``codex exec`` for non-interactive execution with JSON output.
+    Parses newline-delimited JSON events, extracting the last assistant message.
     """
 
     name = "codex"
 
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        return [
-            "codex",
-            "exec",
-            "--full-auto",
-            "--json",
-            prompt,
-        ]
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="codex",
+            args=["exec", "--full-auto", "--json", "{prompt}"],
+            output_format=OutputFormat.JSON,
+            json_result_key="result",
+            json_cost_key="cost_usd",
+        )
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
         # codex exec --json outputs newline-delimited JSON events
@@ -113,16 +169,6 @@ class CodexAdapter(AgentAdapter):
                 continue
         return (last_message or raw.strip(), {})
 
-    @classmethod
-    def to_config(cls) -> dict[str, Any]:
-        return {
-            "command": "codex",
-            "args": ["exec", "--full-auto", "--json", "{prompt}"],
-            "output_format": "json",
-            "json_result_key": "result",
-            "json_cost_key": "cost_usd",
-        }
-
 
 class CursorAdapter(AgentAdapter):
     """Adapter for the Cursor CLI (agent command).
@@ -133,63 +179,12 @@ class CursorAdapter(AgentAdapter):
 
     name = "cursor"
 
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        return [
-            "agent",
-            "-p",
-            prompt,
-            "--output-format",
-            "text",
-        ]
-
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        return (raw.strip(), {})
-
-    @classmethod
-    def to_config(cls) -> dict[str, Any]:
-        return {
-            "command": "agent",
-            "args": ["-p", "{prompt}", "--output-format", "text"],
-            "output_format": "text",
-        }
-
-
-@dataclass
-class ConfigAdapter(AgentAdapter):
-    """Adapter driven by a YAML config entry from .workbench/agents.yaml."""
-
-    name: str
-    command: str
-    args: list[str]
-    output_format: str = "text"
-    json_result_key: str = "result"
-    json_cost_key: str = "cost_usd"
-
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        resolved_args = [a.replace("{prompt}", prompt) for a in self.args]
-        return [self.command, *resolved_args]
-
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        if self.output_format == "json":
-            try:
-                data = json.loads(raw)
-                result = data.get(self.json_result_key, raw)
-                cost = data.get(self.json_cost_key, {})
-                return (result, cost)
-            except (json.JSONDecodeError, TypeError):
-                return (raw, {})
-        return (raw.strip(), {})
-
-    def to_config(self) -> dict[str, Any]:
-        entry: dict[str, Any] = {
-            "command": self.command,
-            "args": self.args,
-            "output_format": self.output_format,
-        }
-        if self.output_format == "json":
-            entry["json_result_key"] = self.json_result_key
-            entry["json_cost_key"] = self.json_cost_key
-        return entry
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="agent",
+            args=["-p", "{prompt}", "--output-format", "text"],
+            output_format=OutputFormat.TEXT,
+        )
 
 
 class GeminiAdapter(AgentAdapter):
@@ -197,35 +192,14 @@ class GeminiAdapter(AgentAdapter):
 
     name = "gemini"
 
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        return [
-            "gemini",
-            "-p",
-            prompt,
-            "--output-format",
-            "json",
-            "--approval-mode",
-            "yolo",
-        ]
-
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        try:
-            data = json.loads(raw)
-            result = data.get("response", raw)
-            stats = data.get("stats", {})
-            return (result, stats)
-        except (json.JSONDecodeError, TypeError):
-            return (raw, {})
-
-    @classmethod
-    def to_config(cls) -> dict[str, Any]:
-        return {
-            "command": "gemini",
-            "args": ["-p", "{prompt}", "--output-format", "json", "--approval-mode", "yolo"],
-            "output_format": "json",
-            "json_result_key": "response",
-            "json_cost_key": "stats",
-        }
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="gemini",
+            args=["-p", "{prompt}", "--output-format", "json", "--approval-mode", "yolo"],
+            output_format=OutputFormat.JSON,
+            json_result_key="response",
+            json_cost_key="stats",
+        )
 
 
 class GenericAdapter(AgentAdapter):
@@ -233,13 +207,7 @@ class GenericAdapter(AgentAdapter):
 
     def __init__(self, agent_cmd: str) -> None:
         self.name = agent_cmd
-        self._cmd = agent_cmd
-
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        return [self._cmd, prompt]
-
-    def parse_output(self, raw: str) -> tuple[str, dict]:
-        return (raw.strip(), {})
+        self.config = AgentConfig(command=agent_cmd, args=["{prompt}"])
 
 
 BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
@@ -252,7 +220,7 @@ BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
 
 def default_agents_config() -> dict[str, dict[str, Any]]:
     """Generate the default agents.yaml config from all built-in adapters."""
-    return {name: cls.to_config() for name, cls in BUILTIN_ADAPTERS.items()}
+    return {name: cls().to_config() for name, cls in BUILTIN_ADAPTERS.items()}
 
 
 def _load_yaml_config(config_path: Path) -> dict[str, Any]:
@@ -260,10 +228,8 @@ def _load_yaml_config(config_path: Path) -> dict[str, Any]:
     try:
         import yaml
     except ImportError:
-        # Fall back to a basic parser if PyYAML isn't installed.
-        # For robustness, we require PyYAML for YAML configs.
         raise ImportError(
-            "PyYAML is required for custom agent configs. " "Install it with: pip install pyyaml"
+            "PyYAML is required for custom agent configs. Install it with: pip install pyyaml"
         )
     with open(config_path) as f:
         return yaml.safe_load(f) or {}

@@ -523,7 +523,7 @@ async def test_only_failed_skips_completed_tasks(tmp_path):
     pipeline_calls = []
 
     # Pre-seed status.json with task-1 completed
-    prior = SessionStatus(session_branch="workbench-1")
+    prior = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     prior.record_task("task-1", status="done", branch="wb/good-task", merged=True)
     prior.save(repo)
 
@@ -603,7 +603,7 @@ async def test_only_failed_ignores_different_session(tmp_path):
     pipeline_calls = []
 
     # Status from a different session
-    prior = SessionStatus(session_branch="workbench-old")
+    prior = SessionStatus(plan_slug="two-tasks", session_branch="workbench-old")
     prior.record_task("task-1", status="done", branch="wb/good-task", merged=True)
     prior.save(repo)
 
@@ -717,7 +717,7 @@ async def test_status_json_written_after_task(tmp_path):
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
     # status.json should exist and contain task-1 as done+merged
-    status = SessionStatus.load(repo)
+    status = SessionStatus.load(repo, "test-plan", "workbench-1")
     assert status is not None
     assert status.session_branch == "workbench-1"
     assert "task-1" in status.tasks
@@ -756,7 +756,7 @@ async def test_status_json_records_failed_task(tmp_path):
 
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
-    status = SessionStatus.load(repo)
+    status = SessionStatus.load(repo, "test-plan", "workbench-1")
     assert status is not None
     assert status.tasks["task-1"].status == "failed"
     assert status.tasks["task-1"].merged is False
@@ -788,7 +788,7 @@ async def test_status_json_marks_merged_after_merge(tmp_path):
 
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
-    status = SessionStatus.load(repo)
+    status = SessionStatus.load(repo, "two-tasks", "workbench-1")
     assert status.tasks["task-1"].merged is True
     assert status.tasks["task-2"].merged is True
 
@@ -804,7 +804,7 @@ async def test_merge_unmerged_merges_done_unmerged(tmp_path):
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-1")
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     status.record_task("task-1", status="done", branch="wb/feat-a")
     status.record_task("task-2", status="done", branch="wb/feat-b")
     status.save(repo)
@@ -816,7 +816,9 @@ async def test_merge_unmerged_merges_done_unmerged(tmp_path):
     ):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
-        result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        result = await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     assert mock_merge.call_count == 2
     assert result.tasks["task-1"].merged is True
@@ -829,7 +831,7 @@ async def test_merge_unmerged_skips_already_merged(tmp_path):
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-1")
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     status.record_task("task-1", status="done", branch="wb/feat-a")
     status.save(repo)
 
@@ -841,7 +843,9 @@ async def test_merge_unmerged_skips_already_merged(tmp_path):
             return_value={"main", "workbench-1", "wb/feat-a"},
         ),
     ):
-        result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        result = await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     # Should NOT attempt merge — branch was already merged
     mock_merge.assert_not_called()
@@ -855,7 +859,7 @@ async def test_merge_unmerged_skips_failed_tasks(tmp_path):
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-1")
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     status.record_task("task-1", status="failed", branch="wb/feat-a")
     status.save(repo)
 
@@ -863,7 +867,9 @@ async def test_merge_unmerged_skips_failed_tasks(tmp_path):
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.get_merged_branches", return_value={"main", "workbench-1"}),
     ):
-        result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        result = await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     mock_merge.assert_not_called()
 
@@ -874,7 +880,7 @@ async def test_merge_unmerged_skips_already_merged_in_status(tmp_path):
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-1")
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     status.record_task("task-1", status="done", branch="wb/feat-a", merged=True)
     status.save(repo)
 
@@ -882,7 +888,9 @@ async def test_merge_unmerged_skips_already_merged_in_status(tmp_path):
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.get_merged_branches", return_value={"main", "workbench-1"}),
     ):
-        result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        result = await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     mock_merge.assert_not_called()
 
@@ -891,25 +899,31 @@ async def test_merge_unmerged_skips_already_merged_in_status(tmp_path):
 async def test_merge_unmerged_no_status_file(tmp_path):
     """merge_unmerged with no status.json should return empty status."""
     repo = tmp_path
-    result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+    result = await merge_unmerged(
+        repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+    )
     assert len(result.tasks) == 0
 
 
 @pytest.mark.asyncio
 async def test_merge_unmerged_wrong_session(tmp_path):
-    """merge_unmerged should reject status from a different session branch."""
+    """merge_unmerged with no matching session should return empty status."""
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-old")
+    # Status exists for workbench-old, but we request workbench-1
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-old")
     status.record_task("task-1", status="done", branch="wb/feat-a")
     status.save(repo)
 
     with (patch("workbench.orchestrator.merge_into_session") as mock_merge,):
-        result = await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        result = await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     mock_merge.assert_not_called()
-    assert result.session_branch == "workbench-old"
+    assert result.session_branch == "workbench-1"
+    assert len(result.tasks) == 0
 
 
 @pytest.mark.asyncio
@@ -918,7 +932,7 @@ async def test_merge_unmerged_persists_status(tmp_path):
     repo = tmp_path
     (repo / ".workbench").mkdir()
 
-    status = SessionStatus(session_branch="workbench-1")
+    status = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     status.record_task("task-1", status="done", branch="wb/feat-a")
     status.save(repo)
 
@@ -928,10 +942,12 @@ async def test_merge_unmerged_persists_status(tmp_path):
         patch("workbench.orchestrator.get_merged_branches", return_value={"main", "workbench-1"}),
     ):
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
-        await merge_unmerged(repo=repo, session_branch="workbench-1", use_tmux=False)
+        await merge_unmerged(
+            repo=repo, session_branch="workbench-1", plan_slug="two-tasks", use_tmux=False
+        )
 
     # Reload from disk and verify
-    reloaded = SessionStatus.load(repo)
+    reloaded = SessionStatus.load(repo, "two-tasks", "workbench-1")
     assert reloaded.tasks["task-1"].merged is True
 
 
@@ -1024,7 +1040,7 @@ async def test_task_filter_preserves_other_status(tmp_path):
     (repo / ".workbench").mkdir()
 
     # Pre-seed status with task-1 done+merged
-    prior = SessionStatus(session_branch="workbench-1")
+    prior = SessionStatus(plan_slug="two-tasks", session_branch="workbench-1")
     prior.record_task(
         "task-1", status="done", branch="wb/good-task", merged=True, last_agent="reviewer"
     )
@@ -1055,7 +1071,7 @@ async def test_task_filter_preserves_other_status(tmp_path):
         )
 
     # task-1's prior status should be preserved
-    status = SessionStatus.load(repo)
+    status = SessionStatus.load(repo, "two-tasks", "workbench-1")
     assert status.tasks["task-1"].status == "done"
     assert status.tasks["task-1"].merged is True
     assert status.tasks["task-1"].last_agent == "reviewer"

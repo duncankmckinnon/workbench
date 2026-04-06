@@ -654,6 +654,13 @@ def stop(cleanup: bool, repo: Path | None):
     help="Session branch to merge into (e.g. workbench-1).",
 )
 @click.option(
+    "--plan",
+    "plan_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Plan file (auto-detected from status if omitted).",
+)
+@click.option(
     "--agent",
     default="claude",
     help="Agent CLI for merge conflict resolution (claude, gemini, codex, cursor, or custom).",
@@ -674,6 +681,7 @@ def stop(cleanup: bool, repo: Path | None):
 )
 def merge(
     session_branch: str,
+    plan_path: Path | None,
     agent: str,
     repo: Path | None,
     no_tmux: bool,
@@ -682,13 +690,16 @@ def merge(
     """Merge completed-but-unmerged task branches into the session branch.
 
     \b
-    Reads .workbench/status.json to find tasks that completed their pipeline
-    but haven't been merged yet. Attempts each merge, using a resolver agent
-    for conflicts.
+    Finds tasks that completed their pipeline but haven't been merged yet.
+    Attempts each merge, using a resolver agent for conflicts.
+
+    If --plan is provided, uses that plan's status file. Otherwise, scans
+    all status files for the session branch.
 
     \b
     Example:
       wb merge -b workbench-1
+      wb merge -b workbench-1 --plan plan.md
       wb merge -b workbench-1 --agent gemini
     """
     if not no_tmux and not check_tmux_available():
@@ -701,10 +712,16 @@ def merge(
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
 
+    plan_slug = None
+    if plan_path:
+        plan = parse_plan(plan_path.resolve())
+        plan_slug = plan.slug
+
     asyncio.run(
         merge_unmerged(
             repo=repo,
             session_branch=session_branch,
+            plan_slug=plan_slug,
             agent_cmd=agent,
             use_tmux=not no_tmux,
             keep_branches=keep_branches,
