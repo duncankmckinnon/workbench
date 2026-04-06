@@ -6,13 +6,14 @@ from pathlib import Path
 import pytest
 
 from workbench.adapters import (
-    ALLOWED_TOOLS,
     AgentAdapter,
+    AgentConfig,
     ClaudeAdapter,
     CodexAdapter,
     ConfigAdapter,
     GeminiAdapter,
     GenericAdapter,
+    OutputFormat,
     get_adapter,
 )
 
@@ -33,7 +34,7 @@ class TestClaudeAdapter:
             "--output-format",
             "json",
             "--allowedTools",
-            ALLOWED_TOOLS,
+            ClaudeAdapter.ALLOWED_TOOLS,
         ]
 
     def test_parse_output_valid_json(self):
@@ -186,67 +187,135 @@ class TestGenericAdapter:
 
 class TestConfigAdapter:
     def test_build_command_substitutes_prompt(self, tmp_path):
-        adapter = ConfigAdapter(
-            name="custom",
-            command="my-cli",
-            args=["--headless", "{prompt}", "--verbose"],
-        )
+        config = AgentConfig(command="my-cli", args=["--headless", "{prompt}", "--verbose"])
+        adapter = ConfigAdapter(name="custom", config=config)
         cmd = adapter.build_command("do work", tmp_path)
         assert cmd == ["my-cli", "--headless", "do work", "--verbose"]
 
     def test_parse_output_text_format(self):
-        adapter = ConfigAdapter(
-            name="custom",
-            command="my-cli",
-            args=["{prompt}"],
-            output_format="text",
-        )
+        config = AgentConfig(command="my-cli", args=["{prompt}"], output_format="text")
+        adapter = ConfigAdapter(name="custom", config=config)
         text, cost = adapter.parse_output("  some output  \n")
         assert text == "some output"
         assert cost == {}
 
     def test_parse_output_json_format(self):
-        adapter = ConfigAdapter(
-            name="custom",
+        config = AgentConfig(
             command="my-cli",
             args=["{prompt}"],
             output_format="json",
             json_result_key="answer",
             json_cost_key="price",
         )
+        adapter = ConfigAdapter(name="custom", config=config)
         raw = json.dumps({"answer": "42", "price": {"total": 0.05}})
         text, cost = adapter.parse_output(raw)
         assert text == "42"
         assert cost == {"total": 0.05}
 
     def test_parse_output_json_format_invalid(self):
-        adapter = ConfigAdapter(
-            name="custom",
-            command="my-cli",
-            args=["{prompt}"],
-            output_format="json",
-        )
+        config = AgentConfig(command="my-cli", args=["{prompt}"], output_format="json")
+        adapter = ConfigAdapter(name="custom", config=config)
         text, cost = adapter.parse_output("not json")
         assert text == "not json"
         assert cost == {}
 
     def test_parse_output_json_missing_keys(self):
-        adapter = ConfigAdapter(
-            name="custom",
+        config = AgentConfig(
             command="my-cli",
             args=["{prompt}"],
             output_format="json",
             json_result_key="answer",
             json_cost_key="price",
         )
+        adapter = ConfigAdapter(name="custom", config=config)
         raw = json.dumps({"unrelated": "data"})
         text, cost = adapter.parse_output(raw)
         assert text == raw  # falls back to raw
         assert cost == {}
 
     def test_is_agent_adapter(self):
-        adapter = ConfigAdapter(name="x", command="x", args=[])
+        config = AgentConfig(command="x", args=["{prompt}"])
+        adapter = ConfigAdapter(name="x", config=config)
         assert isinstance(adapter, AgentAdapter)
+
+
+class TestAgentConfig:
+    def test_valid_text_config(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"])
+        assert config.output_format == OutputFormat.TEXT
+
+    def test_valid_json_config(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"], output_format="json")
+        assert config.output_format == OutputFormat.JSON
+
+    def test_invalid_output_format(self):
+        with pytest.raises(ValueError, match="is not a valid OutputFormat"):
+            AgentConfig(command="my-cli", args=["{prompt}"], output_format="xml")
+
+    def test_empty_command(self):
+        with pytest.raises(ValueError, match="command must not be empty"):
+            AgentConfig(command="", args=["{prompt}"])
+
+    def test_empty_args(self):
+        with pytest.raises(ValueError, match="args must not be empty"):
+            AgentConfig(command="my-cli", args=[])
+
+    def test_missing_prompt_placeholder(self):
+        with pytest.raises(ValueError, match="must contain"):
+            AgentConfig(command="my-cli", args=["--flag"])
+
+    def test_to_dict_text(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"])
+        d = config.to_dict()
+        assert d == {"command": "my-cli", "args": ["{prompt}"], "output_format": "text"}
+        assert "json_result_key" not in d
+
+    def test_to_dict_json(self):
+        config = AgentConfig(
+            command="my-cli",
+            args=["{prompt}"],
+            output_format="json",
+            json_result_key="answer",
+            json_cost_key="price",
+        )
+        d = config.to_dict()
+        assert d["json_result_key"] == "answer"
+        assert d["json_cost_key"] == "price"
+
+    def test_from_dict_minimal(self):
+        config = AgentConfig.from_dict({"command": "my-cli"})
+        assert config.command == "my-cli"
+        assert config.args == ["{prompt}"]
+        assert config.output_format == OutputFormat.TEXT
+
+    def test_from_dict_full(self):
+        config = AgentConfig.from_dict(
+            {
+                "command": "my-cli",
+                "args": ["--flag", "{prompt}"],
+                "output_format": "json",
+                "json_result_key": "answer",
+                "json_cost_key": "price",
+            }
+        )
+        assert config.output_format == OutputFormat.JSON
+        assert config.json_result_key == "answer"
+
+    def test_round_trip(self):
+        original = AgentConfig(
+            command="my-cli",
+            args=["--headless", "{prompt}"],
+            output_format="json",
+            json_result_key="out",
+            json_cost_key="cost",
+        )
+        restored = AgentConfig.from_dict(original.to_dict())
+        assert restored.command == original.command
+        assert restored.args == original.args
+        assert restored.output_format == original.output_format
+        assert restored.json_result_key == original.json_result_key
+        assert restored.json_cost_key == original.json_cost_key
 
 
 class TestGetAdapter:
@@ -287,8 +356,8 @@ class TestGetAdapter:
         adapter = get_adapter("my-agent", config_path=config_file)
         assert isinstance(adapter, ConfigAdapter)
         assert adapter.name == "my-agent"
-        assert adapter.command == "my-agent-cli"
-        assert adapter.output_format == "json"
+        assert adapter.config.command == "my-agent-cli"
+        assert adapter.config.output_format == OutputFormat.JSON
 
         cmd = adapter.build_command("test prompt", tmp_path)
         assert cmd == ["my-agent-cli", "--headless", "test prompt"]
@@ -307,7 +376,7 @@ class TestGetAdapter:
         )
         adapter = get_adapter("claude", config_path=config_file)
         assert isinstance(adapter, ConfigAdapter)
-        assert adapter.command == "custom-claude"
+        assert adapter.config.command == "custom-claude"
 
     def test_config_defaults(self, tmp_path):
         """Minimal config entry should get sensible defaults."""
@@ -315,7 +384,7 @@ class TestGetAdapter:
         config_file.write_text("agents:\n  minimal:\n    command: min-cli\n")
         adapter = get_adapter("minimal", config_path=config_file)
         assert isinstance(adapter, ConfigAdapter)
-        assert adapter.args == ["{prompt}"]
-        assert adapter.output_format == "text"
-        assert adapter.json_result_key == "result"
-        assert adapter.json_cost_key == "cost_usd"
+        assert adapter.config.args == ["{prompt}"]
+        assert adapter.config.output_format == OutputFormat.TEXT
+        assert adapter.config.json_result_key == "result"
+        assert adapter.config.json_cost_key == "cost_usd"

@@ -1,6 +1,7 @@
 # Workbench
 
 [![CI](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/duncankmckinnon/workbench/graph/badge.svg)](https://codecov.io/gh/duncankmckinnon/workbench)
 [![PyPI](https://img.shields.io/pypi/v/wbcli?v=2)](https://pypi.org/project/wbcli/)
 [![Python](https://img.shields.io/pypi/pyversions/wbcli?v=2)](https://pypi.org/project/wbcli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
@@ -129,7 +130,7 @@ Workbench parses the plan, groups tasks into dependency waves, creates isolated 
 implement → test → fix  → review → fix (retry up to --max-retries)
 ```
 
-After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status.json` as each task completes.
+After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status-<plan>.yaml` as each task completes, keyed by session branch.
 
 ### 4. Handle failures
 
@@ -151,7 +152,7 @@ wb run plan.md --retry-failed --fail-fast
 
 `--retry-failed` distinguishes between transient failures (agent crash, timeout) and deliberate failures (exhausted all fix cycles). Only transient failures are retried.
 
-`--only-failed` reads `.workbench/status.json` to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
+`--only-failed` reads the plan's status file to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
 
 You can also re-run specific tasks by ID or slug:
 
@@ -169,7 +170,7 @@ wb run plan.md -b workbench-1 --task my-feature-name
 wb run plan.md --task task-2
 ```
 
-`--task` accepts task IDs (e.g. `task-2`) or slugs (e.g. `my-feature-name`). Only the specified tasks run — all other tasks are left untouched. If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved in `status.json`.
+`--task` accepts task IDs (e.g. `task-2`) or slugs (e.g. `my-feature-name`). Only the specified tasks run — all other tasks are left untouched. If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved.
 
 ### 5. Merge unmerged branches
 
@@ -177,9 +178,10 @@ If a run was interrupted or some merges failed due to conflicts, use `wb merge` 
 
 ```bash
 wb merge -b workbench-1
+wb merge -b workbench-1 --plan plan.md    # explicit plan
 ```
 
-This reads `.workbench/status.json`, finds tasks with `status=done` that haven't been merged yet, and attempts each merge. Conflicts are handled by a merge resolver agent. Branches that were already merged manually (via git) are detected and skipped.
+This scans the status files for the session branch, finds tasks with `status=done` that haven't been merged yet, and attempts each merge. Conflicts are handled by a merge resolver agent. Branches that were already merged manually (via git) are detected and skipped. If the session branch exists in multiple plan status files, use `--plan` to disambiguate.
 
 ### 6. Monitor progress
 
@@ -369,7 +371,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | Command | Description |
 |---|---|
 | `wb run <plan>` | Execute a plan with parallel agents |
-| `wb merge -b <branch>` | Merge completed-but-unmerged task branches |
+| `wb merge -b <branch>` | Merge completed-but-unmerged task branches (auto-detects plan) |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
 | `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
@@ -427,6 +429,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | Flag | Description |
 |---|---|
 | `-b NAME` / `--session-branch` | Session branch to merge into (required) |
+| `--plan PATH` | Plan file to determine status file (auto-detected if omitted) |
 | `--agent CMD` | Agent CLI for conflict resolution (default: `claude`) |
 | `--no-tmux` | Run resolver agents as subprocesses instead of tmux |
 | `--keep-branches` | Keep task branches after merging |
