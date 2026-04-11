@@ -128,6 +128,7 @@ async def run_plan(
     cleanup_on_done: bool = False,
     session_branch: str | None = None,
     start_wave: int = 1,
+    end_wave: int | None = None,
     use_tmux: bool = True,
     directives: dict[Role, str] | None = None,
     tdd: bool = False,
@@ -231,6 +232,13 @@ async def run_plan(
                 all_states.append(state)
                 state_map[task.id] = state
             continue
+
+        # Stop after end_wave
+        if end_wave is not None and wave_num > end_wave:
+            console.print(
+                f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (beyond --wave {end_wave}) ━━━[/dim]\n"
+            )
+            break
 
         console.print(
             f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n"

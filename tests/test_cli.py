@@ -1121,6 +1121,125 @@ def test_run_flags_default_to_false(git_repo, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# Wave range validation
+# ---------------------------------------------------------------------------
+
+
+def _run_cli_with_capture_multi_wave(git_repo, tmp_path, extra_args, num_waves=3):
+    """Like _run_cli_with_capture but with chained dependent tasks (one per wave)."""
+    import asyncio
+
+    # Each task depends on the previous → sequential waves
+    lines = ["# Plan"]
+    for i in range(1, num_waves + 1):
+        lines.append(f"## Task: step {i}")
+        if i > 1:
+            lines.append(f"Depends: step-{i - 1}")
+        lines.append(f"Do thing {i}")
+        lines.append("")
+    plan = tmp_path / "plan.md"
+    plan.write_text("\n".join(lines))
+
+    runner = CliRunner()
+
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_run_plan(**kwargs):
+            return []
+
+        mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux"] + extra_args)
+
+        captured = dict(mock_run_plan.call_args.kwargs) if mock_run_plan.called else {}
+
+    return result, captured
+
+
+def test_wave_flag_sets_start_and_end(git_repo, tmp_path):
+    """-w 2 should set start_wave=2 and end_wave=2."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["-w", "2"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 2
+    assert captured.get("end_wave") == 2
+
+
+def test_start_wave_and_end_wave_passthrough(git_repo, tmp_path):
+    """--start-wave 1 --end-wave 2 passes through correctly."""
+    result, captured = _run_cli_with_capture_multi_wave(
+        git_repo, tmp_path, ["--start-wave", "1", "--end-wave", "2"]
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 1
+    assert captured.get("end_wave") == 2
+
+
+def test_start_wave_defaults_no_end(git_repo, tmp_path):
+    """Without --wave or --end-wave, start_wave defaults to 1 and end_wave is None."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 1
+    assert captured.get("end_wave") is None
+
+
+def test_start_wave_too_low_clamps_to_1(git_repo, tmp_path):
+    """--start-wave 0 clamps to 1 with a warning."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["--start-wave", "0"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 1
+    assert "defaulting to 1" in result.output
+
+
+def test_start_wave_too_high_clamps_to_1(git_repo, tmp_path):
+    """--start-wave beyond num_waves clamps to 1."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["--start-wave", "99"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 1
+    assert "defaulting to 1" in result.output
+
+
+def test_end_wave_too_high_clamps_to_num_waves(git_repo, tmp_path):
+    """--end-wave beyond num_waves clamps to N."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["--end-wave", "99"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("end_wave") == 3  # 3 tasks = 3 waves
+    assert "defaulting to 3" in result.output
+
+
+def test_end_wave_too_low_clamps_to_num_waves(git_repo, tmp_path):
+    """--end-wave 0 clamps to N."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["--end-wave", "0"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("end_wave") == 3
+    assert "defaulting to 3" in result.output
+
+
+def test_end_wave_less_than_start_wave_clamps(git_repo, tmp_path):
+    """--end-wave < --start-wave clamps end_wave to N."""
+    result, captured = _run_cli_with_capture_multi_wave(
+        git_repo, tmp_path, ["--start-wave", "2", "--end-wave", "1"]
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("start_wave") == 2
+    assert captured.get("end_wave") == 3
+    assert "defaulting to 3" in result.output
+
+
+def test_wave_flag_out_of_range_clamps(git_repo, tmp_path):
+    """-w 99 clamps to valid range (start=1 since out of range)."""
+    result, captured = _run_cli_with_capture_multi_wave(git_repo, tmp_path, ["-w", "99"])
+    assert result.exit_code == 0, result.output
+    # --wave sets both start and end to 99; start clamps to 1, end clamps to N
+    assert captured.get("start_wave") == 1
+    assert captured.get("end_wave") == 3
+
+
+# ---------------------------------------------------------------------------
 # wb merge
 # ---------------------------------------------------------------------------
 
