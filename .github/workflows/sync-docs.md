@@ -65,7 +65,17 @@ Clone or fetch the `duncankmckinnon/wbcli-web` repository. Examine the docs-rela
 - How the site structures its content (file layout, component patterns)
 - Which specific files need updating based on the changes from Step 2
 
-Look in common Next.js docs locations: `src/app/docs/`, `src/content/`, `app/docs/`, `content/`, `pages/docs/`, or similar.
+Look in common Next.js docs locations `content/docs`:
+
+- agents.mdx documents workbench agent configuration
+- cli-reference.mdx is the straightforward CLI documentation for workbench
+- getting-started.mdx walks through setup and examples
+- plan-format.mdx documents how plans are formatted for parsing and examples
+- profiles.mdx documents execution profiles and configuration for workflows
+- running-plans.mdx gives example of how you can execute workbench runs with different flags and configurations in different scenarios
+- skills.mdx gives an overview and explanation of the skills included in workbench
+- tdd-mode.mdx is a brief explanation of the test-driven development option
+
 
 ## Step 4: Determine if a PR is needed
 

@@ -637,6 +637,87 @@ async def test_only_failed_ignores_different_session(tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# --end-wave
+# ---------------------------------------------------------------------------
+
+
+def _make_three_wave_plan() -> Plan:
+    """Plan with 3 sequential waves (each task depends on the previous)."""
+    return _make_plan(
+        title="Three Waves",
+        tasks=[
+            Task(id="task-1", title="Wave1", description="first", files=[], depends_on=[]),
+            Task(
+                id="task-2", title="Wave2", description="second", files=[], depends_on=["task-1"]
+            ),
+            Task(id="task-3", title="Wave3", description="third", files=[], depends_on=["task-2"]),
+        ],
+    )
+
+
+@pytest.mark.asyncio
+async def test_end_wave_stops_after_specified_wave(tmp_path):
+    """end_wave=1 should only run wave 1 and skip waves 2 and 3."""
+    plan = _make_three_wave_plan()
+    repo = tmp_path
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False, end_wave=1)
+
+    # Only wave 1 task should have run
+    assert pipeline_calls == ["task-1"]
+    assert len(results) == 1
+    assert results[0].status == TaskStatus.DONE
+
+
+@pytest.mark.asyncio
+async def test_end_wave_none_runs_all_waves(tmp_path):
+    """end_wave=None (default) should run all waves."""
+    plan = _make_three_wave_plan()
+    repo = tmp_path
+    pipeline_calls = []
+
+    async def fake_pipeline(**kwargs):
+        pipeline_calls.append(kwargs["task"].id)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch("workbench.orchestrator.get_main_branch", return_value="main"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert sorted(pipeline_calls) == ["task-1", "task-2", "task-3"]
+    assert all(s.status == TaskStatus.DONE for s in results)
+
+
+# ---------------------------------------------------------------------------
 # Combined flags
 # ---------------------------------------------------------------------------
 
