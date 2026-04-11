@@ -512,9 +512,6 @@ def preview(plan_path: Path):
                 console.print(f"    Files: {', '.join(task.files)}")
             if task.depends_on:
                 console.print(f"    After: {', '.join(task.depends_on)}")
-            desc_preview = task.description.strip()[:120]
-            if desc_preview:
-                console.print(f"    {desc_preview}")
         console.print()
 
 
