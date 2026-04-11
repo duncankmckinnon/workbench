@@ -236,6 +236,25 @@ Runs only the specified tasks. All other tasks are left untouched — no worktre
 
 `--task` works without `-b` too — it just creates a new session with only those tasks.
 
+### Wave control
+
+Run a specific wave or range of waves instead of the full plan:
+
+```bash
+wb run plan.md -w 2                          # run only wave 2
+wb run plan.md --start-wave 2                # run waves 2 through end
+wb run plan.md --start-wave 2 --end-wave 4   # run waves 2, 3, and 4
+wb run plan.md -b workbench-1 -w 3           # resume session, run only wave 3
+```
+
+- `-w N` / `--wave N` — run only wave N (sets both start and end)
+- `--start-wave N` — start from wave N, run through the last wave (default: 1)
+- `--end-wave N` — stop after wave N (default: last wave)
+
+Out-of-range values are clamped automatically with a warning: `--start-wave` defaults to 1, `--end-wave` defaults to the last wave. If `--end-wave` is less than `--start-wave`, it defaults to the last wave.
+
+Waves before `--start-wave` are marked as already completed (skipped). Waves after `--end-wave` are not executed.
+
 ### Merge unmerged branches
 
 ```bash
@@ -291,7 +310,7 @@ Use `--base` when you're working off a branch other than `main` — for example,
 
 ### Resuming with `-b`
 
-Use `-b workbench-N` (or `--session-branch`) to resume a previous session. This skips branch creation entirely and continues merging into the existing session branch. Pair with `--start-wave N` to skip already-completed waves.
+Use `-b workbench-N` (or `--session-branch`) to resume a previous session. This skips branch creation entirely and continues merging into the existing session branch. Pair with `-w N` to run only a specific wave, `--start-wave N` to skip already-completed waves, or `--start-wave N --end-wave M` to run a range of waves.
 
 ## Profiles
 
@@ -382,7 +401,9 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
 - `wb run plan.md --base feature-x` — branch from a specific branch
 - `wb run plan.md --local` — branch from local ref instead of fetching
-- `wb run plan.md -b my-session -w 2` — resume session from wave 2
+- `wb run plan.md -w 2` — run only wave 2
+- `wb run plan.md --start-wave 2 --end-wave 4` — run waves 2 through 4
+- `wb run plan.md -b my-session -w 3` — resume session, run only wave 3
 - `wb run plan.md --profile-name fast` — use a named profile
 - `wb run plan.md --retry-failed` — auto-retry crashed tasks
 - `wb run plan.md --fail-fast` — stop on first wave failure

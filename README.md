@@ -132,7 +132,19 @@ implement → test → fix  → review → fix (retry up to --max-retries)
 
 After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status-<plan>.yaml` as each task completes, keyed by session branch.
 
-### 4. Handle failures
+### 4. Control which waves run
+
+By default, all waves run sequentially. Use wave flags to run a subset:
+
+```bash
+wb run plan.md -w 2                          # run only wave 2
+wb run plan.md --start-wave 2                # run waves 2 through end
+wb run plan.md --start-wave 2 --end-wave 4   # run waves 2 through 4
+```
+
+Out-of-range values are clamped automatically: `--start-wave` defaults to 1 and `--end-wave` defaults to the last wave, with a warning printed.
+
+### 5. Handle failures
 
 If some tasks fail, you have options:
 
@@ -172,7 +184,7 @@ wb run plan.md --task task-2
 
 `--task` accepts task IDs (e.g. `task-2`) or slugs (e.g. `my-feature-name`). Only the specified tasks run — all other tasks are left untouched. If a task has an existing branch from a prior run, it is cleaned up and started fresh. Status records for non-targeted tasks are preserved.
 
-### 5. Merge unmerged branches
+### 6. Merge unmerged branches
 
 If a run was interrupted or some merges failed due to conflicts, use `wb merge` to attempt merging without re-running pipelines:
 
@@ -183,7 +195,7 @@ wb merge -b workbench-1 --plan plan.md    # explicit plan
 
 This scans the status files for the session branch, finds tasks with `status=done` that haven't been merged yet, and attempts each merge. Conflicts are handled by a merge resolver agent. Branches that were already merged manually (via git) are detected and skipped. If the session branch exists in multiple plan status files, use `--plan` to disambiguate.
 
-### 6. Monitor progress
+### 7. Monitor progress
 
 A live status table shows task progress in the terminal. With tmux (default), you can also attach to watch any agent work:
 
@@ -401,7 +413,9 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `--base BRANCH` | Base branch to start from (default: `main`) |
 | `--local` | Branch from local ref instead of fetching origin |
 | `-b NAME` / `--session-branch` | Resume an existing session branch |
-| `-w N` / `--start-wave` | Skip already-completed waves |
+| `-w N` / `--wave` | Run only wave N (clamped to valid range) |
+| `--start-wave N` | Start from wave N, run through end (default: 1) |
+| `--end-wave N` | Stop after wave N (default: last wave) |
 | `--retry-failed` | Auto-retry tasks that crashed (not those that exhausted fix retries) |
 | `--fail-fast` | Stop after the first wave with any failed tasks |
 | `--only-failed` | Skip completed tasks from a prior run (requires `-b`) |

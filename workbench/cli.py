@@ -304,11 +304,23 @@ def main():
     help="Resume from an existing session branch (e.g. workbench-1).",
 )
 @click.option(
-    "--start-wave",
+    "--wave",
     "-w",
+    default=None,
+    type=int,
+    help="Run only this wave number (1-indexed). Without this, runs all waves.",
+)
+@click.option(
+    "--start-wave",
     default=1,
     type=int,
-    help="Start from this wave number (1-indexed, default: 1).",
+    help="Start from this wave number (1-indexed, default: 1). Ignored if --wave is set.",
+)
+@click.option(
+    "--end-wave",
+    default=None,
+    type=int,
+    help="Stop after this wave number (1-indexed). Ignored if --wave is set.",
 )
 @click.option(
     "--no-tmux", is_flag=True, help="Run agents as raw subprocesses instead of tmux sessions."
@@ -395,7 +407,9 @@ def run(
     keep_branches: bool,
     repo: Path | None,
     session_branch: str | None,
+    wave: int | None,
     start_wave: int,
+    end_wave: int | None,
     no_tmux: bool,
     tdd: bool,
     local: bool,
@@ -441,6 +455,31 @@ def run(
     if not plan.tasks:
         raise click.ClickException("No tasks found in plan. Use '## Task: <title>' sections.")
 
+    # Resolve and clamp wave range
+    num_waves = len(plan.independent_groups)
+    effective_start_wave = wave if wave is not None else start_wave
+    effective_end_wave = wave if wave is not None else end_wave
+
+    # Clamp start_wave to [1, num_waves]
+    if effective_start_wave < 1 or effective_start_wave > num_waves:
+        console.print(
+            f"[yellow]--start-wave {effective_start_wave} out of range [1, {num_waves}], defaulting to 1[/yellow]"
+        )
+        effective_start_wave = 1
+
+    # Clamp end_wave to [1, num_waves] and ensure >= start_wave
+    if effective_end_wave is not None:
+        if effective_end_wave < 1 or effective_end_wave > num_waves:
+            console.print(
+                f"[yellow]--end-wave {effective_end_wave} out of range [1, {num_waves}], defaulting to {num_waves}[/yellow]"
+            )
+            effective_end_wave = num_waves
+        if effective_end_wave < effective_start_wave:
+            console.print(
+                f"[yellow]--end-wave {effective_end_wave} < --start-wave {effective_start_wave}, defaulting to {num_waves}[/yellow]"
+            )
+            effective_end_wave = num_waves
+
     from .agents import Role
 
     directives = {}
@@ -471,7 +510,8 @@ def run(
             agent_cmd=agent,
             cleanup_on_done=cleanup,
             session_branch=session_branch,
-            start_wave=start_wave,
+            start_wave=effective_start_wave,
+            end_wave=effective_end_wave,
             use_tmux=not no_tmux,
             directives=directives or None,
             tdd=tdd,
