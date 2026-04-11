@@ -13,6 +13,8 @@ engine: claude
 tools:
   github:
     toolsets: [default]
+    allowed-repos: ["duncankmckinnon/workbench", "duncankmckinnon/wbcli-web"]
+    min-integrity: none
   bash:
     - "*"
   edit:
