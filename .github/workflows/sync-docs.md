@@ -9,12 +9,16 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
-engine: claude
+engine: gemini
+steps:
+  - name: Clone wbcli-web
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    run: |
+      git clone https://x-access-token:${GH_TOKEN}@github.com/duncankmckinnon/wbcli-web.git /tmp/gh-aw/agent/wbcli-web
 tools:
   github:
     toolsets: [default]
-    allowed-repos: ["duncankmckinnon/workbench", "duncankmckinnon/wbcli-web"]
-    min-integrity: none
   bash:
     - "*"
   edit:
@@ -61,13 +65,15 @@ Summarize the documentation impact clearly before proceeding.
 
 ## Step 3: Read the current website docs
 
-Clone or fetch the `duncankmckinnon/wbcli-web` repository. Examine the docs-related pages in the Next.js site to understand:
+The `wbcli-web` repo has been pre-cloned to `/tmp/gh-aw/agent/wbcli-web`. Read files from there using bash (e.g. `cat`, `ls`, `find`).
+
+Examine the docs-related pages in the Next.js site to understand:
 
 - What is currently documented
 - How the site structures its content (file layout, component patterns)
 - Which specific files need updating based on the changes from Step 2
 
-Look in common Next.js docs locations `content/docs`:
+Look in `content/docs`:
 
 - agents.mdx documents workbench agent configuration
 - cli-reference.mdx is the straightforward CLI documentation for workbench
