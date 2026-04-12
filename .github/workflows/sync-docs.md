@@ -9,7 +9,7 @@ permissions:
   contents: read
   issues: read
   pull-requests: read
-engine: gemini
+engine: claude
 steps:
   - name: Clone wbcli-web
     env:
