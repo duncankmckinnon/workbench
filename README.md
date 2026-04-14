@@ -3,7 +3,7 @@
 [![CI](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml)
 [![codecov](https://codecov.io/gh/duncankmckinnon/workbench/graph/badge.svg)](https://codecov.io/gh/duncankmckinnon/workbench)
 [![PyPI](https://img.shields.io/pypi/v/wbcli?v=2)](https://pypi.org/project/wbcli/)
-[![Python](https://img.shields.io/pypi/pyversions/wbcli?v=2)](https://pypi.org/project/wbcli/)
+[![Python](https://img.shields.io/pypi/pyversions/wbcli?v=3)](https://pypi.org/project/wbcli/)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 Multi-agent orchestrator that dispatches AI coding agents in parallel across isolated git worktrees.
