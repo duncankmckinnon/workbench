@@ -141,10 +141,12 @@ def test_plan_invokes_planner(git_repo):
         result = runner.invoke(main, ["plan", "Add JWT auth", "--name", "myplan", "--no-tmux"])
 
     assert result.exit_code == 0, result.output
-    assert "myplan.md" in result.output
-    assert "wb preview" in result.output
-    assert "wb run" in result.output
-    assert "Next steps" in result.output
+    # Rich may wrap long paths across lines, so check without newlines
+    flat = result.output.replace("\n", "")
+    assert "myplan.md" in flat
+    assert "wb preview" in flat
+    assert "wb run" in flat
+    assert "Next steps" in flat
 
 
 def test_plan_from_file(git_repo, tmp_path):
