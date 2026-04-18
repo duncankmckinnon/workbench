@@ -753,34 +753,67 @@ def _load_plan_guide() -> str:
 
 
 def build_planner_prompt(
-    user_prompt: str,
     output_path: Path,
+    user_prompt: str = "",
+    source_content: str = "",
 ) -> str:
-    """Build the full prompt for the planner agent."""
+    """Build the full prompt for the planner agent.
+
+    Args:
+        output_path: Where to write the plan file.
+        user_prompt: A natural language description of what to build.
+        source_content: Content of an existing document to transform into
+            workbench plan format. When provided, the planner restructures
+            it into proper task format. Can be combined with ``user_prompt``
+            for additional guidance on the transformation.
+    """
     parts = [
         PLANNER_DIRECTIVE,
         f"## Plan Writing Guide\n\n{_load_plan_guide()}",
-        f"## User Request\n\n{user_prompt}",
+    ]
+
+    if source_content:
+        parts.append(
+            "## Source Document\n\n"
+            "The following document describes work to be done. Transform it into "
+            "a workbench plan that follows the plan writing guide above. Preserve "
+            "the intent and scope of the original document, but restructure it "
+            "into proper `## Task:` sections with Files, Depends, detailed "
+            "descriptions, and test plans. Survey the codebase to fill in "
+            "specifics (file paths, function signatures, conventions) that the "
+            "source document may have left vague.\n\n"
+            f"{source_content}"
+        )
+
+    if user_prompt:
+        label = "Additional Guidance" if source_content else "User Request"
+        parts.append(f"## {label}\n\n{user_prompt}")
+
+    parts.append(
         f"## Output\n\nWrite the plan to: {output_path}\n\n"
         "Explore the codebase thoroughly before writing. The plan must be "
         "detailed enough that each task can be implemented by an agent that "
-        "has never seen the rest of the plan.",
-    ]
+        "has never seen the rest of the plan."
+    )
     return "\n\n".join(parts)
 
 
 async def run_planner(
-    user_prompt: str,
     repo: Path,
+    user_prompt: str = "",
+    source_content: str = "",
     plan_name: str = "plan",
     agent_cmd: str = "claude",
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
 ) -> AgentResult:
-    """Spawn a planner agent to generate a workbench plan from a user prompt.
+    """Spawn a planner agent to generate a workbench plan.
 
     The agent explores the codebase, then writes a plan file to
     ``.workbench/plans/<plan_name>.md``.
+
+    Provide ``user_prompt`` for generation from scratch, ``source_content``
+    to transform an existing document, or both for guided transformation.
     """
     adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
 
@@ -788,7 +821,11 @@ async def run_planner(
     plans_dir.mkdir(parents=True, exist_ok=True)
     output_path = plans_dir / f"{plan_name}.md"
 
-    prompt = build_planner_prompt(user_prompt, output_path)
+    prompt = build_planner_prompt(
+        output_path=output_path,
+        user_prompt=user_prompt,
+        source_content=source_content,
+    )
 
     try:
         cmd = adapter.build_command(prompt, repo)

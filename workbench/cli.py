@@ -556,7 +556,14 @@ def preview(plan_path: Path):
 
 
 @main.command()
-@click.argument("prompt", type=str)
+@click.argument("prompt", type=str, required=False, default="")
+@click.option(
+    "--from",
+    "from_file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Transform an existing document into workbench plan format.",
+)
 @click.option(
     "--name",
     "-n",
@@ -570,8 +577,15 @@ def preview(plan_path: Path):
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
-def plan(prompt: str, name: str, agent: str, repo: Path | None, no_tmux: bool):
-    """Generate a workbench plan from a description.
+def plan(
+    prompt: str,
+    from_file: Path | None,
+    name: str,
+    agent: str,
+    repo: Path | None,
+    no_tmux: bool,
+):
+    """Generate a workbench plan from a description or existing document.
 
     \b
     The planner agent explores the codebase, then writes a detailed plan
@@ -580,9 +594,18 @@ def plan(prompt: str, name: str, agent: str, repo: Path | None, no_tmux: bool):
     \b
     Example:
       wb plan "Add JWT authentication to the FastAPI app"
+      wb plan --from claude-plan.md
+      wb plan "Focus on security" --from existing-spec.md
       wb plan "Refactor the database layer" --name db-refactor
-      wb plan "Add unit tests for the API" --agent gemini
     """
+    if not prompt and not from_file:
+        raise click.ClickException(
+            "Provide a prompt, --from <file>, or both.\n"
+            '  wb plan "Add JWT auth"\n'
+            "  wb plan --from existing-plan.md\n"
+            '  wb plan "Focus on security" --from existing-plan.md'
+        )
+
     if not no_tmux and not check_tmux_available():
         raise click.ClickException(
             "tmux is required but not found on PATH. "
@@ -593,16 +616,27 @@ def plan(prompt: str, name: str, agent: str, repo: Path | None, no_tmux: bool):
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
 
+    source_content = ""
+    if from_file:
+        source_content = from_file.read_text()
+
     output_path = repo / ".workbench" / "plans" / f"{name}.md"
-    console.print(f"\n[bold]Planning:[/bold] {prompt}")
+    if from_file and prompt:
+        console.print(f"\n[bold]Transforming:[/bold] {from_file}")
+        console.print(f"[bold]Guidance:[/bold]   {prompt}")
+    elif from_file:
+        console.print(f"\n[bold]Transforming:[/bold] {from_file}")
+    else:
+        console.print(f"\n[bold]Planning:[/bold] {prompt}")
     console.print(f"[bold]Output:[/bold]  {output_path}\n")
 
     from .agents import run_planner
 
     result = asyncio.run(
         run_planner(
-            user_prompt=prompt,
             repo=repo,
+            user_prompt=prompt,
+            source_content=source_content,
             plan_name=name,
             agent_cmd=agent,
             use_tmux=not no_tmux,

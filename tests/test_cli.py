@@ -147,6 +147,101 @@ def test_plan_invokes_planner(git_repo):
     assert "Next steps" in result.output
 
 
+def test_plan_from_file(git_repo, tmp_path):
+    """wb plan --from should read the source file and pass content to planner."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    runner = CliRunner()
+
+    source = tmp_path / "claude-plan.md"
+    source.write_text("# Claude Plan\n\n## Step 1\nDo something\n## Step 2\nDo another thing\n")
+
+    fake_result = AgentResult(
+        task_id="planner-converted",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="Plan written.",
+    )
+
+    captured_kwargs = {}
+
+    async def fake_run_planner(**kwargs):
+        captured_kwargs.update(kwargs)
+        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Converted Plan\n## Task: Step one\nDo something.\n")
+        return fake_result
+
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(
+            main,
+            ["plan", "--from", str(source), "--name", "converted", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Transforming" in result.output
+    assert "Claude Plan" in captured_kwargs["source_content"]
+
+
+def test_plan_from_file_with_prompt(git_repo, tmp_path):
+    """wb plan PROMPT --from FILE should pass both."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    runner = CliRunner()
+
+    source = tmp_path / "spec.md"
+    source.write_text("# Spec\nBuild a widget.\n")
+
+    fake_result = AgentResult(
+        task_id="planner-guided",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="Plan written.",
+    )
+
+    captured_kwargs = {}
+
+    async def fake_run_planner(**kwargs):
+        captured_kwargs.update(kwargs)
+        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Plan\n## Task: Widget\nBuild it.\n")
+        return fake_result
+
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(
+            main,
+            ["plan", "Focus on security", "--from", str(source), "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert "Transforming" in result.output
+    assert "Guidance" in result.output
+    assert captured_kwargs["user_prompt"] == "Focus on security"
+    assert "Build a widget" in captured_kwargs["source_content"]
+
+
+def test_plan_no_prompt_no_from_errors(git_repo):
+    """wb plan with neither prompt nor --from should error."""
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+    ):
+        result = runner.invoke(main, ["plan", "--no-tmux"])
+
+    assert result.exit_code != 0
+    assert "Provide a prompt" in result.output
+
+
 def test_plan_without_tmux_shows_error(git_repo):
     """wb plan without tmux and without --no-tmux should error."""
     runner = CliRunner()

@@ -349,24 +349,50 @@ def test_build_prompt_reviewer_followup_action_line(sample_task, sample_worktree
 
 
 def test_build_planner_prompt_contains_directive():
-    prompt = build_planner_prompt("Add auth", Path("/repo/.workbench/plans/auth.md"))
+    prompt = build_planner_prompt(Path("/repo/plans/auth.md"), user_prompt="Add auth")
     assert PLANNER_DIRECTIVE in prompt
 
 
 def test_build_planner_prompt_contains_user_request():
-    prompt = build_planner_prompt("Add JWT authentication", Path("/repo/plan.md"))
+    prompt = build_planner_prompt(Path("/repo/plan.md"), user_prompt="Add JWT authentication")
     assert "## User Request" in prompt
     assert "Add JWT authentication" in prompt
 
 
 def test_build_planner_prompt_contains_output_path():
     output = Path("/repo/.workbench/plans/auth.md")
-    prompt = build_planner_prompt("Add auth", output)
+    prompt = build_planner_prompt(output, user_prompt="Add auth")
     assert str(output) in prompt
 
 
 def test_build_planner_prompt_contains_plan_guide():
-    prompt = build_planner_prompt("Add auth", Path("/repo/plan.md"))
+    prompt = build_planner_prompt(Path("/repo/plan.md"), user_prompt="Add auth")
     assert "## Plan Writing Guide" in prompt
     assert "## Plan Format" in prompt
     assert "## Task:" in prompt
+
+
+def test_build_planner_prompt_from_source_document():
+    """Source content is rendered as a Source Document section."""
+    prompt = build_planner_prompt(
+        Path("/repo/plan.md"),
+        source_content="# Claude Plan\n\n## Step 1\nDo something\n",
+    )
+    assert "## Source Document" in prompt
+    assert "Claude Plan" in prompt
+    assert "Transform it into a workbench plan" in prompt
+    assert "## User Request" not in prompt
+
+
+def test_build_planner_prompt_source_with_guidance():
+    """Both source and prompt: prompt becomes Additional Guidance."""
+    prompt = build_planner_prompt(
+        Path("/repo/plan.md"),
+        user_prompt="Focus on security",
+        source_content="# Spec\nBuild a widget.\n",
+    )
+    assert "## Source Document" in prompt
+    assert "Build a widget" in prompt
+    assert "## Additional Guidance" in prompt
+    assert "Focus on security" in prompt
+    assert "## User Request" not in prompt
