@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -11,9 +12,12 @@ from workbench.agents import (
     DEFAULT_DIRECTIVES,
     PLANNER_DIRECTIVE,
     REVIEWER_FOLLOWUP_DIRECTIVE,
+    AgentResult,
     Role,
+    TaskStatus,
     build_planner_prompt,
     build_prompt,
+    run_planner,
 )
 from workbench.plan_parser import Task, parse_plan
 from workbench.worktree import Worktree
@@ -396,3 +400,94 @@ def test_build_planner_prompt_source_with_guidance():
     assert "## Additional Guidance" in prompt
     assert "Focus on security" in prompt
     assert "## User Request" not in prompt
+
+
+# ── run_planner tests ────────────────────────────────────────────────
+
+
+def test_run_planner_success(tmp_path):
+    """run_planner spawns agent and returns result on success."""
+    mock_adapter = MagicMock()
+    mock_adapter.build_command.return_value = ["echo", "ok"]
+    mock_adapter.parse_output.return_value = ("Plan generated.", {})
+
+    result = asyncio.run(
+        run_planner(
+            repo=tmp_path,
+            user_prompt="Add auth",
+            plan_name="test-plan",
+            use_tmux=False,
+            adapter=mock_adapter,
+        )
+    )
+
+    assert result.status == TaskStatus.DONE
+    assert result.task_id == "planner-test-plan"
+    assert (tmp_path / ".workbench" / "plans").is_dir()
+    mock_adapter.build_command.assert_called_once()
+
+
+def test_run_planner_failure(tmp_path):
+    """run_planner returns FAILED when the subprocess exits non-zero."""
+    mock_adapter = MagicMock()
+    mock_adapter.build_command.return_value = ["false"]
+    mock_adapter.parse_output.return_value = ("", {})
+
+    result = asyncio.run(
+        run_planner(
+            repo=tmp_path,
+            user_prompt="Add auth",
+            plan_name="fail-plan",
+            use_tmux=False,
+            adapter=mock_adapter,
+        )
+    )
+
+    assert result.status == TaskStatus.FAILED
+
+
+def test_run_planner_exception(tmp_path):
+    """run_planner returns FAILED when adapter raises."""
+    mock_adapter = MagicMock()
+    mock_adapter.build_command.side_effect = RuntimeError("boom")
+
+    result = asyncio.run(
+        run_planner(
+            repo=tmp_path,
+            user_prompt="Add auth",
+            plan_name="err-plan",
+            use_tmux=False,
+            adapter=mock_adapter,
+        )
+    )
+
+    assert result.status == TaskStatus.FAILED
+    assert "boom" in result.output
+
+
+def test_run_planner_with_source_content(tmp_path):
+    """run_planner passes source_content through to the prompt."""
+    captured_prompt = {}
+
+    mock_adapter = MagicMock()
+
+    def capture_command(prompt, cwd):
+        captured_prompt["prompt"] = prompt
+        return ["echo", "ok"]
+
+    mock_adapter.build_command.side_effect = capture_command
+    mock_adapter.parse_output.return_value = ("ok", {})
+
+    asyncio.run(
+        run_planner(
+            repo=tmp_path,
+            user_prompt="Focus on security",
+            source_content="# Existing Plan\nDo stuff.",
+            plan_name="src-plan",
+            use_tmux=False,
+            adapter=mock_adapter,
+        )
+    )
+
+    assert "Existing Plan" in captured_prompt["prompt"]
+    assert "Focus on security" in captured_prompt["prompt"]

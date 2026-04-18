@@ -746,6 +746,121 @@ class TestReviewerFollowupContext:
         assert "issue A" not in reviewer_calls[2]["extra_context"]
 
 
+class TestReviewerCrashDuringFollowup:
+    """Reviewer agent crash on attempt > 1 stops the pipeline."""
+
+    def test_reviewer_crash_on_followup_stops_pipeline(
+        self, sample_task, sample_worktree, tmp_path
+    ):
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            role = args[0]
+            captured_calls.append({"role": role, **kwargs})
+            count = len([c for c in captured_calls if c["role"] == role])
+            if role == Role.IMPLEMENTOR:
+                return _done_result(role)
+            if role == Role.TESTER:
+                return _pass_result(role)
+            if role == Role.REVIEWER:
+                if count == 1:
+                    return _fail_verdict_result(role)
+                return _crash_result(role)
+            if role == Role.FIXER:
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", return_value="sha-1"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                )
+            )
+
+        reviewer_calls = [r for r in results if r.role == Role.REVIEWER]
+        assert len(reviewer_calls) == 2
+        assert reviewer_calls[1].status == TaskStatus.FAILED
+
+
+class TestReviewFixerCrashStopsPipeline:
+    """Fixer crash during review retry stops the pipeline."""
+
+    def test_review_fixer_crash_stops_pipeline(self, sample_task, sample_worktree, tmp_path):
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            role = args[0]
+            captured_calls.append({"role": role, **kwargs})
+            if role == Role.IMPLEMENTOR:
+                return _done_result(role)
+            if role == Role.TESTER:
+                return _pass_result(role)
+            if role == Role.REVIEWER:
+                return _fail_verdict_result(role)
+            if role == Role.FIXER:
+                return _crash_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", return_value="sha-1"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                )
+            )
+
+        fixer_calls = [r for r in results if r.role == Role.FIXER]
+        assert len(fixer_calls) == 1
+        assert fixer_calls[0].status == TaskStatus.FAILED
+
+
+class TestReviewRetriesExhausted:
+    """Pipeline fails when review retries are exhausted."""
+
+    def test_review_retries_exhausted(self, sample_task, sample_worktree, tmp_path):
+        async def mock_run_agent(*args, **kwargs):
+            role = args[0]
+            if role == Role.IMPLEMENTOR:
+                return _done_result(role)
+            if role == Role.TESTER:
+                return _pass_result(role)
+            if role == Role.REVIEWER:
+                return _fail_verdict_result(role)
+            if role == Role.FIXER:
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", return_value="sha-1"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    max_retries=1,
+                )
+            )
+
+        reviewer_calls = [r for r in results if r.role == Role.REVIEWER]
+        # 1 initial + 1 retry = 2 reviews, both FAIL
+        assert len(reviewer_calls) == 2
+        assert all(not r.passed for r in reviewer_calls)
+
+
 class TestTDDPipelineUsesProfileAgent:
     def test_tdd_pipeline_uses_profile_agent(self, sample_task, sample_worktree, tmp_path):
         """In TDD mode, profile agent should be used for TDD phases."""

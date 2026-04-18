@@ -3,9 +3,12 @@
 import subprocess
 
 from workbench.worktree import (
+    Worktree,
     create_session_branch,
     create_worktree,
     get_diff,
+    get_diff_since,
+    get_head_sha,
     get_main_branch,
     get_merged_branches,
     merge_into_session,
@@ -266,3 +269,31 @@ def test_get_merged_branches_excludes_unmerged(git_repo):
         assert wt.branch not in merged
     finally:
         wt.cleanup()
+
+
+def test_get_head_sha(git_repo):
+    """get_head_sha returns the current HEAD commit SHA."""
+    wt = Worktree(path=git_repo, branch="main", task_id="test")
+    sha = get_head_sha(wt)
+    assert len(sha) == 40
+    assert all(c in "0123456789abcdef" for c in sha)
+
+
+def test_get_head_sha_failure(tmp_path):
+    """get_head_sha returns empty string for non-git directories."""
+    wt = Worktree(path=tmp_path, branch="main", task_id="test")
+    assert get_head_sha(wt) == ""
+
+
+def test_get_diff_since(git_repo):
+    """get_diff_since returns only changes after the given SHA."""
+    wt = Worktree(path=git_repo, branch="main", task_id="test")
+    before_sha = get_head_sha(wt)
+
+    _commit_file(git_repo, "new.txt", "new content", "add new file")
+
+    diff = get_diff_since(wt, before_sha)
+    assert "new content" in diff
+
+    full_diff = get_diff_since(wt, before_sha)
+    assert "init" not in full_diff
