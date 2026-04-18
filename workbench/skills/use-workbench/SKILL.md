@@ -9,7 +9,7 @@ How to write effective plans for the `wb` CLI to execute with parallel AI agents
 
 ## Overview
 
-Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Gemini CLI, Codex, or custom) to implement, test, and review each task in isolated git worktrees.
+Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Gemini CLI, Codex, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
 
 Each task becomes a standalone agent session — the agent only sees its own task description, not the rest of the plan. This means the plan must be thorough enough that each task is self-sufficient.
 
@@ -321,7 +321,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, `cursor`, or any custom CLI via `.workbench/agents.yaml`.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 

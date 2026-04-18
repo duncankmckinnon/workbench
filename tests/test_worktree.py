@@ -2,6 +2,8 @@
 
 import subprocess
 
+import pytest
+
 from workbench.worktree import (
     Worktree,
     create_session_branch,
@@ -12,6 +14,7 @@ from workbench.worktree import (
     get_main_branch,
     get_merged_branches,
     merge_into_session,
+    push_session_branch,
 )
 
 
@@ -297,3 +300,121 @@ def test_get_diff_since(git_repo):
 
     full_diff = get_diff_since(wt, before_sha)
     assert "init" not in full_diff
+
+
+@pytest.fixture
+def git_repo_with_remote(git_repo, tmp_path):
+    """Create a git repo with a bare remote to test push operations."""
+    remote_path = tmp_path / "remote.git"
+    subprocess.run(
+        ["git", "init", "--bare", str(remote_path)],
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "remote", "add", "origin", str(remote_path)],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    # Push main so the remote has something
+    subprocess.run(
+        ["git", "push", "-u", "origin", "main"],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    return git_repo
+
+
+def test_push_session_branch(git_repo_with_remote):
+    """push_session_branch pushes the branch and sets upstream tracking."""
+    repo = git_repo_with_remote
+    session = create_session_branch(repo)
+    _commit_file(repo / ".workbench" / "task-1" if False else repo, "work.txt", "work", "add work")
+    # Commit on the session branch so there's something to push
+    subprocess.run(["git", "checkout", session], cwd=repo, capture_output=True, check=True)
+    _commit_file(repo, "feature.txt", "feature", "add feature")
+    subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True, check=True)
+
+    success, msg = push_session_branch(repo, session)
+    assert success is True
+    assert session in msg
+
+    # Verify the branch exists on the remote
+    result = subprocess.run(
+        ["git", "branch", "-r"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert f"origin/{session}" in result.stdout
+
+    # Verify upstream tracking is set
+    result = subprocess.run(
+        ["git", "config", f"branch.{session}.remote"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert result.stdout.strip() == "origin"
+
+
+def test_push_session_branch_no_remote(git_repo):
+    """push_session_branch fails gracefully when no remote is configured."""
+    session = create_session_branch(git_repo)
+
+    success, msg = push_session_branch(git_repo, session)
+    assert success is False
+    assert msg  # should have an error message
+
+
+def test_session_branch_no_track(git_repo_with_remote):
+    """Session branch created from origin/main should not track origin/main."""
+    repo = git_repo_with_remote
+    session = create_session_branch(repo)
+
+    # Verify no upstream is set (--no-track)
+    result = subprocess.run(
+        ["git", "config", f"branch.{session}.remote"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode != 0 or result.stdout.strip() == ""
+
+
+def test_worktree_branch_no_track(git_repo_with_remote):
+    """Task worktree branch should not inherit upstream tracking from session branch."""
+    repo = git_repo_with_remote
+    session = create_session_branch(repo)
+    wt = create_worktree(repo, "task-1", "no-track-test", base_branch=session)
+    try:
+        result = subprocess.run(
+            ["git", "config", f"branch.{wt.branch}.remote"],
+            cwd=repo,
+            capture_output=True,
+            text=True,
+        )
+        assert result.returncode != 0 or result.stdout.strip() == ""
+    finally:
+        wt.cleanup()
+
+
+def test_push_then_subsequent_push(git_repo_with_remote):
+    """After initial push -u, subsequent pushes should work without specifying remote."""
+    repo = git_repo_with_remote
+    session = create_session_branch(repo)
+
+    subprocess.run(["git", "checkout", session], cwd=repo, capture_output=True, check=True)
+    _commit_file(repo, "first.txt", "first", "first commit")
+
+    success, _ = push_session_branch(repo, session)
+    assert success is True
+
+    # Make another commit and push again — should still work
+    _commit_file(repo, "second.txt", "second", "second commit")
+    success2, msg2 = push_session_branch(repo, session)
+    assert success2 is True
+
+    subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True, check=True)

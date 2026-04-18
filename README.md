@@ -29,6 +29,7 @@ Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks,
   - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
   - [Codex](https://github.com/openai/codex)
   - [Cursor CLI](https://cursor.com/docs/cli/overview)
+  - [Copilot CLI](https://github.com/features/copilot/cli)
   - Any custom CLI via `.workbench/agents.yaml`
 
 **Optional:**
@@ -149,6 +150,12 @@ implement → test → fix  → review → fix (retry up to --max-retries)
 
 After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status-<plan>.yaml` as each task completes, keyed by session branch.
 
+Use `--push` to push the session branch to origin when done:
+
+```bash
+wb run plan.md --push
+```
+
 ### 4. Control which waves run
 
 By default, all waves run sequentially. Use wave flags to run a subset:
@@ -208,6 +215,7 @@ If a run was interrupted or some merges failed due to conflicts, use `wb merge` 
 ```bash
 wb merge -b workbench-1
 wb merge -b workbench-1 --plan plan.md    # explicit plan
+wb merge -b workbench-1 --push            # merge and push to origin
 ```
 
 This scans the status files for the session branch, finds tasks with `status=done` that haven't been merged yet, and attempts each merge. Conflicts are handled by a merge resolver agent. Branches that were already merged manually (via git) are detected and skipped. If the session branch exists in multiple plan status files, use `--plan` to disambiguate.
@@ -337,13 +345,14 @@ The tester writes comprehensive failing tests first. The implementor writes code
 
 ## Agents
 
-Workbench ships with built-in adapters for Claude Code, Gemini CLI, Codex, and Cursor CLI. Use `--agent` to select one:
+Workbench ships with built-in adapters for Claude Code, Gemini CLI, Codex, Cursor CLI, and Copilot CLI. Use `--agent` to select one:
 
 ```bash
 wb run plan.md --agent claude     # default
 wb run plan.md --agent gemini
 wb run plan.md --agent codex
 wb run plan.md --agent cursor
+wb run plan.md --agent copilot
 ```
 
 ### Custom agents
@@ -380,7 +389,7 @@ wb agents add my-agent --command new-cli   # update an existing agent
 wb agents remove my-agent         # remove a custom agent
 ```
 
-`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Gemini, Codex, Cursor). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
+`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Gemini, Codex, Cursor, Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
 
 ## Directive overrides
 
@@ -454,6 +463,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--task ID` | Run only specific tasks by ID or slug (repeatable) |
 | `--cleanup` | Remove worktrees after completion |
 | `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
+| `--push` | Push the session branch to origin after merging (sets upstream tracking) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 | `--profile PATH` | Use a specific profile.yaml |
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
@@ -463,7 +473,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 
 | Flag | Description |
 |---|---|
-| `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `manual` (auto-detected if omitted) |
+| `--agent NAME` | Target platform: `claude`, `gemini`, `cursor`, `codex`, `copilot`, `manual` (auto-detected if omitted) |
 | `--global` | Install skills to user-level paths only (skip `.workbench/` creation) |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |
@@ -479,6 +489,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--agent CMD` | Agent CLI for conflict resolution (default: `claude`) |
 | `--no-tmux` | Run resolver agents as subprocesses instead of tmux |
 | `--keep-branches` | Keep task branches after merging |
+| `--push` | Push the session branch to origin after merging (sets upstream tracking) |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb stop`

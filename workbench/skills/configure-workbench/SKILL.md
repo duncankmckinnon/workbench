@@ -14,7 +14,7 @@ How to set up the `wb` CLI, configure agent adapters, and manage profiles for mu
 - Creating or editing `.workbench/agents.yaml` for custom agent adapters
 - Creating or editing `.workbench/profile.yaml` to control agent behavior per role
 - Troubleshooting agent dispatch, connection, or output parsing issues
-- Switching between agent platforms (Claude, Gemini, Codex, Cursor)
+- Switching between agent platforms (Claude, Gemini, Codex, Cursor, Copilot)
 
 ## Initial Setup
 
@@ -40,6 +40,7 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 | `gemini` | `gemini -p <prompt>` | Print mode, JSON output, yolo approval | Parses `response` and `stats` from JSON |
 | `codex` | `codex exec <prompt>` | Full-auto, JSON events | Extracts last assistant message from NDJSON |
 | `cursor` | `agent -p <prompt>` | Print mode, text output | Raw text |
+| `copilot` | `copilot -p <prompt>` | Print mode, JSON output, no-ask-user | Extracts last assistant message from JSONL |
 
 Use `--agent <name>` on `wb run` or `wb merge` to select one:
 
@@ -99,7 +100,7 @@ wb agents remove my-agent         # remove a custom agent
 
 When `wb run --agent <name>` is used:
 1. If `.workbench/agents.yaml` contains the name, use that config
-2. If it's a built-in name (`claude`, `gemini`, `codex`, `cursor`), use the built-in adapter
+2. If it's a built-in name (`claude`, `gemini`, `codex`, `cursor`, `copilot`), use the built-in adapter
 3. Otherwise, fall back to a generic adapter that passes the prompt as the sole argument
 
 This means you can override a built-in adapter's behavior by adding an entry with the same name to `agents.yaml`.
