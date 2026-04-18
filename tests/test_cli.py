@@ -244,6 +244,58 @@ def test_plan_no_prompt_no_from_errors(git_repo):
     assert "Provide a prompt" in result.output
 
 
+def test_plan_failure_shows_error(git_repo):
+    """wb plan shows error when planner agent fails."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    runner = CliRunner()
+
+    async def fake_run_planner(**kwargs):
+        return AgentResult(
+            task_id="planner-plan",
+            role=Role.IMPLEMENTOR,
+            status=TaskStatus.FAILED,
+            output="Agent crashed.",
+        )
+
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(main, ["plan", "Do something", "--no-tmux"])
+
+    assert result.exit_code != 0
+    flat = result.output.replace("\n", "")
+    assert "Planning failed" in flat
+
+
+def test_plan_file_not_found_shows_warning(git_repo):
+    """wb plan warns when agent succeeds but doesn't write the plan file."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    runner = CliRunner()
+
+    async def fake_run_planner(**kwargs):
+        return AgentResult(
+            task_id="planner-plan",
+            role=Role.IMPLEMENTOR,
+            status=TaskStatus.DONE,
+            output="Done.",
+        )
+
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(main, ["plan", "Do something", "--no-tmux"])
+
+    assert result.exit_code == 0
+    flat = result.output.replace("\n", "")
+    assert "plan file not found" in flat
+
+
 def test_plan_without_tmux_shows_error(git_repo):
     """wb plan without tmux and without --no-tmux should error."""
     runner = CliRunner()
