@@ -7,7 +7,14 @@ from unittest.mock import patch
 
 import pytest
 
-from workbench.agents import DEFAULT_DIRECTIVES, Role, build_prompt
+from workbench.agents import (
+    DEFAULT_DIRECTIVES,
+    PLANNER_DIRECTIVE,
+    REVIEWER_FOLLOWUP_DIRECTIVE,
+    Role,
+    build_planner_prompt,
+    build_prompt,
+)
 from workbench.plan_parser import Task, parse_plan
 from workbench.worktree import Worktree
 
@@ -257,3 +264,109 @@ def test_build_prompt_reviewer_no_branch_pinning(sample_task, sample_worktree):
             base_branch="main",
         )
     assert "Stay on this branch" not in prompt
+
+
+# ── Reviewer follow-up mode ──────────────────────────────────────────
+
+
+def test_build_prompt_reviewer_followup_uses_diff_since(sample_task, sample_worktree):
+    """With prior_review_sha set, REVIEWER uses get_diff_since against that SHA."""
+    with (
+        patch("workbench.agents.get_diff_since", return_value="+ fixer line") as mock_since,
+        patch("workbench.agents.get_diff") as mock_full,
+    ):
+        prompt = build_prompt(
+            role=Role.REVIEWER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
+            extra_context="Missing null check in foo().",
+            prior_review_sha="abc123",
+        )
+
+    mock_since.assert_called_once_with(sample_worktree, "abc123")
+    mock_full.assert_not_called()
+    assert "## Changes since prior review" in prompt
+    assert "+ fixer line" in prompt
+    assert "## Diff to review" not in prompt
+
+
+def test_build_prompt_reviewer_followup_includes_prior_feedback(sample_task, sample_worktree):
+    """Follow-up review renders extra_context as the prior feedback section."""
+    with patch("workbench.agents.get_diff_since", return_value=""):
+        prompt = build_prompt(
+            role=Role.REVIEWER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
+            extra_context="Missing null check in foo().",
+            prior_review_sha="abc123",
+        )
+    assert "## Prior review feedback" in prompt
+    assert "Missing null check in foo()." in prompt
+    assert "Verify each item in the prior review feedback" in prompt
+
+
+def test_build_prompt_reviewer_first_pass_ignores_prior_sha_param(sample_task, sample_worktree):
+    """Without prior_review_sha, REVIEWER behaves as the comprehensive first pass."""
+    with (
+        patch("workbench.agents.get_diff", return_value="- full diff") as mock_full,
+        patch("workbench.agents.get_diff_since") as mock_since,
+    ):
+        prompt = build_prompt(
+            role=Role.REVIEWER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+        )
+
+    mock_full.assert_called_once_with(sample_worktree, "main")
+    mock_since.assert_not_called()
+    assert "## Diff to review" in prompt
+    assert "## Changes since prior review" not in prompt
+    assert "## Prior review feedback" not in prompt
+
+
+def test_build_prompt_reviewer_followup_action_line(sample_task, sample_worktree):
+    """Follow-up review swaps the default action line for the verification instruction."""
+    with patch("workbench.agents.get_diff_since", return_value=""):
+        prompt = build_prompt(
+            role=Role.REVIEWER,
+            task=sample_task,
+            worktree=sample_worktree,
+            base_branch="main",
+            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
+            extra_context="prior feedback",
+            prior_review_sha="abc123",
+        )
+    assert "Provide your review." not in prompt
+    assert "Do not raise new issues." in prompt
+
+
+# ── Planner prompt ───────────────────────────────────────────────────
+
+
+def test_build_planner_prompt_contains_directive():
+    prompt = build_planner_prompt("Add auth", Path("/repo/.workbench/plans/auth.md"))
+    assert PLANNER_DIRECTIVE in prompt
+
+
+def test_build_planner_prompt_contains_user_request():
+    prompt = build_planner_prompt("Add JWT authentication", Path("/repo/plan.md"))
+    assert "## User Request" in prompt
+    assert "Add JWT authentication" in prompt
+
+
+def test_build_planner_prompt_contains_output_path():
+    output = Path("/repo/.workbench/plans/auth.md")
+    prompt = build_planner_prompt("Add auth", output)
+    assert str(output) in prompt
+
+
+def test_build_planner_prompt_contains_plan_guide():
+    prompt = build_planner_prompt("Add auth", Path("/repo/plan.md"))
+    assert "## Plan Writing Guide" in prompt
+    assert "## Plan Format" in prompt
+    assert "## Task:" in prompt

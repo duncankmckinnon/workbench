@@ -556,6 +556,86 @@ def preview(plan_path: Path):
 
 
 @main.command()
+@click.argument("prompt", type=str)
+@click.option(
+    "--name",
+    "-n",
+    default="plan",
+    help="Name for the plan file (default: plan). Produces .workbench/plans/<name>.md.",
+)
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI command (claude, gemini, codex, cursor, or custom).",
+)
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--no-tmux", is_flag=True, help="Run without tmux.")
+def plan(prompt: str, name: str, agent: str, repo: Path | None, no_tmux: bool):
+    """Generate a workbench plan from a description.
+
+    \b
+    The planner agent explores the codebase, then writes a detailed plan
+    to .workbench/plans/<name>.md that can be executed with `wb run`.
+
+    \b
+    Example:
+      wb plan "Add JWT authentication to the FastAPI app"
+      wb plan "Refactor the database layer" --name db-refactor
+      wb plan "Add unit tests for the API" --agent gemini
+    """
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    output_path = repo / ".workbench" / "plans" / f"{name}.md"
+    console.print(f"\n[bold]Planning:[/bold] {prompt}")
+    console.print(f"[bold]Output:[/bold]  {output_path}\n")
+
+    from .agents import run_planner
+
+    result = asyncio.run(
+        run_planner(
+            user_prompt=prompt,
+            repo=repo,
+            plan_name=name,
+            agent_cmd=agent,
+            use_tmux=not no_tmux,
+        )
+    )
+
+    if result.status.value == "failed":
+        console.print(f"\n[red]Planning failed:[/red] {result.output}")
+        raise SystemExit(1)
+
+    if output_path.exists():
+        console.print(f"\n[green]Plan written to:[/green] {output_path}\n")
+        console.print("[bold]Next steps:[/bold]\n")
+        console.print(f"  [dim]# Review the plan[/dim]")
+        console.print(f"  cat {output_path}\n")
+        console.print(f"  [dim]# Preview task waves (dry run)[/dim]")
+        console.print(f"  wb preview {output_path}\n")
+        console.print(f"  [dim]# Run the plan[/dim]")
+        console.print(f"  wb run {output_path}\n")
+        console.print(f"  [dim]# Run with options[/dim]")
+        console.print(f"  wb run {output_path} --tdd")
+        console.print(f"  wb run {output_path} --skip-review")
+        console.print(f"  wb run {output_path} -j 6")
+    else:
+        console.print(
+            f"\n[yellow]Agent completed but plan file not found at {output_path}.[/yellow]"
+        )
+        console.print(
+            "[dim]The agent may have written it elsewhere. Check its output above.[/dim]"
+        )
+
+
+@main.command()
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def status(repo: Path | None):
     """Show active worktrees from workbench."""

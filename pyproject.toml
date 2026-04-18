@@ -42,6 +42,7 @@ wb = "workbench.cli:main"
 where = ["."]
 
 [tool.setuptools.package-data]
+"workbench" = ["plan_guide.md"]
 "workbench.skills" = ["**/*.md"]
 
 [tool.setuptools_scm]

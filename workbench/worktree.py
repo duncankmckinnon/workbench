@@ -361,3 +361,27 @@ def get_diff(worktree: Worktree, base_branch: str) -> str:
         text=True,
     )
     return result.stdout
+
+
+def get_diff_since(worktree: Worktree, since_sha: str) -> str:
+    """Get the diff between a specific commit and HEAD in a worktree."""
+    result = subprocess.run(
+        ["git", "diff", f"{since_sha}..HEAD"],
+        cwd=worktree.path,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout
+
+
+def get_head_sha(worktree: Worktree) -> str:
+    """Return the current HEAD SHA of a worktree, or empty string on failure."""
+    result = subprocess.run(
+        ["git", "rev-parse", "HEAD"],
+        cwd=worktree.path,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        return ""
+    return result.stdout.strip()

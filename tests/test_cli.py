@@ -110,6 +110,57 @@ def test_run_without_tmux_shows_error(git_repo, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# wb plan
+# ---------------------------------------------------------------------------
+
+
+def test_plan_invokes_planner(git_repo):
+    """wb plan should invoke run_planner with the prompt and name."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    runner = CliRunner()
+
+    fake_result = AgentResult(
+        task_id="planner-myplan",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="Plan written.",
+    )
+
+    async def fake_run_planner(**kwargs):
+        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Generated Plan\n## Task: Foo\nDo the thing.\n")
+        return fake_result
+
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(main, ["plan", "Add JWT auth", "--name", "myplan", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert "myplan.md" in result.output
+    assert "wb preview" in result.output
+    assert "wb run" in result.output
+    assert "Next steps" in result.output
+
+
+def test_plan_without_tmux_shows_error(git_repo):
+    """wb plan without tmux and without --no-tmux should error."""
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=False),
+    ):
+        result = runner.invoke(main, ["plan", "Do something"])
+
+    assert result.exit_code != 0
+    assert "tmux is required" in result.output
+
+
+# ---------------------------------------------------------------------------
 # wb init --agent manual
 # ---------------------------------------------------------------------------
 
