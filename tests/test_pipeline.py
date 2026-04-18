@@ -9,6 +9,7 @@ import pytest
 
 from workbench.agents import (
     DEFAULT_DIRECTIVES,
+    REVIEWER_FOLLOWUP_DIRECTIVE,
     TDD_DIRECTIVES,
     AgentResult,
     Role,
@@ -632,6 +633,117 @@ class TestRunAgentProfileRoleConfig:
 # ---------------------------------------------------------------------------
 # TDD + Profile integration tests
 # ---------------------------------------------------------------------------
+
+
+class TestReviewerFollowupContext:
+    """Reviewer on attempt N > 1 receives the immediately prior review's
+    feedback and SHA, and runs under the follow-up directive."""
+
+    def test_reviewer_attempt_2_receives_prior_feedback_and_sha(
+        self, sample_task, sample_worktree, tmp_path
+    ):
+        captured_calls: list[dict] = []
+
+        async def mock_run_agent(*args, **kwargs):
+            role = args[0]
+            captured_calls.append({"role": role, **kwargs})
+            count = len([c for c in captured_calls if c["role"] == role])
+            if role == Role.IMPLEMENTOR:
+                return _done_result(role)
+            if role == Role.TESTER:
+                return _pass_result(role)
+            if role == Role.REVIEWER:
+                if count == 1:
+                    return _make_result(
+                        role,
+                        TaskStatus.DONE,
+                        "Missing null check in foo().\nVERDICT: FAIL",
+                    )
+                return _pass_result(role)
+            if role == Role.FIXER:
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", return_value="sha-1"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                )
+            )
+
+        reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
+        assert len(reviewer_calls) == 2
+
+        # Attempt 1: full review — no prior SHA, no prior feedback, default directive.
+        assert reviewer_calls[0].get("prior_review_sha") is None
+        assert reviewer_calls[0].get("extra_context", "") == ""
+        assert reviewer_calls[0].get("directive") != REVIEWER_FOLLOWUP_DIRECTIVE
+
+        # Attempt 2: follow-up — SHA captured before attempt 1, feedback from attempt 1,
+        # and the follow-up directive.
+        assert reviewer_calls[1]["prior_review_sha"] == "sha-1"
+        assert "Missing null check in foo()." in reviewer_calls[1]["extra_context"]
+        assert reviewer_calls[1]["directive"] == REVIEWER_FOLLOWUP_DIRECTIVE
+
+    def test_reviewer_attempt_3_uses_attempt_2_sha_and_feedback(
+        self, sample_task, sample_worktree, tmp_path
+    ):
+        """Follow-up always compares against the IMMEDIATELY prior review, not the original."""
+        captured_calls: list[dict] = []
+
+        # Simulate HEAD advancing as the fixer commits between reviews.
+        head_shas = iter(["sha-review-1", "sha-review-2", "sha-review-3"])
+
+        async def mock_run_agent(*args, **kwargs):
+            role = args[0]
+            captured_calls.append({"role": role, **kwargs})
+            count = len([c for c in captured_calls if c["role"] == role])
+            if role == Role.IMPLEMENTOR:
+                return _done_result(role)
+            if role == Role.TESTER:
+                return _pass_result(role)
+            if role == Role.REVIEWER:
+                if count == 1:
+                    return _make_result(role, TaskStatus.DONE, "issue A\nVERDICT: FAIL")
+                if count == 2:
+                    return _make_result(role, TaskStatus.DONE, "issue B\nVERDICT: FAIL")
+                return _pass_result(role)
+            if role == Role.FIXER:
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", side_effect=lambda *_a, **_k: next(head_shas)),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    max_retries=3,
+                )
+            )
+
+        reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
+        assert len(reviewer_calls) == 3
+
+        # Attempt 2 compares against attempt 1's SHA and gets attempt 1's feedback.
+        assert reviewer_calls[1]["prior_review_sha"] == "sha-review-1"
+        assert "issue A" in reviewer_calls[1]["extra_context"]
+
+        # Attempt 3 compares against attempt 2's SHA and gets attempt 2's feedback
+        # (NOT attempt 1's).
+        assert reviewer_calls[2]["prior_review_sha"] == "sha-review-2"
+        assert "issue B" in reviewer_calls[2]["extra_context"]
+        assert "issue A" not in reviewer_calls[2]["extra_context"]
 
 
 class TestTDDPipelineUsesProfileAgent:

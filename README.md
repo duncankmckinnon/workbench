@@ -71,6 +71,23 @@ If the skill file already exists and is unchanged, it's skipped. If it differs, 
 
 ### 2. Write a plan
 
+You can generate a plan automatically or write one by hand.
+
+**Generate with `wb plan`:**
+
+```bash
+wb plan "Add JWT authentication to the FastAPI app"
+wb plan "Refactor the database layer" --name db-refactor
+wb plan --from existing-spec.md
+wb plan "Focus on security" --from claude-plan.md --name secure-auth
+```
+
+The planner agent explores your codebase — reading project structure, existing patterns, test infrastructure, and conventions — then writes a detailed plan to `.workbench/plans/<name>.md`. On completion it prints commands for reviewing, previewing, and running the result.
+
+Use `--from` to transform an existing document (e.g. a Claude plan, a spec, or rough notes) into workbench format. Add a prompt alongside `--from` for additional guidance on the transformation.
+
+**Write by hand:**
+
 Create a markdown file (e.g. `plan.md`) with tasks for workbench to execute:
 
 ```markdown
@@ -382,6 +399,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 
 | Command | Description |
 |---|---|
+| `wb plan "<prompt>"` | Generate a plan from a natural language description |
 | `wb run <plan>` | Execute a plan with parallel agents |
 | `wb merge -b <branch>` | Merge completed-but-unmerged task branches (auto-detects plan) |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
@@ -398,6 +416,20 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb profile show` | Show resolved profile |
 | `wb profile set <key> <value>` | Update a profile field |
 | `wb profile diff` | Show differences from defaults |
+
+### `wb plan`
+
+Takes an optional prompt argument and/or `--from` flag. At least one must be provided.
+
+The planner agent surveys the codebase (project structure, patterns, test infrastructure) and writes a detailed plan to `.workbench/plans/<name>.md`. Use `--from` to transform an existing document into workbench format.
+
+| Flag | Description |
+|---|---|
+| `--from FILE` | Transform an existing document into workbench plan format |
+| `-n NAME` / `--name` | Plan file name (default: `plan`). Produces `.workbench/plans/<name>.md` |
+| `--agent CMD` | Agent CLI command (default: `claude`) |
+| `--no-tmux` | Run without tmux |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb run`
 

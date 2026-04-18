@@ -556,6 +556,120 @@ def preview(plan_path: Path):
 
 
 @main.command()
+@click.argument("prompt", type=str, required=False, default="")
+@click.option(
+    "--from",
+    "from_file",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Transform an existing document into workbench plan format.",
+)
+@click.option(
+    "--name",
+    "-n",
+    default="plan",
+    help="Name for the plan file (default: plan). Produces .workbench/plans/<name>.md.",
+)
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI command (claude, gemini, codex, cursor, or custom).",
+)
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--no-tmux", is_flag=True, help="Run without tmux.")
+def plan(
+    prompt: str,
+    from_file: Path | None,
+    name: str,
+    agent: str,
+    repo: Path | None,
+    no_tmux: bool,
+):
+    """Generate a workbench plan from a description or existing document.
+
+    \b
+    The planner agent explores the codebase, then writes a detailed plan
+    to .workbench/plans/<name>.md that can be executed with `wb run`.
+
+    \b
+    Example:
+      wb plan "Add JWT authentication to the FastAPI app"
+      wb plan --from claude-plan.md
+      wb plan "Focus on security" --from existing-spec.md
+      wb plan "Refactor the database layer" --name db-refactor
+    """
+    if not prompt and not from_file:
+        raise click.ClickException(
+            "Provide a prompt, --from <file>, or both.\n"
+            '  wb plan "Add JWT auth"\n'
+            "  wb plan --from existing-plan.md\n"
+            '  wb plan "Focus on security" --from existing-plan.md'
+        )
+
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    source_content = ""
+    if from_file:
+        source_content = from_file.read_text()
+
+    output_path = repo / ".workbench" / "plans" / f"{name}.md"
+    if from_file and prompt:
+        console.print(f"\n[bold]Transforming:[/bold] {from_file}")
+        console.print(f"[bold]Guidance:[/bold]   {prompt}")
+    elif from_file:
+        console.print(f"\n[bold]Transforming:[/bold] {from_file}")
+    else:
+        console.print(f"\n[bold]Planning:[/bold] {prompt}")
+    console.print(f"[bold]Output:[/bold]  {output_path}\n")
+
+    from .agents import run_planner
+
+    result = asyncio.run(
+        run_planner(
+            repo=repo,
+            user_prompt=prompt,
+            source_content=source_content,
+            plan_name=name,
+            agent_cmd=agent,
+            use_tmux=not no_tmux,
+        )
+    )
+
+    if result.status.value == "failed":
+        console.print(f"\n[red]Planning failed:[/red] {result.output}")
+        raise SystemExit(1)
+
+    if output_path.exists():
+        console.print(f"\n[green]Plan written to:[/green] {output_path}\n")
+        console.print("[bold]Next steps:[/bold]\n")
+        console.print(f"  [dim]# Review the plan[/dim]")
+        console.print(f"  cat {output_path}\n")
+        console.print(f"  [dim]# Preview task waves (dry run)[/dim]")
+        console.print(f"  wb preview {output_path}\n")
+        console.print(f"  [dim]# Run the plan[/dim]")
+        console.print(f"  wb run {output_path}\n")
+        console.print(f"  [dim]# Run with options[/dim]")
+        console.print(f"  wb run {output_path} --tdd")
+        console.print(f"  wb run {output_path} --skip-review")
+        console.print(f"  wb run {output_path} -j 6")
+    else:
+        console.print(
+            f"\n[yellow]Agent completed but plan file not found at {output_path}.[/yellow]"
+        )
+        console.print(
+            "[dim]The agent may have written it elsewhere. Check its output above.[/dim]"
+        )
+
+
+@main.command()
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def status(repo: Path | None):
     """Show active worktrees from workbench."""
