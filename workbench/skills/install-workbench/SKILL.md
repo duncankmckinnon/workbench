@@ -93,6 +93,7 @@ At least one of:
 | Gemini CLI | `gemini --version` | [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) |
 | Codex | `codex --version` | [github.com/openai/codex](https://github.com/openai/codex) |
 | Cursor CLI | `agent --version` | [cursor.com/docs/cli](https://cursor.com/docs/cli/overview) |
+| Copilot CLI | `copilot --version` | [github.com/features/copilot/cli](https://github.com/features/copilot/cli) |
 
 You can also use a custom agent CLI via `.workbench/agents.yaml` — see `wb agents add`.
 

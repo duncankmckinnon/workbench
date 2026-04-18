@@ -187,6 +187,53 @@ class CursorAdapter(AgentAdapter):
         )
 
 
+class CopilotAdapter(AgentAdapter):
+    """Adapter for the GitHub Copilot CLI.
+
+    Uses ``copilot -p`` for programmatic execution with JSONL output.
+    Parses newline-delimited JSON events, extracting the last assistant message.
+    See https://docs.github.com/en/copilot/reference/copilot-cli-reference
+    """
+
+    name = "copilot"
+
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="copilot",
+            args=[
+                "-p",
+                "{prompt}",
+                "--output-format",
+                "json",
+                "--no-ask-user",
+            ],
+            output_format=OutputFormat.JSON,
+            json_result_key="result",
+            json_cost_key="cost_usd",
+        )
+
+    def parse_output(self, raw: str) -> tuple[str, dict]:
+        # copilot -p --output-format json outputs JSONL (one JSON object per line)
+        lines = raw.strip().split("\n")
+        last_message = ""
+        for line in reversed(lines):
+            try:
+                data = json.loads(line)
+                # Try common message shapes
+                if data.get("type") == "message" and data.get("role") == "assistant":
+                    last_message = data.get("content", "")
+                    break
+                if "result" in data:
+                    last_message = data["result"]
+                    break
+                if "message" in data:
+                    last_message = data["message"]
+                    break
+            except (json.JSONDecodeError, TypeError):
+                continue
+        return (last_message or raw.strip(), {})
+
+
 class GeminiAdapter(AgentAdapter):
     """Adapter for the Gemini CLI."""
 
@@ -215,6 +262,7 @@ BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
     "codex": CodexAdapter,
     "gemini": GeminiAdapter,
     "cursor": CursorAdapter,
+    "copilot": CopilotAdapter,
 }
 
 
@@ -240,7 +288,7 @@ def get_adapter(agent_cmd: str, config_path: Path | None = None) -> AgentAdapter
 
     Resolution order:
     1. If config_path is provided and contains agent_cmd, use ConfigAdapter
-    2. Built-in adapters: "claude", "codex", "gemini", "cursor"
+    2. Built-in adapters: "claude", "codex", "gemini", "cursor", "copilot"
     3. Fallback: GenericAdapter
     """
     if config_path is not None and config_path.exists():

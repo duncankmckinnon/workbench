@@ -26,6 +26,7 @@ from .worktree import (
     get_main_branch,
     get_merged_branches,
     merge_into_session,
+    push_session_branch,
 )
 
 
@@ -142,6 +143,7 @@ async def run_plan(
     fail_fast: bool = False,
     only_failed: bool = False,
     task_filter: set[str] | None = None,
+    push: bool = False,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -561,6 +563,14 @@ async def run_plan(
         console.print(f"  git checkout {session_branch}")
         console.print(f"  git diff main...{session_branch}")
 
+    # Push session branch to origin
+    if push and done:
+        success, msg = push_session_branch(repo, session_branch)
+        if success:
+            console.print(f"\n[green]{msg}[/green]")
+        else:
+            console.print(f"\n[red]Push failed: {msg}[/red]")
+
     if cleanup_on_done:
         for s in all_states:
             if s.worktree:
@@ -577,6 +587,7 @@ async def merge_unmerged(
     agent_cmd: str = "claude",
     use_tmux: bool = True,
     keep_branches: bool = False,
+    push: bool = False,
 ) -> SessionStatus:
     """Merge all completed-but-unmerged task branches into the session branch.
 
@@ -663,5 +674,13 @@ async def merge_unmerged(
     merged_count = sum(1 for rec in status.tasks.values() if rec.merged)
     total = len(status.tasks)
     console.print(f"\n[bold]{merged_count}/{total} task(s) merged into {session_branch}[/bold]")
+
+    # Push session branch to origin
+    if push and merged_count > 0:
+        success, msg = push_session_branch(repo, session_branch)
+        if success:
+            console.print(f"\n[green]{msg}[/green]")
+        else:
+            console.print(f"\n[red]Push failed: {msg}[/red]")
 
     return status

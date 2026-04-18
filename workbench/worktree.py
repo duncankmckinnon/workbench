@@ -130,7 +130,7 @@ def create_session_branch(
         branch_point = f"origin/{base}" if ref_check.returncode == 0 else base
 
     subprocess.run(
-        ["git", "branch", session_branch, branch_point],
+        ["git", "branch", "--no-track", session_branch, branch_point],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -155,9 +155,9 @@ def create_worktree(
     base = base_branch or get_main_branch(repo)
     worktree_dir = repo / ".workbench" / task_id
 
-    # Create the branch from the base
+    # Create the branch from the base (--no-track prevents inheriting upstream)
     subprocess.run(
-        ["git", "branch", branch, base],
+        ["git", "branch", "--no-track", branch, base],
         cwd=repo,
         capture_output=True,
         text=True,
@@ -350,6 +350,22 @@ def get_merged_branches(repo: Path, session_branch: str) -> set[str]:
         if branch:
             merged.add(branch)
     return merged
+
+
+def push_session_branch(repo: Path, session_branch: str) -> tuple[bool, str]:
+    """Push the session branch to origin with upstream tracking.
+
+    Returns (success, message).
+    """
+    result = subprocess.run(
+        ["git", "push", "-u", "origin", session_branch],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True, f"Pushed {session_branch} to origin/{session_branch}"
+    return False, result.stderr.strip() or "Push failed"
 
 
 def get_diff(worktree: Worktree, base_branch: str) -> str:

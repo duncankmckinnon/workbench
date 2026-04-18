@@ -58,7 +58,7 @@ def _discover_skills(skills_dir: Path) -> list[tuple[str, Path]]:
 def _detect_agent() -> str:
     """Auto-detect the agent platform from PATH."""
     found = []
-    for name in ("claude", "gemini", "codex", "cursor"):
+    for name in ("claude", "gemini", "codex", "cursor", "copilot"):
         if shutil.which(name):
             found.append(name)
 
@@ -77,6 +77,7 @@ _PLATFORM_LABEL = {
     "gemini": "skill",
     "cursor": "rule",
     "codex": "instruction",
+    "copilot": "skill",
     "manual": "skill file",
 }
 
@@ -205,6 +206,37 @@ def _install_skills(
                 shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                 console.print(f"  Copied {name} → {dest_dir}")
 
+    elif agent == "copilot":
+        if local:
+            target_dir = repo / ".github" / "skills"
+        else:
+            target_dir = Path.home() / ".copilot" / "skills"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            src_dir = src.parent
+            dest_dir = target_dir / name
+            dest = dest_dir / "SKILL.md"
+            if dest.exists() and not symlink and not update:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing {name}?", default=True):
+                    console.print(f"  [yellow]Skipped {name}[/yellow]")
+                    continue
+            if symlink:
+                if dest_dir.is_symlink():
+                    dest_dir.unlink()
+                elif dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.symlink_to(src_dir.resolve())
+                console.print(f"  Linked {name} → {dest_dir}")
+            else:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                console.print(f"  Copied {name} → {dest_dir}")
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
+
     elif agent == "cursor":
         if local:
             console.print("  [dim]Note: cursor skills are always project-level.[/dim]")
@@ -283,7 +315,7 @@ def main():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, gemini, codex, cursor, or custom).",
+    help="Agent CLI command (claude, gemini, codex, cursor, copilot, or custom).",
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
@@ -396,6 +428,11 @@ def main():
 @click.option(
     "--fixer-directive", default=None, type=str, help="Override the fixer agent's instructions."
 )
+@click.option(
+    "--push",
+    is_flag=True,
+    help="Push the session branch to origin after merging (sets upstream tracking).",
+)
 def run(
     plan_path: Path,
     max_concurrent: int,
@@ -425,6 +462,7 @@ def run(
     tester_directive: str | None,
     reviewer_directive: str | None,
     fixer_directive: str | None,
+    push: bool,
 ):
     """Run a plan with parallel agents.
 
@@ -525,6 +563,7 @@ def run(
             fail_fast=fail_fast,
             only_failed=only_failed,
             task_filter=set(task_ids) if task_ids else None,
+            push=push,
         )
     )
 
@@ -573,7 +612,7 @@ def preview(plan_path: Path):
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, gemini, codex, cursor, or custom).",
+    help="Agent CLI command (claude, gemini, codex, cursor, copilot, or custom).",
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
@@ -830,6 +869,11 @@ def stop(cleanup: bool, repo: Path | None):
     is_flag=True,
     help="Keep task branches after merging (default: auto-delete on success).",
 )
+@click.option(
+    "--push",
+    is_flag=True,
+    help="Push the session branch to origin after merging (sets upstream tracking).",
+)
 def merge(
     session_branch: str,
     plan_path: Path | None,
@@ -837,6 +881,7 @@ def merge(
     repo: Path | None,
     no_tmux: bool,
     keep_branches: bool,
+    push: bool,
 ):
     """Merge completed-but-unmerged task branches into the session branch.
 
@@ -876,6 +921,7 @@ def merge(
             agent_cmd=agent,
             use_tmux=not no_tmux,
             keep_branches=keep_branches,
+            push=push,
         )
     )
 
@@ -883,7 +929,7 @@ def merge(
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]),
+    type=click.Choice(["claude", "gemini", "cursor", "codex", "copilot", "manual"]),
     default=None,
     help="Target agent platform.",
 )
