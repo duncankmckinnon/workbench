@@ -31,6 +31,8 @@ safe-outputs:
   github-token: ${{ secrets.GH_AW_CROSS_REPO_PAT }}
   create-pull-request:
     max: 1
+    allowed-repos:
+      - duncankmckinnon/wbcli-web
   noop:
     max: 1
 ---
