@@ -978,8 +978,8 @@ class TestProfileShow:
         assert result.exit_code == 0
         assert "gemini" in result.output
 
-    def test_profile_show_truncates_directive(self, tmp_path):
-        """wb profile show truncates directive to first line."""
+    def test_profile_show_displays_full_directive(self, tmp_path):
+        """wb profile show displays the full directive without truncation."""
 
         profile_path = tmp_path / "custom.yaml"
         profile_path.write_text(
@@ -997,9 +997,10 @@ class TestProfileShow:
             )
 
         assert result.exit_code == 0
-        # First line should be visible; second/third should not
+        # All lines should be visible — no truncation
         assert "First line." in result.output
-        assert "Second line." not in result.output
+        assert "Second line." in result.output
+        assert "Third line." in result.output
 
 
 class TestProfileSet:

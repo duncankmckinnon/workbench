@@ -1121,12 +1121,13 @@ def profile_show(repo: Path | None, name: str | None, profile_path: Path | None)
         profile_name=name,
     )
 
-    console.print(f"{'Role':<15} {'Agent':<12} {'Directive'}")
-    console.print("-" * 60)
     for role_name in _VALID_ROLES:
         cfg: RoleConfig = getattr(resolved, role_name)
-        directive_preview = cfg.directive.split("\n")[0][:60] if cfg.directive else ""
-        console.print(f"{role_name:<15} {cfg.agent:<12} {directive_preview}")
+        console.print(f"[bold]{role_name}[/bold] (agent: {cfg.agent})")
+        if cfg.directive:
+            for line in cfg.directive.split("\n"):
+                console.print(f"  {line}")
+        console.print()
 
 
 @profile.command("set")
