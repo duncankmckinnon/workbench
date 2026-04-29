@@ -25,3 +25,4 @@ workbench/_version.py
 # agents
 .agents/
 .claude/
+docs/superpowers/*
