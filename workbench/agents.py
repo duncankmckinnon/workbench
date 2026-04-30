@@ -656,21 +656,26 @@ async def run_merge_resolver(
     agent_cmd: str = "claude",
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
+    profile: Profile | None = None,
+    directive_override: str | None = None,
 ) -> AgentResult:
     """Run a merge conflict resolution agent in the merge worktree.
 
     This is a standalone function (not part of the pipeline) called directly
     by the orchestrator when merge conflicts are detected.
     """
+    from .directives import MergerDirective
+
     adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
 
-    prompt_parts = [
-        DEFAULT_DIRECTIVES[Role.MERGER],
-        f"Merging branch '{task_branch}' into '{session_branch}'",
-        "Conflicted files:\n" + "\n".join(f"  - {c}" for c in conflicts),
-        "Read each file, resolve the conflict markers, and stage with git add.",
-    ]
-    prompt = "\n\n".join(prompt_parts)
+    text = directive_override or (profile.merger.directive if profile else "")
+    directive = MergerDirective(
+        directive_text=text,
+        task_branch=task_branch,
+        session_branch=session_branch,
+        conflicts=conflicts,
+    )
+    prompt = directive.render()
 
     try:
         cmd = adapter.build_command(prompt, merge_dir)
@@ -806,6 +811,7 @@ async def run_planner(
     agent_cmd: str = "claude",
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
+    profile: Profile | None = None,
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -815,17 +821,24 @@ async def run_planner(
     Provide ``user_prompt`` for generation from scratch, ``source_content``
     to transform an existing document, or both for guided transformation.
     """
+    from .directives import PlannerDirective
+
     adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
 
     plans_dir = repo / ".workbench" / "plans"
     plans_dir.mkdir(parents=True, exist_ok=True)
     output_path = plans_dir / f"{plan_name}.md"
 
-    prompt = build_planner_prompt(
+    text = profile.planner.directive if profile else ""
+    plan_guide = _load_plan_guide()
+    directive = PlannerDirective(
+        directive_text=text,
         output_path=output_path,
         user_prompt=user_prompt,
         source_content=source_content,
+        plan_guide=plan_guide,
     )
+    prompt = directive.render()
 
     try:
         cmd = adapter.build_command(prompt, repo)
