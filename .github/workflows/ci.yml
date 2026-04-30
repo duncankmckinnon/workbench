@@ -16,14 +16,11 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install dependencies
-        run: pip install black isort
+      - name: Install pre-commit
+        run: pip install pre-commit
 
-      - name: Check formatting
-        run: black --check --target-version py311 .
-
-      - name: Check import order
-        run: isort --check --profile black .
+      - name: Run pre-commit hooks
+        run: pre-commit run --all-files
 
   test:
     runs-on: ubuntu-latest
