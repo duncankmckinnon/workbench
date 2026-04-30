@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -369,13 +370,9 @@ def test_planner_prompt_source_with_guidance():
 
 def test_run_planner_success(tmp_path):
     """run_planner spawns agent and returns result on success."""
-    from unittest.mock import MagicMock
-
     mock_adapter = MagicMock()
     mock_adapter.build_command.return_value = ["echo", "ok"]
     mock_adapter.parse_output.return_value = ("Plan generated.", {})
-
-    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -395,13 +392,9 @@ def test_run_planner_success(tmp_path):
 
 def test_run_planner_failure(tmp_path):
     """run_planner returns FAILED when the subprocess exits non-zero."""
-    from unittest.mock import MagicMock
-
     mock_adapter = MagicMock()
     mock_adapter.build_command.return_value = ["false"]
     mock_adapter.parse_output.return_value = ("", {})
-
-    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -418,12 +411,8 @@ def test_run_planner_failure(tmp_path):
 
 def test_run_planner_exception(tmp_path):
     """run_planner returns FAILED when adapter raises."""
-    from unittest.mock import MagicMock
-
     mock_adapter = MagicMock()
     mock_adapter.build_command.side_effect = RuntimeError("boom")
-
-    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -441,8 +430,6 @@ def test_run_planner_exception(tmp_path):
 
 def test_run_planner_with_source_content(tmp_path):
     """run_planner passes source_content through to the prompt."""
-    from unittest.mock import MagicMock
-
     captured_prompt = {}
 
     mock_adapter = MagicMock()
@@ -453,8 +440,6 @@ def test_run_planner_with_source_content(tmp_path):
 
     mock_adapter.build_command.side_effect = capture_command
     mock_adapter.parse_output.return_value = ("ok", {})
-
-    import asyncio
 
     asyncio.run(
         run_planner(
