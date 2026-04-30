@@ -14,7 +14,7 @@ from rich.console import Console
 
 from .orchestrator import merge_unmerged, run_plan
 from .plan_parser import parse_plan
-from .profile import Profile, RoleConfig
+from .profile import ModeConfig, Profile, RoleConfig
 from .tmux import check_tmux_available
 
 console = Console()
@@ -1039,6 +1039,8 @@ def init(agent: str | None, symlink: bool, local: bool, create_profile: bool, up
 
 _VALID_ROLES = Profile._ROLE_NAMES
 _VALID_FIELDS = ("agent", "directive", "directive_extend")
+_VALID_SUB_MODE_FIELDS = ("directive", "directive_extend")
+_VALID_SUB_MODES = {"tdd": {"implementor", "tester"}, "followup": {"reviewer"}}
 
 
 @main.group()
@@ -1086,18 +1088,41 @@ def profile_init(
             )
         key, value = override.split("=", 1)
         parts = key.split(".")
-        if len(parts) != 2:
-            raise click.ClickException(f"Key must be <role>.<field>, got: {key}")
-        role_name, field_name = parts
+        if len(parts) == 2:
+            role_name, field_name = parts
+            sub_mode = None
+        elif len(parts) == 3:
+            role_name, sub_mode, field_name = parts
+        else:
+            raise click.ClickException(
+                f"Key must be <role>.<field> or <role>.<sub_mode>.<field>, got: {key}"
+            )
         if role_name not in _VALID_ROLES:
             raise click.ClickException(f"Unknown role: {role_name}")
-        if field_name not in _VALID_FIELDS:
-            raise click.ClickException(f"Unknown field: {field_name}")
         cfg: RoleConfig = getattr(p, role_name)
-        if field_name == "directive_extend":
-            cfg.directive = cfg.directive + "\n\n" + value
+
+        if sub_mode is not None:
+            if sub_mode not in _VALID_SUB_MODES:
+                raise click.ClickException(f"Unknown sub-mode: {sub_mode}")
+            if role_name not in _VALID_SUB_MODES[sub_mode]:
+                raise click.ClickException(f"{role_name} does not support a '{sub_mode}' sub-mode")
+            if field_name not in _VALID_SUB_MODE_FIELDS:
+                raise click.ClickException(f"Unknown sub-mode field: {field_name}")
+            mode_cfg = getattr(cfg, sub_mode)
+            if mode_cfg is None:
+                mode_cfg = ModeConfig(directive="")
+                setattr(cfg, sub_mode, mode_cfg)
+            if field_name == "directive_extend":
+                mode_cfg.directive = mode_cfg.directive + "\n\n" + value
+            else:
+                setattr(mode_cfg, field_name, value)
         else:
-            setattr(cfg, field_name, value)
+            if field_name not in _VALID_FIELDS:
+                raise click.ClickException(f"Unknown field: {field_name}")
+            if field_name == "directive_extend":
+                cfg.directive = cfg.directive + "\n\n" + value
+            else:
+                setattr(cfg, field_name, value)
 
     p.save(target)
     console.print(f"Created {target}")
@@ -1127,6 +1152,16 @@ def profile_show(repo: Path | None, name: str | None, profile_path: Path | None)
         cfg: RoleConfig = getattr(resolved, role_name)
         directive_preview = cfg.directive.split("\n")[0][:60] if cfg.directive else ""
         console.print(f"{role_name:<15} {cfg.agent:<12} {directive_preview}")
+        if cfg.tdd is not None:
+            tdd_preview = cfg.tdd.directive.split("\n")[0][:60] if cfg.tdd.directive else ""
+            tdd_key = f"  {role_name}.tdd.directive"
+            console.print(f"{tdd_key:<28} {tdd_preview}")
+        if cfg.followup is not None:
+            fu_preview = (
+                cfg.followup.directive.split("\n")[0][:60] if cfg.followup.directive else ""
+            )
+            fu_key = f"  {role_name}.followup.directive"
+            console.print(f"{fu_key:<28} {fu_preview}")
 
 
 @profile.command("set")
@@ -1136,21 +1171,40 @@ def profile_show(repo: Path | None, name: str | None, profile_path: Path | None)
 @click.option("--name", default=None, help="Named profile to update.")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def profile_set(key: str, value: str, use_global: bool, name: str | None, repo: Path | None):
-    """Set a profile field (e.g. reviewer.agent gemini)."""
+    """Set a profile field (e.g. reviewer.agent gemini, tester.tdd.directive 'text')."""
     parts = key.split(".")
-    if len(parts) != 2:
-        raise click.ClickException(f"Key must be in <role>.<field> format, got: {key}")
-
-    role_name, field_name = parts
+    if len(parts) == 2:
+        role_name, field_name = parts
+        sub_mode = None
+    elif len(parts) == 3:
+        role_name, sub_mode, field_name = parts
+    else:
+        raise click.ClickException(
+            f"Key must be <role>.<field> or <role>.<sub_mode>.<field>, got: {key}"
+        )
 
     if role_name not in _VALID_ROLES:
         raise click.ClickException(
             f"Unknown role: {role_name}. Valid roles: {', '.join(_VALID_ROLES)}"
         )
-    if field_name not in _VALID_FIELDS:
-        raise click.ClickException(
-            f"Unknown field: {field_name}. Valid fields: {', '.join(_VALID_FIELDS)}"
-        )
+
+    if sub_mode is not None:
+        if sub_mode not in _VALID_SUB_MODES:
+            raise click.ClickException(
+                f"Unknown sub-mode: {sub_mode}. Valid sub-modes: {', '.join(_VALID_SUB_MODES)}"
+            )
+        if role_name not in _VALID_SUB_MODES[sub_mode]:
+            raise click.ClickException(f"{role_name} does not support a '{sub_mode}' sub-mode")
+        if field_name not in _VALID_SUB_MODE_FIELDS:
+            raise click.ClickException(
+                f"Unknown sub-mode field: {field_name}. "
+                f"Valid fields: {', '.join(_VALID_SUB_MODE_FIELDS)}"
+            )
+    else:
+        if field_name not in _VALID_FIELDS:
+            raise click.ClickException(
+                f"Unknown field: {field_name}. Valid fields: {', '.join(_VALID_FIELDS)}"
+            )
 
     filename = Profile._profile_filename(name)
     if use_global:
@@ -1172,7 +1226,13 @@ def profile_set(key: str, value: str, use_global: bool, name: str | None, repo: 
     if role_name not in data["roles"]:
         data["roles"][role_name] = {}
 
-    data["roles"][role_name][field_name] = value
+    if sub_mode is not None:
+        if sub_mode not in data["roles"][role_name]:
+            data["roles"][role_name][sub_mode] = {}
+        data["roles"][role_name][sub_mode][field_name] = value
+    else:
+        data["roles"][role_name][field_name] = value
+
     target.write_text(yaml.dump(data, default_flow_style=False))
     console.print(f"Set {key} = {value} in {target}")
 
@@ -1205,6 +1265,16 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
             diffs.append(f"  {role_name}.agent: {default_cfg.agent} → {resolved_cfg.agent}")
         if resolved_cfg.directive != default_cfg.directive:
             diffs.append(f"  {role_name}.directive: \\[changed]")
+        if resolved_cfg.tdd is not None and default_cfg.tdd is None:
+            diffs.append(f"  {role_name}.tdd.directive: \\[changed]")
+        elif resolved_cfg.tdd is not None and default_cfg.tdd is not None:
+            if resolved_cfg.tdd.directive != default_cfg.tdd.directive:
+                diffs.append(f"  {role_name}.tdd.directive: \\[changed]")
+        if resolved_cfg.followup is not None and default_cfg.followup is None:
+            diffs.append(f"  {role_name}.followup.directive: \\[changed]")
+        elif resolved_cfg.followup is not None and default_cfg.followup is not None:
+            if resolved_cfg.followup.directive != default_cfg.followup.directive:
+                diffs.append(f"  {role_name}.followup.directive: \\[changed]")
 
     if not diffs:
         console.print("Profile matches defaults.")

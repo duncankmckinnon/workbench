@@ -1190,6 +1190,147 @@ class TestProfileDiff:
         assert "codex" in result.output
 
 
+class TestProfileSetDottedPaths:
+    """Tests for wb profile set with dotted sub-mode paths."""
+
+    def test_profile_set_tdd_directive(self, tmp_path):
+        """wb profile set tester.tdd.directive 'Custom' writes to YAML."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "tester.tdd.directive", "Custom", "--repo", str(repo)]
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["tester"]["tdd"]["directive"] == "Custom"
+
+    def test_profile_set_tdd_directive_extend(self, tmp_path):
+        """wb profile set tester.tdd.directive_extend 'Extra' sets the extend field."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "set", "tester.tdd.directive_extend", "Extra", "--repo", str(repo)],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["tester"]["tdd"]["directive_extend"] == "Extra"
+
+    def test_profile_set_followup_directive(self, tmp_path):
+        """wb profile set reviewer.followup.directive 'Custom' writes to YAML."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "set", "reviewer.followup.directive", "Custom", "--repo", str(repo)],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["reviewer"]["followup"]["directive"] == "Custom"
+
+    def test_profile_set_planner_directive(self, tmp_path):
+        """wb profile set planner.directive 'Custom' writes to YAML."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "planner.directive", "Custom", "--repo", str(repo)]
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["planner"]["directive"] == "Custom"
+
+    def test_profile_set_planner_agent(self, tmp_path):
+        """wb profile set planner.agent gemini writes to YAML."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "planner.agent", "gemini", "--repo", str(repo)]
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["planner"]["agent"] == "gemini"
+
+    def test_profile_set_invalid_submode(self, tmp_path):
+        """wb profile set merger.tdd.directive 'X' errors: merger doesn't support tdd."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "merger.tdd.directive", "X", "--repo", str(repo)]
+        )
+
+        assert result.exit_code != 0
+        assert "merger does not support a 'tdd' sub-mode" in result.output
+
+    def test_profile_set_invalid_submode_field(self, tmp_path):
+        """wb profile set tester.tdd.agent gemini errors: sub-modes don't have agent."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "set", "tester.tdd.agent", "gemini", "--repo", str(repo)]
+        )
+
+        assert result.exit_code != 0
+        assert "sub-mode field" in result.output.lower() or "Unknown" in result.output
+
+    def test_profile_show_includes_submodes(self, tmp_path):
+        """wb profile show includes tester.tdd.directive when set."""
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"tester": {"tdd": {"directive": "TDD custom directive"}}}})
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main,
+                ["profile", "show", "--repo", str(repo), "--profile", str(profile_path)],
+            )
+
+        assert result.exit_code == 0
+        assert "tester.tdd.directive" in result.output
+
+    def test_profile_show_omits_unset_submodes(self, tmp_path):
+        """Default profile show does not emit any tdd or followup lines."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "show", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        assert "tdd" not in result.output
+        assert "followup" not in result.output
+
+
 # ---------------------------------------------------------------------------
 # wb run --profile flag
 # ---------------------------------------------------------------------------
