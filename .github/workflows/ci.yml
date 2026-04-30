@@ -20,10 +20,10 @@ jobs:
         run: pip install black isort
 
       - name: Check formatting
-        run: black --check --line-length 99 --target-version py311 .
+        run: black --check --target-version py311 .
 
       - name: Check import order
-        run: isort --check --profile black --line-length 99 .
+        run: isort --check --profile black .
 
   test:
     runs-on: ubuntu-latest
