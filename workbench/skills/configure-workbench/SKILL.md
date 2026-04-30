@@ -211,6 +211,96 @@ wb run plan.md --reviewer-directive "Focus only on security issues."
 wb run plan.md --tester-directive "Run pytest with -x flag, fail fast."
 ```
 
+## Customizing directives
+
+A **directive** is the role-specific instruction text inserted at the top of every agent prompt. Each role and mode variant has a built-in default; the profile lets you replace or extend it.
+
+### Override precedence
+
+Highest wins:
+
+| Layer | YAML field | Behavior |
+|---|---|---|
+| CLI flag | `--implementor-directive`, `--tester-directive`, `--reviewer-directive`, `--fixer-directive` | Full replace, one-shot. Wins over profile. Only available for these four roles. |
+| Profile override | `directive: "..."` | Full replace. Persistent. |
+| Profile extend | `directive_extend: "..."` | Appended to the built-in default with a blank line. Persistent. |
+| Class default | *(built-in)* | The bundled text in workbench. Always used when nothing above applies. |
+
+### The full directive map
+
+Workbench uses 9 directive variants. Each has a YAML path that configures it:
+
+| Directive | YAML path | When used |
+|---|---|---|
+| Implementor | `implementor.directive` | Standard implement stage |
+| Tester | `tester.directive` | Standard test stage |
+| Reviewer (first pass) | `reviewer.directive` | First review of a task |
+| Reviewer follow-up | `reviewer.followup.directive` | Re-review after a fix (attempts > 1) |
+| Fixer | `fixer.directive` | After test or review failure |
+| Merger | `merger.directive` | When merging branches produces conflicts |
+| TDD Tester | `tester.tdd.directive` | `wb run --tdd` — writing failing tests first |
+| TDD Implementor | `implementor.tdd.directive` | `wb run --tdd` — making failing tests pass |
+| Planner | `planner.directive` | `wb plan <prompt>` |
+
+All 9 support both `directive` (full replace) and `directive_extend` (append) at their respective YAML paths.
+
+### Examples
+
+Adding repo conventions to every implementation:
+
+```yaml
+implementor:
+  directive_extend: |
+    All new modules must include a docstring with a one-line summary
+    and a short example. Tests go in tests/ mirroring the source layout.
+```
+
+Tighter tester verdict for a strict project:
+
+```yaml
+tester:
+  directive: |
+    You are a strict testing agent. PASS only if every public function
+    has at least one test, and all tests pass with zero warnings.
+    [...]
+    VERDICT: PASS
+    VERDICT: FAIL
+```
+
+Per-project TDD style for the tester:
+
+```yaml
+tester:
+  tdd:
+    directive_extend: |
+      Use pytest fixtures for shared setup. Prefer parametrized tests
+      over multiple near-duplicate tests.
+```
+
+Customizing the planner with project-specific conventions:
+
+```yaml
+planner:
+  directive_extend: |
+    For this repo, every plan must include a "Manual verification" subsection
+    in each task that lists steps to verify the change in a browser.
+```
+
+### Validation errors
+
+Sub-mode keys are only valid under specific roles. If you misplace one:
+
+```
+$ wb run plan.md
+Error: merger does not support a 'tdd' sub-mode
+```
+
+`tdd` is only valid under `implementor` and `tester`. `followup` is only valid under `reviewer`.
+
+### CLI vs YAML
+
+CLI flags are intentionally limited to the four most common roles (`implementor`, `tester`, `reviewer`, `fixer`). Other directives — reviewer follow-up, merger, TDD variants, and planner — are persistent overrides best set via the profile.
+
 ## Troubleshooting
 
 ### Agent not found
