@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus, build_prompt, run_agent
+from workbench.directives import ImplementorDirective, PromptContext
 from workbench.plan_parser import Task
 from workbench.worktree import Worktree
 
@@ -21,22 +22,27 @@ def sample_worktree(tmp_path):
     return Worktree(path=tmp_path, branch="wb/test-task", task_id="task-1")
 
 
+@pytest.fixture
+def sample_ctx(sample_task, sample_worktree):
+    return PromptContext(
+        task=sample_task,
+        worktree=sample_worktree,
+        base_branch="main",
+    )
+
+
 class TestRunAgentTmux:
-    def test_run_agent_success_tmux(self, sample_task, sample_worktree, tmp_path):
+    def test_run_agent_success_tmux(self, sample_ctx, tmp_path):
         """Mock run_in_tmux returning (0, json), verify AgentResult.status == DONE."""
         output = json.dumps({"result": "all good", "cost_usd": {"input": 0.01}})
-        with (
-            patch(
-                "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, output)
-            ),
-            patch("workbench.agents.get_main_branch", return_value="main"),
-            patch("workbench.agents.get_diff", return_value=""),
+        directive = ImplementorDirective()
+        with patch(
+            "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, output)
         ):
             result = asyncio.run(
                 run_agent(
-                    role=Role.IMPLEMENTOR,
-                    task=sample_task,
-                    worktree=sample_worktree,
+                    directive,
+                    sample_ctx,
                     repo=tmp_path,
                     agent_cmd="claude",
                     use_tmux=True,
@@ -46,20 +52,16 @@ class TestRunAgentTmux:
         assert result.status == TaskStatus.DONE
         assert result.task_id == "task-1"
 
-    def test_run_agent_failure_tmux(self, sample_task, sample_worktree, tmp_path):
+    def test_run_agent_failure_tmux(self, sample_ctx, tmp_path):
         """Mock returning (1, "error"), verify FAILED."""
-        with (
-            patch(
-                "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(1, "error")
-            ),
-            patch("workbench.agents.get_main_branch", return_value="main"),
-            patch("workbench.agents.get_diff", return_value=""),
+        directive = ImplementorDirective()
+        with patch(
+            "workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(1, "error")
         ):
             result = asyncio.run(
                 run_agent(
-                    role=Role.IMPLEMENTOR,
-                    task=sample_task,
-                    worktree=sample_worktree,
+                    directive,
+                    sample_ctx,
                     repo=tmp_path,
                     agent_cmd="claude",
                     use_tmux=True,
@@ -70,26 +72,22 @@ class TestRunAgentTmux:
 
 
 class TestRunAgentSubprocess:
-    def test_run_agent_no_tmux(self, sample_task, sample_worktree, tmp_path):
+    def test_run_agent_no_tmux(self, sample_ctx, tmp_path):
         """use_tmux=False, mock create_subprocess_exec, verify it's called."""
         mock_proc = AsyncMock()
         mock_proc.communicate.return_value = (b"done", b"")
         mock_proc.returncode = 0
 
-        with (
-            patch(
-                "workbench.agents.asyncio.create_subprocess_exec",
-                new_callable=AsyncMock,
-                return_value=mock_proc,
-            ) as mock_exec,
-            patch("workbench.agents.get_main_branch", return_value="main"),
-            patch("workbench.agents.get_diff", return_value=""),
-        ):
+        directive = ImplementorDirective()
+        with patch(
+            "workbench.agents.asyncio.create_subprocess_exec",
+            new_callable=AsyncMock,
+            return_value=mock_proc,
+        ) as mock_exec:
             result = asyncio.run(
                 run_agent(
-                    role=Role.IMPLEMENTOR,
-                    task=sample_task,
-                    worktree=sample_worktree,
+                    directive,
+                    sample_ctx,
                     repo=tmp_path,
                     agent_cmd="claude",
                     use_tmux=False,

@@ -15,6 +15,7 @@ from .tmux import run_in_tmux
 from .worktree import Worktree, get_diff, get_diff_since, get_head_sha, get_main_branch
 
 if TYPE_CHECKING:
+    from .directives import PipelineDirective, PromptContext
     from .profile import Profile, RoleConfig
 
 
@@ -294,53 +295,28 @@ class AgentResult:
 
 
 async def run_agent(
-    role: Role,
-    task: Task,
-    worktree: Worktree,
+    directive: PipelineDirective,
+    ctx: PromptContext,
     repo: Path,
     agent_cmd: str = "claude",
-    extra_context: str = "",
-    session_branch: str | None = None,
-    plan_context: str = "",
-    plan_conventions: str = "",
-    directive: str | None = None,
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
-    profile_role_config: RoleConfig | None = None,
-    prior_review_sha: str | None = None,
+    task_id: str | None = None,
 ) -> AgentResult:
-    """Spawn a Claude Code agent in a worktree."""
-
-    if profile_role_config:
-        if directive is None:
-            directive = profile_role_config.directive
-        if agent_cmd == "claude":  # default, not explicitly overridden
-            agent_cmd = profile_role_config.agent
-
+    """Spawn an agent in a worktree to run a single pipeline stage."""
     adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
-
-    base = session_branch or get_main_branch(repo)
-    prompt = build_prompt(
-        role=role,
-        task=task,
-        worktree=worktree,
-        base_branch=base,
-        plan_context=plan_context,
-        plan_conventions=plan_conventions,
-        directive=directive,
-        extra_context=extra_context,
-        prior_review_sha=prior_review_sha,
-    )
+    prompt = directive.render(ctx)
+    effective_task_id = task_id or ctx.task.id
 
     try:
-        cmd = adapter.build_command(prompt, worktree.path)
+        cmd = adapter.build_command(prompt, ctx.worktree.path)
         if use_tmux:
-            session_name = f"wb-{task.id}-{role.value}"
-            returncode, raw_output = await run_in_tmux(session_name, cmd, worktree.path)
+            session_name = f"wb-{effective_task_id}-{directive.role.value}"
+            returncode, raw_output = await run_in_tmux(session_name, cmd, ctx.worktree.path)
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
-                cwd=str(worktree.path),
+                cwd=str(ctx.worktree.path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
@@ -353,8 +329,8 @@ async def run_agent(
         status = TaskStatus.DONE if returncode == 0 else TaskStatus.FAILED
 
         return AgentResult(
-            task_id=task.id,
-            role=role,
+            task_id=effective_task_id,
+            role=directive.role,
             status=status,
             output=output_text if isinstance(output_text, str) else str(output_text),
             cost=cost_data,
@@ -362,8 +338,8 @@ async def run_agent(
 
     except Exception as e:
         return AgentResult(
-            task_id=task.id,
-            role=role,
+            task_id=effective_task_id,
+            role=directive.role,
             status=TaskStatus.FAILED,
             output=f"Agent error: {e}",
         )
@@ -400,49 +376,68 @@ async def run_pipeline(
                     fix ──→ test     fix ──→ review
                     (up to max_retries)
     """
+    from .directives import (
+        FixerDirective,
+        ImplementorDirective,
+        PromptContext,
+        ReviewerDirective,
+        ReviewerFollowupDirective,
+        TddImplementorDirective,
+        TddTesterDirective,
+        TesterDirective,
+    )
+
     results: list[AgentResult] = []
+    base = session_branch or get_main_branch(repo)
+    ctx = PromptContext(
+        task=task,
+        worktree=worktree,
+        base_branch=base,
+        plan_context=plan_context,
+        plan_conventions=plan_conventions,
+    )
 
     def _notify(status: TaskStatus):
         if on_status_change:
             on_status_change(task.id, status)
 
-    def _resolve_for_role(role: Role) -> tuple[str, str | None]:
-        """Resolve effective agent_cmd and directive for a role.
-
-        Priority: CLI flags > profile > defaults.
-        """
-        cli_directive = directives.get(role) if directives else None
-        if profile:
-            rc = getattr(profile, role.value)
-            eff_agent = rc.agent if agent_cmd == "claude" else agent_cmd
-            eff_directive = cli_directive if cli_directive is not None else rc.directive
-        else:
-            eff_agent = agent_cmd
-            eff_directive = cli_directive
-        return eff_agent, eff_directive
-
-    def _resolve_agent_for_role(role: Role) -> str:
-        """Resolve effective agent_cmd for a role (agent only, no directive)."""
+    def _agent_for(role: Role) -> str:
+        """Resolve effective agent_cmd for a role."""
         if profile and agent_cmd == "claude":
             return getattr(profile, role.value).agent
         return agent_cmd
 
+    def _text_for(role: Role, mode: str = "main") -> str:
+        """Resolve directive_text for a (role, mode) from CLI / profile.
+
+        Priority: CLI flags > profile sub-mode > profile main > empty string.
+        """
+        cli_override = (directives or {}).get(role)
+        if cli_override is not None:
+            return cli_override
+        if profile is None:
+            return ""
+        rc = getattr(profile, role.value)
+        if mode == "main":
+            return rc.directive
+        if mode == "tdd":
+            return rc.tdd.directive if rc.tdd else ""
+        if mode == "followup":
+            return rc.followup.directive if rc.followup else ""
+        return ""
+
     if tdd:
         # TDD Phase 1: Write failing tests
-        # Directive priority for TDD: CLI > TDD_DIRECTIVES (profile directives are ignored)
+        # Directive priority for TDD: CLI > profile.tester.tdd > TddTesterDirective.DEFAULT_TEXT
         _notify(TaskStatus.TESTING)
-        tdd_test_agent = _resolve_agent_for_role(Role.TESTER)
-        tdd_test_directive = (directives or {}).get(Role.TESTER) or TDD_DIRECTIVES[Role.TESTER]
+        tdd_test_directive = TddTesterDirective(
+            directive_text=_text_for(Role.TESTER, "tdd"),
+        )
         test_write_result = await run_agent(
-            Role.TESTER,
-            task,
-            worktree,
+            tdd_test_directive,
+            ctx,
             repo,
-            agent_cmd=tdd_test_agent,
-            session_branch=session_branch,
-            plan_context=plan_context,
-            plan_conventions=plan_conventions,
-            directive=tdd_test_directive,
+            agent_cmd=_agent_for(Role.TESTER),
             use_tmux=use_tmux,
         )
         results.append(test_write_result)
@@ -453,20 +448,14 @@ async def run_pipeline(
 
         # TDD Phase 2: Implement to make tests pass
         _notify(TaskStatus.IMPLEMENTING)
-        tdd_impl_agent = _resolve_agent_for_role(Role.IMPLEMENTOR)
-        tdd_impl_directive = (directives or {}).get(Role.IMPLEMENTOR) or TDD_DIRECTIVES[
-            Role.IMPLEMENTOR
-        ]
+        tdd_impl_directive = TddImplementorDirective(
+            directive_text=_text_for(Role.IMPLEMENTOR, "tdd"),
+        )
         impl_result = await run_agent(
-            Role.IMPLEMENTOR,
-            task,
-            worktree,
+            tdd_impl_directive,
+            ctx,
             repo,
-            agent_cmd=tdd_impl_agent,
-            session_branch=session_branch,
-            plan_context=plan_context,
-            plan_conventions=plan_conventions,
-            directive=tdd_impl_directive,
+            agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
         )
         results.append(impl_result)
@@ -486,17 +475,14 @@ async def run_pipeline(
     # 1. Implement (skipped in TDD mode — already done above)
     if not tdd:
         _notify(TaskStatus.IMPLEMENTING)
-        impl_agent, impl_directive = _resolve_for_role(Role.IMPLEMENTOR)
+        impl_directive = ImplementorDirective(
+            directive_text=_text_for(Role.IMPLEMENTOR),
+        )
         impl_result = await run_agent(
-            Role.IMPLEMENTOR,
-            task,
-            worktree,
+            impl_directive,
+            ctx,
             repo,
-            agent_cmd=impl_agent,
-            session_branch=session_branch,
-            plan_context=plan_context,
-            plan_conventions=plan_conventions,
-            directive=impl_directive,
+            agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
         )
         results.append(impl_result)
@@ -507,19 +493,16 @@ async def run_pipeline(
 
     # 2. Test (with retry loop)
     if not skip_test:
-        test_agent, test_directive = _resolve_for_role(Role.TESTER)
         for attempt in range(1, max_retries + 2):  # +2: 1 initial + max_retries fixes
             _notify(TaskStatus.TESTING)
+            test_directive = TesterDirective(
+                directive_text=_text_for(Role.TESTER),
+            )
             test_result = await run_agent(
-                Role.TESTER,
-                task,
-                worktree,
+                test_directive,
+                ctx,
                 repo,
-                agent_cmd=test_agent,
-                session_branch=session_branch,
-                plan_context=plan_context,
-                plan_conventions=plan_conventions,
-                directive=test_directive,
+                agent_cmd=_agent_for(Role.TESTER),
                 use_tmux=use_tmux,
             )
             test_result.attempt = attempt
@@ -537,18 +520,17 @@ async def run_pipeline(
             if attempt <= max_retries:
                 _notify(TaskStatus.FIXING)
                 feedback = test_result.feedback or test_result.output
-                fix_agent, fix_directive = _resolve_for_role(Role.FIXER)
+                fix_directive = FixerDirective(
+                    directive_text=_text_for(Role.FIXER),
+                    feedback=feedback,
+                    failure_kind="test",
+                    attempt=attempt,
+                )
                 fix_result = await run_agent(
-                    Role.FIXER,
-                    task,
-                    worktree,
+                    fix_directive,
+                    ctx,
                     repo,
-                    agent_cmd=fix_agent,
-                    extra_context=f"[Test failure, attempt {attempt}]\n{feedback}",
-                    session_branch=session_branch,
-                    plan_context=plan_context,
-                    plan_conventions=plan_conventions,
-                    directive=fix_directive,
+                    agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                 )
                 fix_result.attempt = attempt
@@ -570,7 +552,6 @@ async def run_pipeline(
     # and are directed to verify each item was addressed rather than raise
     # new issues. prior_review_sha always tracks the immediately prior review.
     if not skip_review:
-        review_agent, review_directive = _resolve_for_role(Role.REVIEWER)
         prior_review_sha: str | None = None
         prior_review_feedback: str | None = None
         for attempt in range(1, max_retries + 2):
@@ -580,27 +561,22 @@ async def run_pipeline(
             current_sha = get_head_sha(worktree) or None
 
             if attempt == 1:
-                effective_directive = review_directive
-                effective_extra = ""
-                effective_prior_sha = None
+                rev_directive: PipelineDirective = ReviewerDirective(
+                    directive_text=_text_for(Role.REVIEWER),
+                )
             else:
-                effective_directive = REVIEWER_FOLLOWUP_DIRECTIVE
-                effective_extra = prior_review_feedback or ""
-                effective_prior_sha = prior_review_sha
+                rev_directive = ReviewerFollowupDirective(
+                    directive_text=_text_for(Role.REVIEWER, "followup"),
+                    prior_review_sha=prior_review_sha or "",
+                    prior_feedback=prior_review_feedback or "",
+                )
 
             review_result = await run_agent(
-                Role.REVIEWER,
-                task,
-                worktree,
+                rev_directive,
+                ctx,
                 repo,
-                agent_cmd=review_agent,
-                extra_context=effective_extra,
-                session_branch=session_branch,
-                plan_context=plan_context,
-                plan_conventions=plan_conventions,
-                directive=effective_directive,
+                agent_cmd=_agent_for(Role.REVIEWER),
                 use_tmux=use_tmux,
-                prior_review_sha=effective_prior_sha,
             )
             review_result.attempt = attempt
             results.append(review_result)
@@ -619,18 +595,17 @@ async def run_pipeline(
             # Review failed with feedback — send to fixer
             if attempt <= max_retries:
                 _notify(TaskStatus.FIXING)
-                review_fix_agent, review_fix_directive = _resolve_for_role(Role.FIXER)
+                fix_directive = FixerDirective(
+                    directive_text=_text_for(Role.FIXER),
+                    feedback=prior_review_feedback,
+                    failure_kind="review",
+                    attempt=attempt,
+                )
                 fix_result = await run_agent(
-                    Role.FIXER,
-                    task,
-                    worktree,
+                    fix_directive,
+                    ctx,
                     repo,
-                    agent_cmd=review_fix_agent,
-                    extra_context=f"[Review failure, attempt {attempt}]\n{prior_review_feedback}",
-                    session_branch=session_branch,
-                    plan_context=plan_context,
-                    plan_conventions=plan_conventions,
-                    directive=review_fix_directive,
+                    agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                 )
                 fix_result.attempt = attempt
