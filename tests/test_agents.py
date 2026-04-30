@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from workbench.agents import AgentResult, Role, TaskStatus, build_prompt, run_agent
-from workbench.directives import ImplementorDirective, PromptContext
+from workbench.agents import AgentResult, Role, TaskStatus, run_agent
+from workbench.directives import FixerDirective, ImplementorDirective, PromptContext
 from workbench.plan_parser import Task
 from workbench.worktree import Worktree
 
@@ -100,25 +100,16 @@ class TestRunAgentSubprocess:
 
 class TestPromptBuilding:
     def test_implementor_prompt_has_branch(self, sample_task, sample_worktree):
-        """Capture the prompt passed to adapter, verify branch name present."""
-        with patch("workbench.agents.get_diff", return_value=""):
-            prompt = build_prompt(
-                role=Role.IMPLEMENTOR,
-                task=sample_task,
-                worktree=sample_worktree,
-                base_branch="main",
-            )
+        """Verify branch name present in rendered implementor prompt."""
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ImplementorDirective().render(ctx)
         assert "wb/test-task" in prompt
 
     def test_fixer_prompt_has_branch(self, sample_task, sample_worktree):
         """Same for fixer role."""
-        with patch("workbench.agents.get_diff", return_value="some diff"):
-            prompt = build_prompt(
-                role=Role.FIXER,
-                task=sample_task,
-                worktree=sample_worktree,
-                base_branch="main",
-            )
+        with patch("workbench.directives.get_diff", return_value="some diff"):
+            ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+            prompt = FixerDirective(feedback="", failure_kind="test", attempt=1).render(ctx)
         assert "wb/test-task" in prompt
 
 

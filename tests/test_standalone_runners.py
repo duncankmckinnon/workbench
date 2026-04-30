@@ -14,13 +14,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.agents import (
-    DEFAULT_DIRECTIVES,
-    PLANNER_DIRECTIVE,
     AgentResult,
     Role,
     TaskStatus,
     _load_plan_guide,
-    build_planner_prompt,
     run_merge_resolver,
     run_planner,
 )
@@ -174,7 +171,7 @@ class TestMergeResolverBackwardCompat:
 
         # Old assembly
         old_parts = [
-            DEFAULT_DIRECTIVES[Role.MERGER],
+            MergerDirective.DEFAULT_TEXT,
             f"Merging branch '{task_branch}' into '{session_branch}'",
             "Conflicted files:\n" + "\n".join(f"  - {c}" for c in conflicts),
             "Read each file, resolve the conflict markers, and stage with git add.",
@@ -200,7 +197,7 @@ class TestMergeResolverBackwardCompat:
             conflicts=conflicts,
         )
         assert "  - README.md" in prompt
-        assert DEFAULT_DIRECTIVES[Role.MERGER] in prompt
+        assert MergerDirective.DEFAULT_TEXT in prompt
 
     def test_many_conflict_files(self, mock_adapter, tmp_repo):
         conflicts = [f"src/mod{i}.py" for i in range(10)]
@@ -331,15 +328,18 @@ class TestMergeResolverSignature:
 
 
 class TestPlannerBackwardCompat:
-    """With no profile, the generated prompt must match build_planner_prompt."""
+    """With no profile, the generated prompt must match PlannerDirective.render()."""
 
-    def test_default_prompt_matches_build_planner_prompt(self, mock_adapter, tmp_repo):
-        """Prompt from PlannerDirective.render() with no override matches
-        the old build_planner_prompt output."""
+    def test_default_prompt_matches_planner_directive(self, mock_adapter, tmp_repo):
+        """Prompt from run_planner with no override matches
+        PlannerDirective(...).render() directly."""
         plan_name = "my-plan"
         output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
 
-        old_prompt = build_planner_prompt(output_path=output_path)
+        expected = PlannerDirective(
+            output_path=output_path,
+            plan_guide=_load_plan_guide(),
+        ).render()
 
         new_prompt = _capture_planner_prompt(
             adapter=mock_adapter,
@@ -347,17 +347,18 @@ class TestPlannerBackwardCompat:
             plan_name=plan_name,
         )
 
-        assert new_prompt == old_prompt
+        assert new_prompt == expected
 
     def test_with_user_prompt_matches(self, mock_adapter, tmp_repo):
         plan_name = "auth-plan"
         output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
         user_prompt = "Add JWT authentication"
 
-        old_prompt = build_planner_prompt(
+        expected = PlannerDirective(
             output_path=output_path,
             user_prompt=user_prompt,
-        )
+            plan_guide=_load_plan_guide(),
+        ).render()
 
         new_prompt = _capture_planner_prompt(
             adapter=mock_adapter,
@@ -366,17 +367,18 @@ class TestPlannerBackwardCompat:
             plan_name=plan_name,
         )
 
-        assert new_prompt == old_prompt
+        assert new_prompt == expected
 
     def test_with_source_content_matches(self, mock_adapter, tmp_repo):
         plan_name = "refactor"
         output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
         source_content = "# Spec\nBuild the widget system.\n"
 
-        old_prompt = build_planner_prompt(
+        expected = PlannerDirective(
             output_path=output_path,
             source_content=source_content,
-        )
+            plan_guide=_load_plan_guide(),
+        ).render()
 
         new_prompt = _capture_planner_prompt(
             adapter=mock_adapter,
@@ -385,7 +387,7 @@ class TestPlannerBackwardCompat:
             plan_name=plan_name,
         )
 
-        assert new_prompt == old_prompt
+        assert new_prompt == expected
 
     def test_with_both_user_and_source_matches(self, mock_adapter, tmp_repo):
         plan_name = "full"
@@ -393,11 +395,12 @@ class TestPlannerBackwardCompat:
         user_prompt = "Focus on security"
         source_content = "# Design\nAdd auth module.\n"
 
-        old_prompt = build_planner_prompt(
+        expected = PlannerDirective(
             output_path=output_path,
             user_prompt=user_prompt,
             source_content=source_content,
-        )
+            plan_guide=_load_plan_guide(),
+        ).render()
 
         new_prompt = _capture_planner_prompt(
             adapter=mock_adapter,
@@ -407,7 +410,7 @@ class TestPlannerBackwardCompat:
             plan_name=plan_name,
         )
 
-        assert new_prompt == old_prompt
+        assert new_prompt == expected
 
 
 # ── run_planner with profile ─────────────────────────────────────────
@@ -423,7 +426,7 @@ class TestPlannerWithProfile:
             profile=profile,
         )
         assert "Custom planner instructions." in prompt
-        assert PLANNER_DIRECTIVE not in prompt
+        assert PlannerDirective.DEFAULT_TEXT not in prompt
 
     def test_profile_empty_directive_uses_default(self, mock_adapter, tmp_repo):
         profile = Profile.default()

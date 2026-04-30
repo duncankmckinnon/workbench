@@ -1,23 +1,22 @@
-"""Tests for plan context/conventions parsing and prompt building."""
+"""Tests for plan context/conventions parsing and directive rendering."""
 
 from __future__ import annotations
 
-import asyncio
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
-from workbench.agents import (
-    DEFAULT_DIRECTIVES,
-    PLANNER_DIRECTIVE,
-    REVIEWER_FOLLOWUP_DIRECTIVE,
-    AgentResult,
-    Role,
-    TaskStatus,
-    build_planner_prompt,
-    build_prompt,
-    run_planner,
+from workbench.agents import AgentResult, Role, TaskStatus, _load_plan_guide, run_planner
+from workbench.directives import (
+    FixerDirective,
+    ImplementorDirective,
+    MergerDirective,
+    PlannerDirective,
+    PromptContext,
+    ReviewerDirective,
+    ReviewerFollowupDirective,
+    TesterDirective,
 )
 from workbench.plan_parser import Task, parse_plan
 from workbench.worktree import Worktree
@@ -111,183 +110,140 @@ def test_parse_plan_case_insensitive_headings(tmp_path: Path):
     assert plan.conventions == "Some conventions."
 
 
-# ── build_prompt tests ────────────────────────────────────────────────
+# ── Directive render tests ───────────────────────────────────────────
 
 
-def test_build_prompt_implementor_has_context(sample_task, sample_worktree):
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
+def test_implementor_has_context(sample_task, sample_worktree):
+    ctx = PromptContext(
         task=sample_task,
         worktree=sample_worktree,
         base_branch="main",
         plan_context="Python 3.12 with asyncio.",
     )
+    prompt = ImplementorDirective().render(ctx)
     assert "## Context" in prompt
     assert "Python 3.12 with asyncio." in prompt
 
 
-def test_build_prompt_implementor_has_conventions(sample_task, sample_worktree):
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
+def test_implementor_has_conventions(sample_task, sample_worktree):
+    ctx = PromptContext(
         task=sample_task,
         worktree=sample_worktree,
         base_branch="main",
         plan_conventions="Use type hints everywhere.",
     )
+    prompt = ImplementorDirective().render(ctx)
     assert "## Conventions" in prompt
     assert "Use type hints everywhere." in prompt
 
 
-def test_build_prompt_implementor_has_branch(sample_task, sample_worktree):
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
-        task=sample_task,
-        worktree=sample_worktree,
-        base_branch="main",
-    )
+def test_implementor_has_branch(sample_task, sample_worktree):
+    ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+    prompt = ImplementorDirective().render(ctx)
     assert "wb/task-1-add-widget" in prompt
     assert "Stay on this branch" in prompt
 
 
-def test_build_prompt_tester_has_branch_pinning(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value="some diff"):
-        prompt = build_prompt(
-            role=Role.TESTER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+def test_tester_has_branch_pinning(sample_task, sample_worktree):
+    with patch("workbench.directives.get_diff", return_value="some diff"):
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = TesterDirective().render(ctx)
     assert "Stay on this branch" in prompt
 
 
-def test_build_prompt_directive_override(sample_task, sample_worktree):
+def test_directive_override(sample_task, sample_worktree):
     custom = "You are a custom agent. Do custom things."
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
-        task=sample_task,
-        worktree=sample_worktree,
-        base_branch="main",
-        directive=custom,
-    )
+    ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+    prompt = ImplementorDirective(directive_text=custom).render(ctx)
     assert custom in prompt
-    assert DEFAULT_DIRECTIVES[Role.IMPLEMENTOR] not in prompt
+    assert ImplementorDirective.DEFAULT_TEXT not in prompt
 
 
-def test_build_prompt_fixer_has_feedback(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value="diff content"):
-        prompt = build_prompt(
-            role=Role.FIXER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-            extra_context="Tests failed: missing return value.",
-        )
+def test_fixer_has_feedback(sample_task, sample_worktree):
+    with patch("workbench.directives.get_diff", return_value="diff content"):
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = FixerDirective(
+            feedback="Tests failed: missing return value.",
+            failure_kind="test",
+            attempt=1,
+        ).render(ctx)
     assert "## Feedback to address" in prompt
     assert "missing return value" in prompt
 
 
-def test_build_prompt_tester_has_diff(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value="+ added line") as mock_diff:
-        prompt = build_prompt(
-            role=Role.TESTER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+def test_tester_has_diff(sample_task, sample_worktree):
+    with patch("workbench.directives.get_diff", return_value="+ added line") as mock_diff:
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = TesterDirective().render(ctx)
     mock_diff.assert_called_once_with(sample_worktree, "main")
     assert "## Changes made" in prompt
     assert "+ added line" in prompt
 
 
-def test_build_prompt_reviewer_has_diff(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value="- removed line") as mock_diff:
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+def test_reviewer_has_diff(sample_task, sample_worktree):
+    with patch("workbench.directives.get_diff", return_value="- removed line") as mock_diff:
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerDirective().render(ctx)
     mock_diff.assert_called_once_with(sample_worktree, "main")
     assert "## Diff to review" in prompt
     assert "- removed line" in prompt
 
 
-def test_build_prompt_implementor_has_task_and_files(sample_task, sample_worktree):
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
-        task=sample_task,
-        worktree=sample_worktree,
-        base_branch="main",
-    )
+def test_implementor_has_task_and_files(sample_task, sample_worktree):
+    ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+    prompt = ImplementorDirective().render(ctx)
     assert "## Task: Add widget" in prompt
     assert "Implement the widget module." in prompt
     assert "src/widget.py" in prompt
     assert "Implement this task and commit your changes." in prompt
 
 
-def test_build_prompt_default_directive_used(sample_task, sample_worktree):
-    prompt = build_prompt(
-        role=Role.IMPLEMENTOR,
-        task=sample_task,
-        worktree=sample_worktree,
-        base_branch="main",
-    )
-    assert DEFAULT_DIRECTIVES[Role.IMPLEMENTOR] in prompt
+def test_default_directive_used(sample_task, sample_worktree):
+    ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+    prompt = ImplementorDirective().render(ctx)
+    assert ImplementorDirective.DEFAULT_TEXT in prompt
 
 
-def test_build_prompt_merger_has_branch_pinning(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value=""):
-        prompt = build_prompt(
-            role=Role.MERGER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+def test_merger_has_branch_info():
+    prompt = MergerDirective(
+        task_branch="wb/task-1-add-widget",
+        session_branch="main",
+        conflicts=["src/foo.py"],
+    ).render()
     assert "wb/task-1-add-widget" in prompt
-    assert "Stay on this branch" in prompt
-    assert "Resolve all merge conflicts" in prompt
+    assert "resolve ALL merge conflicts" in prompt
 
 
-def test_build_prompt_merger_has_directive(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value=""):
-        prompt = build_prompt(
-            role=Role.MERGER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
-    assert DEFAULT_DIRECTIVES[Role.MERGER] in prompt
+def test_merger_has_directive():
+    prompt = MergerDirective(
+        task_branch="feature/x",
+        session_branch="main",
+        conflicts=["a.py"],
+    ).render()
+    assert MergerDirective.DEFAULT_TEXT in prompt
 
 
-def test_build_prompt_reviewer_no_branch_pinning(sample_task, sample_worktree):
-    with patch("workbench.agents.get_diff", return_value=""):
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+def test_reviewer_no_branch_pinning(sample_task, sample_worktree):
+    with patch("workbench.directives.get_diff", return_value=""):
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerDirective().render(ctx)
     assert "Stay on this branch" not in prompt
 
 
 # ── Reviewer follow-up mode ──────────────────────────────────────────
 
 
-def test_build_prompt_reviewer_followup_uses_diff_since(sample_task, sample_worktree):
-    """With prior_review_sha set, REVIEWER uses get_diff_since against that SHA."""
+def test_reviewer_followup_uses_diff_since(sample_task, sample_worktree):
+    """With prior_review_sha set, ReviewerFollowupDirective uses get_diff_since."""
     with (
-        patch("workbench.agents.get_diff_since", return_value="+ fixer line") as mock_since,
-        patch("workbench.agents.get_diff") as mock_full,
+        patch("workbench.directives.get_diff_since", return_value="+ fixer line") as mock_since,
+        patch("workbench.directives.get_diff") as mock_full,
     ):
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
-            extra_context="Missing null check in foo().",
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerFollowupDirective(
             prior_review_sha="abc123",
-        )
+            prior_feedback="Missing null check in foo().",
+        ).render(ctx)
 
     mock_since.assert_called_once_with(sample_worktree, "abc123")
     mock_full.assert_not_called()
@@ -296,35 +252,27 @@ def test_build_prompt_reviewer_followup_uses_diff_since(sample_task, sample_work
     assert "## Diff to review" not in prompt
 
 
-def test_build_prompt_reviewer_followup_includes_prior_feedback(sample_task, sample_worktree):
-    """Follow-up review renders extra_context as the prior feedback section."""
-    with patch("workbench.agents.get_diff_since", return_value=""):
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
-            extra_context="Missing null check in foo().",
+def test_reviewer_followup_includes_prior_feedback(sample_task, sample_worktree):
+    """Follow-up review renders prior_feedback as the prior feedback section."""
+    with patch("workbench.directives.get_diff_since", return_value=""):
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerFollowupDirective(
             prior_review_sha="abc123",
-        )
+            prior_feedback="Missing null check in foo().",
+        ).render(ctx)
     assert "## Prior review feedback" in prompt
     assert "Missing null check in foo()." in prompt
     assert "Verify each item in the prior review feedback" in prompt
 
 
-def test_build_prompt_reviewer_first_pass_ignores_prior_sha_param(sample_task, sample_worktree):
-    """Without prior_review_sha, REVIEWER behaves as the comprehensive first pass."""
+def test_reviewer_first_pass_ignores_prior_sha(sample_task, sample_worktree):
+    """Without prior_review_sha, ReviewerDirective behaves as the comprehensive first pass."""
     with (
-        patch("workbench.agents.get_diff", return_value="- full diff") as mock_full,
-        patch("workbench.agents.get_diff_since") as mock_since,
+        patch("workbench.directives.get_diff", return_value="- full diff") as mock_full,
+        patch("workbench.directives.get_diff_since") as mock_since,
     ):
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-        )
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerDirective().render(ctx)
 
     mock_full.assert_called_once_with(sample_worktree, "main")
     mock_since.assert_not_called()
@@ -333,18 +281,14 @@ def test_build_prompt_reviewer_first_pass_ignores_prior_sha_param(sample_task, s
     assert "## Prior review feedback" not in prompt
 
 
-def test_build_prompt_reviewer_followup_action_line(sample_task, sample_worktree):
+def test_reviewer_followup_action_line(sample_task, sample_worktree):
     """Follow-up review swaps the default action line for the verification instruction."""
-    with patch("workbench.agents.get_diff_since", return_value=""):
-        prompt = build_prompt(
-            role=Role.REVIEWER,
-            task=sample_task,
-            worktree=sample_worktree,
-            base_branch="main",
-            directive=REVIEWER_FOLLOWUP_DIRECTIVE,
-            extra_context="prior feedback",
+    with patch("workbench.directives.get_diff_since", return_value=""):
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        prompt = ReviewerFollowupDirective(
             prior_review_sha="abc123",
-        )
+            prior_feedback="prior feedback",
+        ).render(ctx)
     assert "Provide your review." not in prompt
     assert "Do not raise new issues." in prompt
 
@@ -352,49 +296,67 @@ def test_build_prompt_reviewer_followup_action_line(sample_task, sample_worktree
 # ── Planner prompt ───────────────────────────────────────────────────
 
 
-def test_build_planner_prompt_contains_directive():
-    prompt = build_planner_prompt(Path("/repo/plans/auth.md"), user_prompt="Add auth")
-    assert PLANNER_DIRECTIVE in prompt
+def test_planner_prompt_contains_directive():
+    prompt = PlannerDirective(
+        output_path=Path("/repo/plans/auth.md"),
+        user_prompt="Add auth",
+        plan_guide=_load_plan_guide(),
+    ).render()
+    assert PlannerDirective.DEFAULT_TEXT in prompt
 
 
-def test_build_planner_prompt_contains_user_request():
-    prompt = build_planner_prompt(Path("/repo/plan.md"), user_prompt="Add JWT authentication")
+def test_planner_prompt_contains_user_request():
+    prompt = PlannerDirective(
+        output_path=Path("/repo/plan.md"),
+        user_prompt="Add JWT authentication",
+        plan_guide=_load_plan_guide(),
+    ).render()
     assert "## User Request" in prompt
     assert "Add JWT authentication" in prompt
 
 
-def test_build_planner_prompt_contains_output_path():
+def test_planner_prompt_contains_output_path():
     output = Path("/repo/.workbench/plans/auth.md")
-    prompt = build_planner_prompt(output, user_prompt="Add auth")
+    prompt = PlannerDirective(
+        output_path=output,
+        user_prompt="Add auth",
+        plan_guide=_load_plan_guide(),
+    ).render()
     assert str(output) in prompt
 
 
-def test_build_planner_prompt_contains_plan_guide():
-    prompt = build_planner_prompt(Path("/repo/plan.md"), user_prompt="Add auth")
+def test_planner_prompt_contains_plan_guide():
+    prompt = PlannerDirective(
+        output_path=Path("/repo/plan.md"),
+        user_prompt="Add auth",
+        plan_guide=_load_plan_guide(),
+    ).render()
     assert "## Plan Writing Guide" in prompt
     assert "## Plan Format" in prompt
     assert "## Task:" in prompt
 
 
-def test_build_planner_prompt_from_source_document():
+def test_planner_prompt_from_source_document():
     """Source content is rendered as a Source Document section."""
-    prompt = build_planner_prompt(
-        Path("/repo/plan.md"),
+    prompt = PlannerDirective(
+        output_path=Path("/repo/plan.md"),
         source_content="# Claude Plan\n\n## Step 1\nDo something\n",
-    )
+        plan_guide=_load_plan_guide(),
+    ).render()
     assert "## Source Document" in prompt
     assert "Claude Plan" in prompt
     assert "Transform it into a workbench plan" in prompt
     assert "## User Request" not in prompt
 
 
-def test_build_planner_prompt_source_with_guidance():
+def test_planner_prompt_source_with_guidance():
     """Both source and prompt: prompt becomes Additional Guidance."""
-    prompt = build_planner_prompt(
-        Path("/repo/plan.md"),
+    prompt = PlannerDirective(
+        output_path=Path("/repo/plan.md"),
         user_prompt="Focus on security",
         source_content="# Spec\nBuild a widget.\n",
-    )
+        plan_guide=_load_plan_guide(),
+    ).render()
     assert "## Source Document" in prompt
     assert "Build a widget" in prompt
     assert "## Additional Guidance" in prompt
@@ -407,9 +369,13 @@ def test_build_planner_prompt_source_with_guidance():
 
 def test_run_planner_success(tmp_path):
     """run_planner spawns agent and returns result on success."""
+    from unittest.mock import MagicMock
+
     mock_adapter = MagicMock()
     mock_adapter.build_command.return_value = ["echo", "ok"]
     mock_adapter.parse_output.return_value = ("Plan generated.", {})
+
+    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -429,9 +395,13 @@ def test_run_planner_success(tmp_path):
 
 def test_run_planner_failure(tmp_path):
     """run_planner returns FAILED when the subprocess exits non-zero."""
+    from unittest.mock import MagicMock
+
     mock_adapter = MagicMock()
     mock_adapter.build_command.return_value = ["false"]
     mock_adapter.parse_output.return_value = ("", {})
+
+    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -448,8 +418,12 @@ def test_run_planner_failure(tmp_path):
 
 def test_run_planner_exception(tmp_path):
     """run_planner returns FAILED when adapter raises."""
+    from unittest.mock import MagicMock
+
     mock_adapter = MagicMock()
     mock_adapter.build_command.side_effect = RuntimeError("boom")
+
+    import asyncio
 
     result = asyncio.run(
         run_planner(
@@ -467,6 +441,8 @@ def test_run_planner_exception(tmp_path):
 
 def test_run_planner_with_source_content(tmp_path):
     """run_planner passes source_content through to the prompt."""
+    from unittest.mock import MagicMock
+
     captured_prompt = {}
 
     mock_adapter = MagicMock()
@@ -477,6 +453,8 @@ def test_run_planner_with_source_content(tmp_path):
 
     mock_adapter.build_command.side_effect = capture_command
     mock_adapter.parse_output.return_value = ("ok", {})
+
+    import asyncio
 
     asyncio.run(
         run_planner(

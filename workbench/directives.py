@@ -80,7 +80,7 @@ def _render_pipeline(
 ) -> str:
     """Assemble the standard pipeline prompt sections.
 
-    Section order matches build_prompt in agents.py:
+    Section order:
       1. Directive text
       2. Branch pinning (optional)
       3. Plan context (if non-empty)

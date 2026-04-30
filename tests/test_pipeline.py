@@ -7,15 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from workbench.agents import (
-    DEFAULT_DIRECTIVES,
-    REVIEWER_FOLLOWUP_DIRECTIVE,
-    TDD_DIRECTIVES,
-    AgentResult,
-    Role,
-    TaskStatus,
-    run_pipeline,
-)
+from workbench.agents import AgentResult, Role, TaskStatus, run_pipeline
 from workbench.directives import (
     FixerDirective,
     ImplementorDirective,
