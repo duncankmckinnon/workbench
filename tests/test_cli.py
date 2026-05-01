@@ -942,6 +942,280 @@ class TestProfileInit:
         # Rich may wrap long paths across lines, so check without newlines
         assert "profile.yaml" in result.output.replace("\n", "")
 
+    def test_profile_init_set_two_part_agent(self, tmp_path):
+        """wb profile init --set reviewer.agent=gemini writes that agent."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "init", "--repo", str(repo), "--set", "reviewer.agent=gemini"],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["reviewer"]["agent"] == "gemini"
+
+    def test_profile_init_set_two_part_directive(self, tmp_path):
+        """wb profile init --set reviewer.directive=Custom replaces the directive."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "init", "--repo", str(repo), "--set", "reviewer.directive=Custom"],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["reviewer"]["directive"].strip() == "Custom"
+
+    def test_profile_init_set_two_part_directive_extend(self, tmp_path):
+        """wb profile init --set reviewer.directive_extend=Extra writes the extended directive."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "reviewer.directive_extend=Extra",
+            ],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        directive = data["roles"]["reviewer"]["directive"]
+        assert directive.endswith("Extra")
+
+    def test_profile_init_set_three_part_tdd_directive(self, tmp_path):
+        """wb profile init --set tester.tdd.directive=Custom writes the sub-mode."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "tester.tdd.directive=Custom TDD",
+            ],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["tester"]["tdd"]["directive"].strip() == "Custom TDD"
+
+    def test_profile_init_set_three_part_tdd_directive_extend(self, tmp_path):
+        """wb profile init --set tester.tdd.directive_extend=Extra appends."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "tester.tdd.directive_extend=Extra",
+            ],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        directive = data["roles"]["tester"]["tdd"]["directive"]
+        assert directive.endswith("Extra")
+
+    def test_profile_init_set_three_part_followup_directive(self, tmp_path):
+        """wb profile init --set reviewer.followup.directive=Custom writes the sub-mode."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "reviewer.followup.directive=Custom FU",
+            ],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["reviewer"]["followup"]["directive"].strip() == "Custom FU"
+
+    def test_profile_init_set_invalid_format_no_equals(self, tmp_path):
+        """wb profile init --set foo (no `=`) errors."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo), "--set", "foo"])
+
+        assert result.exit_code != 0
+        assert "Invalid --set format" in result.output
+
+    def test_profile_init_set_invalid_format_one_part(self, tmp_path):
+        """wb profile init --set foo=bar errors: key needs at least one dot."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(main, ["profile", "init", "--repo", str(repo), "--set", "foo=bar"])
+
+        assert result.exit_code != 0
+        assert "<role>.<field>" in result.output
+
+    def test_profile_init_set_invalid_format_four_part(self, tmp_path):
+        """wb profile init --set a.b.c.d=x errors with format message."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "tester.tdd.directive.extra=x",
+            ],
+        )
+
+        assert result.exit_code != 0
+        assert "<role>.<field> or <role>.<sub_mode>.<field>" in result.output
+
+    def test_profile_init_set_invalid_role(self, tmp_path):
+        """wb profile init --set bogus.agent=claude errors: unknown role."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "init", "--repo", str(repo), "--set", "bogus.agent=claude"]
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown role" in result.output
+
+    def test_profile_init_set_invalid_field(self, tmp_path):
+        """wb profile init --set reviewer.bogus=x errors: unknown field."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main, ["profile", "init", "--repo", str(repo), "--set", "reviewer.bogus=x"]
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown field" in result.output
+
+    def test_profile_init_set_invalid_submode(self, tmp_path):
+        """wb profile init --set tester.bogus.directive=x errors: unknown sub-mode."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "init", "--repo", str(repo), "--set", "tester.bogus.directive=x"],
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown sub-mode" in result.output
+
+    def test_profile_init_set_role_does_not_support_submode(self, tmp_path):
+        """wb profile init --set merger.tdd.directive=x errors: merger has no tdd."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "init", "--repo", str(repo), "--set", "merger.tdd.directive=x"],
+        )
+
+        assert result.exit_code != 0
+        assert "merger does not support a 'tdd' sub-mode" in result.output
+
+    def test_profile_init_set_invalid_submode_field(self, tmp_path):
+        """wb profile init --set tester.tdd.agent=gemini errors: sub-modes have no agent."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            ["profile", "init", "--repo", str(repo), "--set", "tester.tdd.agent=gemini"],
+        )
+
+        assert result.exit_code != 0
+        assert "Unknown sub-mode field" in result.output
+
+    def test_profile_init_set_multiple_overrides(self, tmp_path):
+        """Multiple --set flags all apply, mixing two-part and three-part keys."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+        (repo / ".workbench").mkdir()
+
+        runner = CliRunner()
+        result = runner.invoke(
+            main,
+            [
+                "profile",
+                "init",
+                "--repo",
+                str(repo),
+                "--set",
+                "reviewer.agent=gemini",
+                "--set",
+                "tester.tdd.directive=Custom TDD",
+                "--set",
+                "reviewer.followup.directive=Custom FU",
+            ],
+        )
+
+        assert result.exit_code == 0
+        data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
+        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        assert data["roles"]["tester"]["tdd"]["directive"].strip() == "Custom TDD"
+        assert data["roles"]["reviewer"]["followup"]["directive"].strip() == "Custom FU"
+
 
 class TestProfileShow:
     def test_profile_show_output(self, tmp_path):
@@ -960,6 +1234,151 @@ class TestProfileShow:
         assert "reviewer" in result.output
         assert "fixer" in result.output
         assert "claude" in result.output
+
+    def test_profile_show_marks_unset_directive_as_default(self, tmp_path):
+        """When a role's directive is empty, profile show prints '(default)'."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "show", "--repo", str(repo)])
+
+        assert result.exit_code == 0
+        assert "(default)" in result.output
+
+    def test_profile_show_does_not_mark_set_directive_as_default(self, tmp_path):
+        """When a directive is overridden, '(default)' is not shown for that role."""
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump(
+                {
+                    "roles": {
+                        "implementor": {"directive": "Custom impl directive"},
+                        "tester": {"directive": "Custom test directive"},
+                        "reviewer": {"directive": "Custom review directive"},
+                        "fixer": {"directive": "Custom fix directive"},
+                        "merger": {"directive": "Custom merge directive"},
+                        "planner": {"directive": "Custom plan directive"},
+                    }
+                }
+            )
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main,
+                ["profile", "show", "--repo", str(repo), "--profile", str(profile_path)],
+            )
+
+        assert result.exit_code == 0
+        assert "(default)" not in result.output
+        assert "Custom impl directive" in result.output
+
+    def test_profile_show_marks_unset_submode_directive_as_default(self, tmp_path):
+        """Empty sub-mode directive lines also display '(default)'."""
+        profile_path = tmp_path / "custom.yaml"
+        # Write a sub-mode block but without a directive value, forcing the empty
+        # sub-mode directive path.
+        profile_path.write_text(yaml.dump({"roles": {"tester": {"tdd": {"directive": ""}}}}))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main,
+                ["profile", "show", "--repo", str(repo), "--profile", str(profile_path)],
+            )
+
+        assert result.exit_code == 0
+        assert "tester.tdd.directive" in result.output
+        assert "(default)" in result.output
+
+    def test_profile_show_full_prints_default_text(self, tmp_path):
+        """wb profile show --full prints the full default directive for unset roles."""
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(main, ["profile", "show", "--repo", str(repo), "--full"])
+
+        assert result.exit_code == 0
+        # All roles labelled as using defaults
+        for role in ("implementor", "tester", "reviewer", "fixer", "merger", "planner"):
+            assert role in result.output
+        assert "(default)" in result.output
+        # Full default text must come through. Rich wraps to terminal width, so
+        # we check for a short, distinctive sentinel substring rather than a full line.
+        from workbench.directives import ImplementorDirective
+
+        sentinel = ImplementorDirective.DEFAULT_TEXT.strip().split()[0:4]
+        # First few words should appear contiguously somewhere in output.
+        assert " ".join(sentinel) in result.output
+
+    def test_profile_show_full_prints_set_directive_without_default_marker(self, tmp_path):
+        """wb profile show --full uses overridden text and omits the '(default)' marker for it."""
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(
+            yaml.dump({"roles": {"reviewer": {"directive": "Reviewer override line."}}})
+        )
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main,
+                [
+                    "profile",
+                    "show",
+                    "--repo",
+                    str(repo),
+                    "--profile",
+                    str(profile_path),
+                    "--full",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "Reviewer override line." in result.output
+        # The reviewer block should not be flagged as default
+        reviewer_section = result.output.split("reviewer", 1)[1].split("fixer", 1)[0]
+        assert "(default)" not in reviewer_section
+
+    def test_profile_show_full_prints_full_submode_default(self, tmp_path):
+        """wb profile show --full prints the full sub-mode default text when sub-mode is unset."""
+        # Trigger a sub-mode block by writing it with an empty directive
+        profile_path = tmp_path / "custom.yaml"
+        profile_path.write_text(yaml.dump({"roles": {"tester": {"tdd": {"directive": ""}}}}))
+        repo = tmp_path / "repo"
+        repo.mkdir()
+
+        runner = CliRunner()
+        with patch("workbench.cli.Path.home", return_value=tmp_path / "fakehome"):
+            result = runner.invoke(
+                main,
+                [
+                    "profile",
+                    "show",
+                    "--repo",
+                    str(repo),
+                    "--profile",
+                    str(profile_path),
+                    "--full",
+                ],
+            )
+
+        assert result.exit_code == 0
+        assert "tester.tdd.directive (default)" in result.output
+        from workbench.directives import TddTesterDirective
+
+        sentinel = TddTesterDirective.DEFAULT_TEXT.strip().split()[0:4]
+        assert " ".join(sentinel) in result.output
 
     def test_profile_show_with_explicit_path(self, tmp_path):
         """wb profile show --profile <path> uses the explicit profile."""

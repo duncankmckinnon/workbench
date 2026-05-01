@@ -12,10 +12,48 @@ import click
 import yaml
 from rich.console import Console
 
+from .directives import (
+    FixerDirective,
+    ImplementorDirective,
+    MergerDirective,
+    PlannerDirective,
+    ReviewerDirective,
+    ReviewerFollowupDirective,
+    TddImplementorDirective,
+    TddTesterDirective,
+    TesterDirective,
+)
 from .orchestrator import merge_unmerged, run_plan
 from .plan_parser import parse_plan
 from .profile import ModeConfig, Profile, RoleConfig
 from .tmux import check_tmux_available
+
+# Maps role name to the Directive class whose DEFAULT_TEXT seeds the role.
+_ROLE_DIRECTIVE_CLASSES = {
+    "implementor": ImplementorDirective,
+    "tester": TesterDirective,
+    "reviewer": ReviewerDirective,
+    "fixer": FixerDirective,
+    "merger": MergerDirective,
+    "planner": PlannerDirective,
+}
+
+# Maps (role, sub_mode) to the Directive class whose DEFAULT_TEXT seeds the sub-mode.
+_SUBMODE_DIRECTIVE_CLASSES = {
+    ("implementor", "tdd"): TddImplementorDirective,
+    ("tester", "tdd"): TddTesterDirective,
+    ("reviewer", "followup"): ReviewerFollowupDirective,
+}
+
+
+def _default_directive_text(role: str, sub_mode: str | None = None) -> str:
+    """Return the built-in DEFAULT_TEXT for a role (or role.sub_mode)."""
+    if sub_mode is not None:
+        cls = _SUBMODE_DIRECTIVE_CLASSES.get((role, sub_mode))
+    else:
+        cls = _ROLE_DIRECTIVE_CLASSES.get(role)
+    return cls.DEFAULT_TEXT if cls else ""
+
 
 console = Console()
 
@@ -1137,7 +1175,12 @@ def profile_init(
     default=None,
     type=click.Path(exists=True, path_type=Path),
 )
-def profile_show(repo: Path | None, name: str | None, profile_path: Path | None):
+@click.option(
+    "--full",
+    is_flag=True,
+    help="Show the full directive text (including built-in defaults).",
+)
+def profile_show(repo: Path | None, name: str | None, profile_path: Path | None, full: bool):
     """Show the resolved profile for each role."""
     repo = repo or Path.cwd()
     resolved = Profile.resolve(
@@ -1146,22 +1189,65 @@ def profile_show(repo: Path | None, name: str | None, profile_path: Path | None)
         profile_name=name,
     )
 
+    if full:
+        _profile_show_full(resolved)
+        return
+
     console.print(f"{'Role':<15} {'Agent':<12} {'Directive'}")
     console.print("-" * 60)
     for role_name in _VALID_ROLES:
         cfg: RoleConfig = getattr(resolved, role_name)
-        directive_preview = cfg.directive.split("\n")[0][:60] if cfg.directive else ""
+        directive_preview = cfg.directive.split("\n")[0][:60] if cfg.directive else "(default)"
         console.print(f"{role_name:<15} {cfg.agent:<12} {directive_preview}")
         if cfg.tdd is not None:
-            tdd_preview = cfg.tdd.directive.split("\n")[0][:60] if cfg.tdd.directive else ""
+            tdd_preview = (
+                cfg.tdd.directive.split("\n")[0][:60] if cfg.tdd.directive else "(default)"
+            )
             tdd_key = f"  {role_name}.tdd.directive"
             console.print(f"{tdd_key:<28} {tdd_preview}")
         if cfg.followup is not None:
             fu_preview = (
-                cfg.followup.directive.split("\n")[0][:60] if cfg.followup.directive else ""
+                cfg.followup.directive.split("\n")[0][:60]
+                if cfg.followup.directive
+                else "(default)"
             )
             fu_key = f"  {role_name}.followup.directive"
             console.print(f"{fu_key:<28} {fu_preview}")
+
+
+def _profile_show_full(resolved: Profile) -> None:
+    """Print every role with its full directive text, using built-in defaults when unset."""
+    for role_name in _VALID_ROLES:
+        cfg: RoleConfig = getattr(resolved, role_name)
+        console.print(f"[bold]{role_name}[/bold] (agent: {cfg.agent})")
+        if cfg.directive:
+            console.print("  directive:")
+            source = "set"
+        else:
+            console.print("  directive (default):")
+            source = "default"
+        text = cfg.directive if source == "set" else _default_directive_text(role_name)
+        console.print(_indent(text, "    "))
+
+        for sub_mode, mode_cfg in (("tdd", cfg.tdd), ("followup", cfg.followup)):
+            if mode_cfg is None:
+                continue
+            label = f"{role_name}.{sub_mode}.directive"
+            if mode_cfg.directive:
+                console.print(f"  {label}:")
+                text = mode_cfg.directive
+            else:
+                console.print(f"  {label} (default):")
+                text = _default_directive_text(role_name, sub_mode)
+            console.print(_indent(text, "    "))
+        console.print()
+
+
+def _indent(text: str, prefix: str) -> str:
+    """Indent every line of `text` by `prefix`."""
+    if not text:
+        return f"{prefix}(empty)"
+    return "\n".join(f"{prefix}{line}" for line in text.splitlines())
 
 
 @profile.command("set")
