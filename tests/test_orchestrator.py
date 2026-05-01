@@ -47,7 +47,6 @@ async def test_run_plan_tdd_mode(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
 
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
@@ -80,7 +79,6 @@ async def test_run_plan_tdd_false_by_default(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
 
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
@@ -119,7 +117,6 @@ async def test_run_plan_with_profile_path(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
         patch("workbench.orchestrator.Profile.resolve", return_value=fake_profile) as mock_resolve,
     ):
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
@@ -153,7 +150,6 @@ async def test_run_plan_deletes_branches_after_merge(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch") as mock_delete,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
@@ -179,7 +175,6 @@ async def test_run_plan_keeps_branches_when_flag_set(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch") as mock_delete,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
@@ -206,7 +201,6 @@ async def test_run_plan_keeps_branches_on_failed_merge(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch") as mock_delete,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(
@@ -267,7 +261,6 @@ async def test_retry_failed_retries_crashed_task(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -348,7 +341,6 @@ async def test_retry_failed_skips_exhausted_retries(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -392,7 +384,6 @@ async def test_retry_failed_disabled_by_default(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -448,7 +439,6 @@ async def test_fail_fast_stops_after_first_wave_failure(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -496,7 +486,6 @@ async def test_fail_fast_allows_full_run_on_success(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -537,7 +526,6 @@ async def test_only_failed_skips_completed_tasks(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/bad-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -576,7 +564,6 @@ async def test_only_failed_runs_all_when_no_status(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -617,7 +604,6 @@ async def test_only_failed_ignores_different_session(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -672,7 +658,6 @@ async def test_end_wave_stops_after_specified_wave(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -704,7 +689,6 @@ async def test_end_wave_none_runs_all_waves(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -746,7 +730,6 @@ async def test_retry_failed_with_fail_fast(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -788,7 +771,6 @@ async def test_status_json_written_after_task(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -828,7 +810,6 @@ async def test_status_json_records_failed_task(tmp_path):
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -860,7 +841,6 @@ async def test_status_json_marks_merged_after_merge(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -1055,7 +1035,6 @@ async def test_task_filter_runs_only_matching_tasks(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/bad-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -1094,7 +1073,6 @@ async def test_task_filter_by_slug(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/good-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -1136,7 +1114,6 @@ async def test_task_filter_preserves_other_status(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/bad-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -1178,7 +1155,6 @@ async def test_task_filter_none_runs_all(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
@@ -1216,7 +1192,6 @@ async def test_task_filter_multiple(tmp_path):
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
-        patch("workbench.orchestrator.get_main_branch", return_value="main"),
     ):
         mock_wt.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
