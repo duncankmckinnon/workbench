@@ -23,7 +23,6 @@ from .worktree import (
     create_session_branch,
     create_worktree,
     delete_branch,
-    get_main_branch,
     get_merged_branches,
     merge_into_session,
     push_session_branch,

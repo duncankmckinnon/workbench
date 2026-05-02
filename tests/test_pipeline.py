@@ -7,17 +7,20 @@ from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
-from workbench.agents import (
-    DEFAULT_DIRECTIVES,
-    REVIEWER_FOLLOWUP_DIRECTIVE,
-    TDD_DIRECTIVES,
-    AgentResult,
-    Role,
-    TaskStatus,
-    run_pipeline,
+from workbench.agents import AgentResult, Role, TaskStatus, run_pipeline
+from workbench.directives import (
+    FixerDirective,
+    ImplementorDirective,
+    PipelineDirective,
+    PromptContext,
+    ReviewerDirective,
+    ReviewerFollowupDirective,
+    TddImplementorDirective,
+    TddTesterDirective,
+    TesterDirective,
 )
 from workbench.plan_parser import Task
-from workbench.profile import Profile, RoleConfig
+from workbench.profile import ModeConfig, Profile, RoleConfig
 from workbench.worktree import Worktree
 
 
@@ -56,14 +59,19 @@ class TestTDDPipelineFullPass:
         """TDD: tester writes tests (DONE), implementor implements (PASS verdict),
         test verification passes, review passes.
         Verify roles are: TESTER, IMPLEMENTOR, TESTER, REVIEWER."""
-        side_effects = [
-            _done_result(Role.TESTER),  # TDD Phase 1: write failing tests (no verdict needed)
-            _pass_result(Role.IMPLEMENTOR),  # TDD Phase 2: implement (tests pass + comprehensive)
-            _pass_result(Role.TESTER),  # Verification: test
-            _pass_result(Role.REVIEWER),  # Review
-        ]
 
-        with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(role)
+            if isinstance(directive, TddImplementorDirective):
+                return _pass_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -86,11 +94,14 @@ class TestTDDPipelineFullPass:
 class TestTDDTestWriteFails:
     def test_pipeline_tdd_test_write_fails(self, sample_task, sample_worktree, tmp_path):
         """TDD tester crashes -> pipeline stops after 1 result."""
-        side_effects = [
-            _crash_result(Role.TESTER),
-        ]
 
-        with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _crash_result(directive.role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -109,12 +120,16 @@ class TestTDDTestWriteFails:
 class TestTDDImplVerdictFail:
     def test_pipeline_tdd_impl_verdict_fail(self, sample_task, sample_worktree, tmp_path):
         """TDD implementor returns VERDICT: FAIL (tests fail or not comprehensive) -> pipeline stops."""
-        side_effects = [
-            _done_result(Role.TESTER),
-            _fail_verdict_result(Role.IMPLEMENTOR),
-        ]
 
-        with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(directive.role)
+            return _fail_verdict_result(directive.role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -134,12 +149,16 @@ class TestTDDImplVerdictFail:
 class TestTDDImplFails:
     def test_pipeline_tdd_impl_fails(self, sample_task, sample_worktree, tmp_path):
         """TDD implementation crashes -> pipeline stops after 2 results."""
-        side_effects = [
-            _done_result(Role.TESTER),
-            _crash_result(Role.IMPLEMENTOR),
-        ]
 
-        with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(directive.role)
+            return _crash_result(directive.role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -158,18 +177,20 @@ class TestTDDImplFails:
 
 class TestTDDDirectives:
     def test_pipeline_tdd_uses_tdd_directives(self, sample_task, sample_worktree, tmp_path):
-        """Verify TDD_DIRECTIVES are used (not DEFAULT_DIRECTIVES) when no override provided."""
-        captured_directives = []
+        """Verify TDD directive DEFAULT_TEXT is used when no override provided."""
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_directives.append(kwargs.get("directive"))
-            role = args[0]
-            if role == Role.TESTER and len(captured_directives) == 1:
-                return _done_result(role)  # TDD tester: no verdict
-            return _pass_result(role)
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(directive.role)
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -179,31 +200,35 @@ class TestTDDDirectives:
                 )
             )
 
-        # First call: TDD tester directive
-        assert captured_directives[0] == TDD_DIRECTIVES[Role.TESTER]
-        # Second call: TDD implementor directive
-        assert captured_directives[1] == TDD_DIRECTIVES[Role.IMPLEMENTOR]
+        # First call: TDD tester directive uses its DEFAULT_TEXT
+        assert isinstance(captured[0], TddTesterDirective)
+        assert captured[0].resolved_text() == TddTesterDirective.DEFAULT_TEXT
+        # Second call: TDD implementor directive uses its DEFAULT_TEXT
+        assert isinstance(captured[1], TddImplementorDirective)
+        assert captured[1].resolved_text() == TddImplementorDirective.DEFAULT_TEXT
 
     def test_pipeline_tdd_directive_override(self, sample_task, sample_worktree, tmp_path):
         """Custom directives dict overrides TDD defaults."""
         custom_tester = "Custom tester directive"
         custom_impl = "Custom implementor directive"
-        captured_directives = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_directives.append(kwargs.get("directive"))
-            role = args[0]
-            if role == Role.TESTER and len(captured_directives) == 1:
-                return _done_result(role)  # TDD tester: no verdict
-            return _pass_result(role)
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(directive.role)
+            return _pass_result(directive.role)
 
         custom_directives = {
             Role.TESTER: custom_tester,
             Role.IMPLEMENTOR: custom_impl,
         }
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -214,8 +239,8 @@ class TestTDDDirectives:
                 )
             )
 
-        assert captured_directives[0] == custom_tester
-        assert captured_directives[1] == custom_impl
+        assert captured[0].resolved_text() == custom_tester
+        assert captured[1].resolved_text() == custom_impl
 
 
 class TestTDDVerificationFailsThenFixes:
@@ -223,16 +248,29 @@ class TestTDDVerificationFailsThenFixes:
         self, sample_task, sample_worktree, tmp_path
     ):
         """After TDD impl, verification test fails, fixer runs, test passes on retry."""
-        side_effects = [
-            _done_result(Role.TESTER),  # TDD Phase 1: write tests (no verdict)
-            _pass_result(Role.IMPLEMENTOR),  # TDD Phase 2: implement (PASS verdict)
-            _fail_verdict_result(Role.TESTER),  # Verification: test FAILS
-            _done_result(Role.FIXER),  # Fixer addresses issues
-            _pass_result(Role.TESTER),  # Verification retry: PASS
-            _pass_result(Role.REVIEWER),  # Review: PASS
-        ]
+        call_count: dict[str, int] = {}
 
-        with patch("workbench.agents.run_agent", new_callable=AsyncMock, side_effect=side_effects):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            key = type(directive).__name__
+            call_count[key] = call_count.get(key, 0) + 1
+            if isinstance(directive, TddTesterDirective):
+                return _done_result(role)
+            if isinstance(directive, TddImplementorDirective):
+                return _pass_result(role)
+            if isinstance(directive, TesterDirective):
+                tester_n = call_count.get("TesterDirective", 0)
+                if tester_n == 1:
+                    return _fail_verdict_result(role)
+                return _pass_result(role)
+            if isinstance(directive, FixerDirective):
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -267,13 +305,15 @@ class TestPipelineUsesProfileAgent:
 
         captured_calls: list[dict] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append(
-                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
-            )
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured_calls.append({"role": role, "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            return _pass_result(role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -298,19 +338,22 @@ class TestPipelineUsesProfileAgent:
 
 class TestPipelineUsesProfileDirective:
     def test_pipeline_uses_profile_directive(self, sample_task, sample_worktree, tmp_path):
-        """Profile with custom tester directive should pass it through to run_agent."""
+        """Profile with custom tester directive should pass it through via directive_text."""
         profile = Profile.default()
         custom_directive = "Custom tester directive from profile"
         profile.tester.directive = custom_directive
 
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], **kwargs})
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -321,9 +364,9 @@ class TestPipelineUsesProfileDirective:
             )
 
         # The tester call should use the profile's directive
-        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
-        assert len(tester_calls) == 1
-        assert tester_calls[0]["directive"] == custom_directive
+        tester_directives = [d for d in captured if isinstance(d, TesterDirective)]
+        assert len(tester_directives) == 1
+        assert tester_directives[0].directive_text == custom_directive
 
 
 class TestPipelineCLIDirectiveOverridesProfile:
@@ -335,14 +378,17 @@ class TestPipelineCLIDirectiveOverridesProfile:
         profile.tester.directive = "Profile tester directive"
         cli_tester_directive = "CLI tester directive wins"
 
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], **kwargs})
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -353,23 +399,26 @@ class TestPipelineCLIDirectiveOverridesProfile:
                 )
             )
 
-        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
-        assert len(tester_calls) == 1
+        tester_directives = [d for d in captured if isinstance(d, TesterDirective)]
+        assert len(tester_directives) == 1
         # CLI directive should win over profile
-        assert tester_calls[0]["directive"] == cli_tester_directive
+        assert tester_directives[0].directive_text == cli_tester_directive
 
 
 class TestPipelineProfileNoneUsesDefaults:
     def test_pipeline_profile_none_uses_defaults(self, sample_task, sample_worktree, tmp_path):
         """profile=None should behave the same as before — default directives, default agent."""
-        captured_calls: list[dict] = []
+        captured: list[tuple[PipelineDirective, dict]] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], **kwargs})
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append((directive, kwargs))
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -380,12 +429,14 @@ class TestPipelineProfileNoneUsesDefaults:
             )
 
         # All calls should use default agent_cmd
-        for c in captured_calls:
-            assert c.get("agent_cmd", "claude") == "claude"
+        for _, kw in captured:
+            assert kw.get("agent_cmd", "claude") == "claude"
 
-        # Directives should be None (letting run_agent apply defaults)
-        impl_calls = [c for c in captured_calls if c["role"] == Role.IMPLEMENTOR]
-        assert impl_calls[0].get("directive") is None
+        # Directives should use empty directive_text (falling back to DEFAULT_TEXT)
+        impl_directives = [d for d, _ in captured if isinstance(d, ImplementorDirective)]
+        assert len(impl_directives) == 1
+        assert impl_directives[0].directive_text == ""
+        assert impl_directives[0].resolved_text() == ImplementorDirective.DEFAULT_TEXT
 
 
 class TestPipelineProfileFixerAgent:
@@ -398,23 +449,24 @@ class TestPipelineProfileFixerAgent:
 
         captured_calls: list[dict] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append(
-                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
-            )
-            role = args[0]
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured_calls.append({"role": role, "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            if isinstance(directive, ImplementorDirective):
                 return _pass_result(role)
             if (
-                role == Role.TESTER
+                isinstance(directive, TesterDirective)
                 and len([c for c in captured_calls if c["role"] == Role.TESTER]) == 1
             ):
                 return _fail_verdict_result(role)  # first test fails
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _done_result(role)
             return _pass_result(role)  # second test + reviewer pass
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -438,13 +490,15 @@ class TestPipelineExplicitAgentCmdOverridesProfile:
 
         captured_calls: list[dict] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append(
-                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
-            )
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured_calls.append({"role": role, "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            return _pass_result(role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -471,13 +525,15 @@ class TestPipelineProfileMultipleRolesCustomized:
 
         captured_calls: list[dict] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append(
-                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
-            )
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured_calls.append({"role": role, "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            return _pass_result(role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -497,19 +553,17 @@ class TestPipelineProfileMultipleRolesCustomized:
         assert reviewer_calls[0]["agent_cmd"] == "gemini"
 
 
-class TestRunAgentProfileRoleConfig:
-    """Test run_agent's profile_role_config parameter directly."""
+class TestRunAgentDirective:
+    """Test run_agent with the new directive-based signature."""
 
-    def test_run_agent_profile_role_config_sets_directive(
-        self, sample_task, sample_worktree, tmp_path
-    ):
-        """profile_role_config.directive is used when no explicit directive passed."""
-        rc = RoleConfig(agent="claude", directive="Profile directive for implementor")
+    def test_run_agent_custom_directive_text(self, sample_task, sample_worktree, tmp_path):
+        """Custom directive_text is rendered in the prompt."""
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        directive = ImplementorDirective(
+            directive_text="Custom implementor directive",
+        )
 
-        with (
-            patch("workbench.agents.get_adapter") as mock_adapter,
-            patch("workbench.agents.get_main_branch", return_value="main"),
-        ):
+        with patch("workbench.agents.get_adapter") as mock_adapter:
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
             mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
@@ -517,64 +571,37 @@ class TestRunAgentProfileRoleConfig:
 
             from workbench.agents import run_agent
 
-            result = asyncio.run(
-                run_agent(
-                    Role.IMPLEMENTOR,
-                    sample_task,
-                    sample_worktree,
-                    tmp_path,
-                    use_tmux=False,
-                    profile_role_config=rc,
-                )
-            )
-
-        # The prompt should contain the profile directive
-        prompt_arg = mock_adapter_instance.build_command.call_args[0][0]
-        assert "Profile directive for implementor" in prompt_arg
-
-    def test_run_agent_explicit_directive_overrides_profile_role_config(
-        self, sample_task, sample_worktree, tmp_path
-    ):
-        """Explicit directive parameter should override profile_role_config.directive."""
-        rc = RoleConfig(agent="claude", directive="Profile directive")
-        explicit = "Explicit directive wins"
-
-        with (
-            patch("workbench.agents.get_adapter") as mock_adapter,
-            patch("workbench.agents.get_main_branch", return_value="main"),
-        ):
-            mock_adapter_instance = MagicMock()
-            mock_adapter_instance.build_command.return_value = ["echo", "test"]
-            mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
-            mock_adapter.return_value = mock_adapter_instance
-
-            from workbench.agents import run_agent
-
-            result = asyncio.run(
-                run_agent(
-                    Role.IMPLEMENTOR,
-                    sample_task,
-                    sample_worktree,
-                    tmp_path,
-                    use_tmux=False,
-                    directive=explicit,
-                    profile_role_config=rc,
-                )
-            )
+            result = asyncio.run(run_agent(directive, ctx, tmp_path, use_tmux=False))
 
         prompt_arg = mock_adapter_instance.build_command.call_args[0][0]
-        assert "Explicit directive wins" in prompt_arg
-        assert "Profile directive" not in prompt_arg
+        assert "Custom implementor directive" in prompt_arg
 
-    def test_run_agent_profile_role_config_sets_agent(
-        self, sample_task, sample_worktree, tmp_path
-    ):
-        """profile_role_config.agent is used when agent_cmd is default 'claude'."""
-        rc = RoleConfig(agent="gemini", directive=DEFAULT_DIRECTIVES[Role.IMPLEMENTOR])
+    def test_run_agent_default_directive_text(self, sample_task, sample_worktree, tmp_path):
+        """Empty directive_text falls back to DEFAULT_TEXT."""
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        directive = ImplementorDirective()
+
+        with patch("workbench.agents.get_adapter") as mock_adapter:
+            mock_adapter_instance = MagicMock()
+            mock_adapter_instance.build_command.return_value = ["echo", "test"]
+            mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
+            mock_adapter.return_value = mock_adapter_instance
+
+            from workbench.agents import run_agent
+
+            result = asyncio.run(run_agent(directive, ctx, tmp_path, use_tmux=False))
+
+        prompt_arg = mock_adapter_instance.build_command.call_args[0][0]
+        assert ImplementorDirective.DEFAULT_TEXT in prompt_arg
+
+    def test_run_agent_uses_directive_role(self, sample_task, sample_worktree, tmp_path):
+        """AgentResult.role is taken from the directive."""
+        ctx = PromptContext(task=sample_task, worktree=sample_worktree, base_branch="main")
+        directive = TesterDirective()
 
         with (
             patch("workbench.agents.get_adapter") as mock_adapter,
-            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.directives.get_diff", return_value="some diff"),
         ):
             mock_adapter_instance = MagicMock()
             mock_adapter_instance.build_command.return_value = ["echo", "test"]
@@ -583,51 +610,9 @@ class TestRunAgentProfileRoleConfig:
 
             from workbench.agents import run_agent
 
-            result = asyncio.run(
-                run_agent(
-                    Role.IMPLEMENTOR,
-                    sample_task,
-                    sample_worktree,
-                    tmp_path,
-                    use_tmux=False,
-                    profile_role_config=rc,
-                )
-            )
+            result = asyncio.run(run_agent(directive, ctx, tmp_path, use_tmux=False))
 
-        # get_adapter should have been called with "gemini"
-        mock_adapter.assert_called_once_with("gemini", tmp_path / ".workbench" / "agents.yaml")
-
-    def test_run_agent_explicit_agent_cmd_overrides_profile_role_config(
-        self, sample_task, sample_worktree, tmp_path
-    ):
-        """Explicit agent_cmd != 'claude' should not be overridden by profile_role_config.agent."""
-        rc = RoleConfig(agent="gemini", directive=DEFAULT_DIRECTIVES[Role.IMPLEMENTOR])
-
-        with (
-            patch("workbench.agents.get_adapter") as mock_adapter,
-            patch("workbench.agents.get_main_branch", return_value="main"),
-        ):
-            mock_adapter_instance = MagicMock()
-            mock_adapter_instance.build_command.return_value = ["echo", "test"]
-            mock_adapter_instance.parse_output.return_value = ("VERDICT: PASS", {})
-            mock_adapter.return_value = mock_adapter_instance
-
-            from workbench.agents import run_agent
-
-            result = asyncio.run(
-                run_agent(
-                    Role.IMPLEMENTOR,
-                    sample_task,
-                    sample_worktree,
-                    tmp_path,
-                    agent_cmd="codex",  # explicit non-default
-                    use_tmux=False,
-                    profile_role_config=rc,
-                )
-            )
-
-        # get_adapter should have been called with "codex" (not "gemini" from profile)
-        mock_adapter.assert_called_once_with("codex", tmp_path / ".workbench" / "agents.yaml")
+        assert result.role == Role.TESTER
 
 
 # ---------------------------------------------------------------------------
@@ -642,31 +627,32 @@ class TestReviewerFollowupContext:
     def test_reviewer_attempt_2_receives_prior_feedback_and_sha(
         self, sample_task, sample_worktree, tmp_path
     ):
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            role = args[0]
-            captured_calls.append({"role": role, **kwargs})
-            count = len([c for c in captured_calls if c["role"] == role])
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured.append(directive)
+            reviewer_count = len([d for d in captured if d.role == Role.REVIEWER])
+            if isinstance(directive, ImplementorDirective):
                 return _done_result(role)
-            if role == Role.TESTER:
+            if isinstance(directive, TesterDirective):
                 return _pass_result(role)
-            if role == Role.REVIEWER:
-                if count == 1:
-                    return _make_result(
-                        role,
-                        TaskStatus.DONE,
-                        "Missing null check in foo().\nVERDICT: FAIL",
-                    )
+            if isinstance(directive, ReviewerDirective):
+                return _make_result(
+                    role,
+                    TaskStatus.DONE,
+                    "Missing null check in foo().\nVERDICT: FAIL",
+                )
+            if isinstance(directive, ReviewerFollowupDirective):
                 return _pass_result(role)
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _done_result(role)
             return _pass_result(role)
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
             patch("workbench.agents.get_head_sha", return_value="sha-1"),
+            patch("workbench.agents.get_main_branch", return_value="main"),
         ):
             asyncio.run(
                 run_pipeline(
@@ -677,50 +663,49 @@ class TestReviewerFollowupContext:
                 )
             )
 
-        reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
-        assert len(reviewer_calls) == 2
+        reviewer_directives = [d for d in captured if d.role == Role.REVIEWER]
+        assert len(reviewer_directives) == 2
 
-        # Attempt 1: full review — no prior SHA, no prior feedback, default directive.
-        assert reviewer_calls[0].get("prior_review_sha") is None
-        assert reviewer_calls[0].get("extra_context", "") == ""
-        assert reviewer_calls[0].get("directive") != REVIEWER_FOLLOWUP_DIRECTIVE
+        # Attempt 1: full review — ReviewerDirective (no followup fields).
+        assert isinstance(reviewer_directives[0], ReviewerDirective)
 
-        # Attempt 2: follow-up — SHA captured before attempt 1, feedback from attempt 1,
-        # and the follow-up directive.
-        assert reviewer_calls[1]["prior_review_sha"] == "sha-1"
-        assert "Missing null check in foo()." in reviewer_calls[1]["extra_context"]
-        assert reviewer_calls[1]["directive"] == REVIEWER_FOLLOWUP_DIRECTIVE
+        # Attempt 2: follow-up — ReviewerFollowupDirective with prior SHA and feedback.
+        followup = reviewer_directives[1]
+        assert isinstance(followup, ReviewerFollowupDirective)
+        assert followup.prior_review_sha == "sha-1"
+        assert "Missing null check in foo()." in followup.prior_feedback
 
     def test_reviewer_attempt_3_uses_attempt_2_sha_and_feedback(
         self, sample_task, sample_worktree, tmp_path
     ):
         """Follow-up always compares against the IMMEDIATELY prior review, not the original."""
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
         # Simulate HEAD advancing as the fixer commits between reviews.
         head_shas = iter(["sha-review-1", "sha-review-2", "sha-review-3"])
 
-        async def mock_run_agent(*args, **kwargs):
-            role = args[0]
-            captured_calls.append({"role": role, **kwargs})
-            count = len([c for c in captured_calls if c["role"] == role])
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured.append(directive)
+            reviewer_count = len([d for d in captured if d.role == Role.REVIEWER])
+            if isinstance(directive, ImplementorDirective):
                 return _done_result(role)
-            if role == Role.TESTER:
+            if isinstance(directive, TesterDirective):
                 return _pass_result(role)
-            if role == Role.REVIEWER:
-                if count == 1:
-                    return _make_result(role, TaskStatus.DONE, "issue A\nVERDICT: FAIL")
-                if count == 2:
+            if isinstance(directive, ReviewerDirective):
+                return _make_result(role, TaskStatus.DONE, "issue A\nVERDICT: FAIL")
+            if isinstance(directive, ReviewerFollowupDirective):
+                if reviewer_count == 2:
                     return _make_result(role, TaskStatus.DONE, "issue B\nVERDICT: FAIL")
                 return _pass_result(role)
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _done_result(role)
             return _pass_result(role)
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
             patch("workbench.agents.get_head_sha", side_effect=lambda *_a, **_k: next(head_shas)),
+            patch("workbench.agents.get_main_branch", return_value="main"),
         ):
             asyncio.run(
                 run_pipeline(
@@ -732,18 +717,22 @@ class TestReviewerFollowupContext:
                 )
             )
 
-        reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
-        assert len(reviewer_calls) == 3
+        reviewer_directives = [d for d in captured if d.role == Role.REVIEWER]
+        assert len(reviewer_directives) == 3
 
         # Attempt 2 compares against attempt 1's SHA and gets attempt 1's feedback.
-        assert reviewer_calls[1]["prior_review_sha"] == "sha-review-1"
-        assert "issue A" in reviewer_calls[1]["extra_context"]
+        followup_2 = reviewer_directives[1]
+        assert isinstance(followup_2, ReviewerFollowupDirective)
+        assert followup_2.prior_review_sha == "sha-review-1"
+        assert "issue A" in followup_2.prior_feedback
 
         # Attempt 3 compares against attempt 2's SHA and gets attempt 2's feedback
         # (NOT attempt 1's).
-        assert reviewer_calls[2]["prior_review_sha"] == "sha-review-2"
-        assert "issue B" in reviewer_calls[2]["extra_context"]
-        assert "issue A" not in reviewer_calls[2]["extra_context"]
+        followup_3 = reviewer_directives[2]
+        assert isinstance(followup_3, ReviewerFollowupDirective)
+        assert followup_3.prior_review_sha == "sha-review-2"
+        assert "issue B" in followup_3.prior_feedback
+        assert "issue A" not in followup_3.prior_feedback
 
 
 class TestReviewerCrashDuringFollowup:
@@ -752,27 +741,24 @@ class TestReviewerCrashDuringFollowup:
     def test_reviewer_crash_on_followup_stops_pipeline(
         self, sample_task, sample_worktree, tmp_path
     ):
-        captured_calls: list[dict] = []
-
-        async def mock_run_agent(*args, **kwargs):
-            role = args[0]
-            captured_calls.append({"role": role, **kwargs})
-            count = len([c for c in captured_calls if c["role"] == role])
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            if isinstance(directive, ImplementorDirective):
                 return _done_result(role)
-            if role == Role.TESTER:
+            if isinstance(directive, TesterDirective):
                 return _pass_result(role)
-            if role == Role.REVIEWER:
-                if count == 1:
-                    return _fail_verdict_result(role)
+            if isinstance(directive, ReviewerDirective):
+                return _fail_verdict_result(role)
+            if isinstance(directive, ReviewerFollowupDirective):
                 return _crash_result(role)
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _done_result(role)
             return _pass_result(role)
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
             patch("workbench.agents.get_head_sha", return_value="sha-1"),
+            patch("workbench.agents.get_main_branch", return_value="main"),
         ):
             results = asyncio.run(
                 run_pipeline(
@@ -792,24 +778,22 @@ class TestReviewFixerCrashStopsPipeline:
     """Fixer crash during review retry stops the pipeline."""
 
     def test_review_fixer_crash_stops_pipeline(self, sample_task, sample_worktree, tmp_path):
-        captured_calls: list[dict] = []
-
-        async def mock_run_agent(*args, **kwargs):
-            role = args[0]
-            captured_calls.append({"role": role, **kwargs})
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            if isinstance(directive, ImplementorDirective):
                 return _done_result(role)
-            if role == Role.TESTER:
+            if isinstance(directive, TesterDirective):
                 return _pass_result(role)
-            if role == Role.REVIEWER:
+            if isinstance(directive, (ReviewerDirective, ReviewerFollowupDirective)):
                 return _fail_verdict_result(role)
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _crash_result(role)
             return _pass_result(role)
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
             patch("workbench.agents.get_head_sha", return_value="sha-1"),
+            patch("workbench.agents.get_main_branch", return_value="main"),
         ):
             results = asyncio.run(
                 run_pipeline(
@@ -829,21 +813,22 @@ class TestReviewRetriesExhausted:
     """Pipeline fails when review retries are exhausted."""
 
     def test_review_retries_exhausted(self, sample_task, sample_worktree, tmp_path):
-        async def mock_run_agent(*args, **kwargs):
-            role = args[0]
-            if role == Role.IMPLEMENTOR:
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            if isinstance(directive, ImplementorDirective):
                 return _done_result(role)
-            if role == Role.TESTER:
+            if isinstance(directive, TesterDirective):
                 return _pass_result(role)
-            if role == Role.REVIEWER:
+            if isinstance(directive, (ReviewerDirective, ReviewerFollowupDirective)):
                 return _fail_verdict_result(role)
-            if role == Role.FIXER:
+            if isinstance(directive, FixerDirective):
                 return _done_result(role)
             return _pass_result(role)
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
             patch("workbench.agents.get_head_sha", return_value="sha-1"),
+            patch("workbench.agents.get_main_branch", return_value="main"),
         ):
             results = asyncio.run(
                 run_pipeline(
@@ -870,13 +855,15 @@ class TestTDDPipelineUsesProfileAgent:
 
         captured_calls: list[dict] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append(
-                {"role": args[0], "agent_cmd": kwargs.get("agent_cmd"), **kwargs}
-            )
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            captured_calls.append({"role": role, "agent_cmd": kwargs.get("agent_cmd"), **kwargs})
+            return _pass_result(role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
             results = asyncio.run(
                 run_pipeline(
                     task=sample_task,
@@ -898,21 +885,25 @@ class TestTDDPipelineUsesProfileAgent:
         assert len(impl_calls) == 1
         assert impl_calls[0]["agent_cmd"] == "codex"
 
-    def test_tdd_pipeline_uses_tdd_directives_over_profile(
+    def test_tdd_pipeline_uses_tdd_default_over_profile_main(
         self, sample_task, sample_worktree, tmp_path
     ):
-        """In TDD mode, TDD directives should be used over profile directives (but CLI wins)."""
+        """In TDD mode with no tdd sub-mode in profile, TDD DEFAULT_TEXT is used
+        (not the profile's main directive)."""
         profile = Profile.default()
         profile.tester.directive = "Profile tester directive"
 
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], **kwargs})
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -923,10 +914,12 @@ class TestTDDPipelineUsesProfileAgent:
                 )
             )
 
-        # TDD Phase 1 tester should use TDD directive (not profile directive)
-        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
-        assert len(tester_calls) >= 1
-        assert tester_calls[0]["directive"] == TDD_DIRECTIVES[Role.TESTER]
+        # TDD Phase 1 tester: profile has no tdd sub-mode, so directive_text is ""
+        # which means resolved_text() falls back to DEFAULT_TEXT
+        tdd_tester = [d for d in captured if isinstance(d, TddTesterDirective)]
+        assert len(tdd_tester) >= 1
+        assert tdd_tester[0].directive_text == ""
+        assert tdd_tester[0].resolved_text() == TddTesterDirective.DEFAULT_TEXT
 
     def test_tdd_pipeline_cli_directive_overrides_tdd_and_profile(
         self, sample_task, sample_worktree, tmp_path
@@ -936,14 +929,17 @@ class TestTDDPipelineUsesProfileAgent:
         profile.tester.directive = "Profile tester directive"
         cli_directive = "CLI tester directive wins"
 
-        captured_calls: list[dict] = []
+        captured: list[PipelineDirective] = []
 
-        async def mock_run_agent(*args, **kwargs):
-            captured_calls.append({"role": args[0], **kwargs})
-            return _pass_result(args[0])
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
 
-        with patch("workbench.agents.run_agent", side_effect=mock_run_agent):
-            results = asyncio.run(
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
                 run_pipeline(
                     task=sample_task,
                     worktree=sample_worktree,
@@ -955,6 +951,195 @@ class TestTDDPipelineUsesProfileAgent:
                 )
             )
 
-        tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
-        assert len(tester_calls) >= 1
-        assert tester_calls[0]["directive"] == cli_directive
+        tdd_tester = [d for d in captured if isinstance(d, TddTesterDirective)]
+        assert len(tdd_tester) >= 1
+        assert tdd_tester[0].resolved_text() == cli_directive
+
+
+# ---------------------------------------------------------------------------
+# New profile sub-mode integration tests
+# ---------------------------------------------------------------------------
+
+
+class TestTDDProfileSubModeHonored:
+    """TDD profile sub-mode is honored."""
+
+    def test_tdd_profile_sub_mode_overrides_default(self, sample_task, sample_worktree, tmp_path):
+        """With profile.tester.tdd = ModeConfig(directive="custom TDD test"),
+        running run_pipeline(..., tdd=True, profile=...) uses that directive."""
+        profile = Profile.default()
+        profile.tester.tdd = ModeConfig(directive="custom TDD test")
+
+        captured: list[PipelineDirective] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                    profile=profile,
+                )
+            )
+
+        tdd_tester = [d for d in captured if isinstance(d, TddTesterDirective)]
+        assert len(tdd_tester) >= 1
+        assert tdd_tester[0].resolved_text() == "custom TDD test"
+        assert tdd_tester[0].resolved_text() != TddTesterDirective.DEFAULT_TEXT
+
+
+class TestCLIFlagWinsOverTDDProfile:
+    """CLI flag wins over TDD profile sub-mode."""
+
+    def test_cli_overrides_tdd_profile(self, sample_task, sample_worktree, tmp_path):
+        """With both directives={Role.TESTER: "from CLI"} and
+        profile.tester.tdd.directive = "from profile", the prompt contains "from CLI"."""
+        profile = Profile.default()
+        profile.tester.tdd = ModeConfig(directive="from profile")
+
+        captured: list[PipelineDirective] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            return _pass_result(directive.role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                    profile=profile,
+                    directives={Role.TESTER: "from CLI"},
+                )
+            )
+
+        tdd_tester = [d for d in captured if isinstance(d, TddTesterDirective)]
+        assert len(tdd_tester) >= 1
+        assert tdd_tester[0].resolved_text() == "from CLI"
+
+
+class TestReviewerFollowupUsesProfileSubMode:
+    """Reviewer followup uses profile sub-mode."""
+
+    def test_reviewer_followup_profile_sub_mode(self, sample_task, sample_worktree, tmp_path):
+        """With profile.reviewer.followup = ModeConfig(directive="custom followup"),
+        the second review attempt's directive contains "custom followup"."""
+        profile = Profile.default()
+        profile.reviewer.followup = ModeConfig(directive="custom followup")
+
+        captured: list[PipelineDirective] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(directive)
+            role = directive.role
+            if isinstance(directive, ImplementorDirective):
+                return _done_result(role)
+            if isinstance(directive, TesterDirective):
+                return _pass_result(role)
+            if isinstance(directive, ReviewerDirective):
+                return _fail_verdict_result(role)
+            if isinstance(directive, ReviewerFollowupDirective):
+                return _pass_result(role)
+            if isinstance(directive, FixerDirective):
+                return _done_result(role)
+            return _pass_result(role)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_head_sha", return_value="sha-1"),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=sample_task,
+                    worktree=sample_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        followups = [d for d in captured if isinstance(d, ReviewerFollowupDirective)]
+        assert len(followups) == 1
+        assert followups[0].resolved_text() == "custom followup"
+
+
+class TestPlannerUsesProfile:
+    """Planner uses profile."""
+
+    def test_planner_profile_directive(self, tmp_path):
+        """With profile.planner.directive = "custom planner",
+        run_planner(..., profile=...) produces a prompt containing "custom planner"."""
+        from workbench.agents import run_planner
+
+        profile = Profile.default()
+        profile.planner.directive = "custom planner"
+
+        with (
+            patch("workbench.agents.get_adapter") as mock_adapter,
+            patch("workbench.agents._load_plan_guide", return_value="guide text"),
+        ):
+            mock_adapter_instance = MagicMock()
+            mock_adapter_instance.build_command.return_value = ["echo", "test"]
+            mock_adapter_instance.parse_output.return_value = ("plan output", {})
+            mock_adapter.return_value = mock_adapter_instance
+
+            result = asyncio.run(
+                run_planner(
+                    repo=tmp_path,
+                    user_prompt="Build X",
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        prompt_arg = mock_adapter_instance.build_command.call_args[0][0]
+        assert "custom planner" in prompt_arg
+
+
+class TestMergerUsesProfile:
+    """Merger uses profile."""
+
+    def test_merger_profile_directive(self, tmp_path):
+        """With profile.merger.directive = "custom merger",
+        run_merge_resolver(..., profile=...) produces a prompt containing "custom merger"."""
+        from workbench.agents import run_merge_resolver
+
+        profile = Profile.default()
+        profile.merger.directive = "custom merger"
+
+        with patch("workbench.agents.get_adapter") as mock_adapter:
+            mock_adapter_instance = MagicMock()
+            mock_adapter_instance.build_command.return_value = ["echo", "test"]
+            mock_adapter_instance.parse_output.return_value = ("merge output", {})
+            mock_adapter.return_value = mock_adapter_instance
+
+            result = asyncio.run(
+                run_merge_resolver(
+                    task_branch="feature/x",
+                    session_branch="main",
+                    merge_dir=tmp_path,
+                    conflicts=["file1.py", "file2.py"],
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        prompt_arg = mock_adapter_instance.build_command.call_args[0][0]
+        assert "custom merger" in prompt_arg
