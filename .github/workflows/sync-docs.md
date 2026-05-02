@@ -15,7 +15,7 @@ steps:
     env:
       GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
     run: |
-      git clone https://x-access-token:${GH_TOKEN}@github.com/duncankmckinnon/wbcli-web.git /tmp/gh-aw/agent/wbcli-web
+      git clone https://x-access-token:${GH_TOKEN}@github.com/duncankmckinnon/wbcli-web.git "${GITHUB_WORKSPACE}/wbcli-web"
 tools:
   github:
     toolsets: [default]
@@ -67,7 +67,9 @@ Summarize the documentation impact clearly before proceeding.
 
 ## Step 3: Read the current website docs
 
-The `wbcli-web` repo has been pre-cloned to `/tmp/gh-aw/agent/wbcli-web`. Read files from there using bash (e.g. `cat`, `ls`, `find`).
+The `wbcli-web` repo has been cloned into the workflow workspace at `./wbcli-web` (relative to `$GITHUB_WORKSPACE`). All reads, edits, branching, and commits MUST happen inside that path — the `create_pull_request` safe output only sees repos checked out inside the workspace. Do NOT use `/tmp/gh-aw/agent/wbcli-web`.
+
+Read files from there using bash (e.g. `cat`, `ls`, `find`).
 
 Examine the docs-related pages in the Next.js site to understand:
 
