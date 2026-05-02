@@ -236,13 +236,10 @@ async def run_pipeline(
             _notify(TaskStatus.FAILED)
             return results
 
-        if not impl_result.passed:
-            _notify(TaskStatus.FAILED)
-            return results
-
         # Continue to normal test verification (phase 2) and review (phase 3)
-        # The existing test/review loop below will verify the implementation
-        # and handle fix retries as normal.
+        # regardless of the TDD implementor's self-reported verdict — the
+        # dedicated tester is the authoritative source of truth, and a verdict-
+        # fail here previously skipped test/review and was silently marked DONE.
 
     # 1. Implement (skipped in TDD mode — already done above)
     if not tdd:
