@@ -118,12 +118,21 @@ class TestTDDTestWriteFails:
 
 
 class TestTDDImplVerdictFail:
-    def test_pipeline_tdd_impl_verdict_fail(self, sample_task, sample_worktree, tmp_path):
-        """TDD implementor returns VERDICT: FAIL (tests fail or not comprehensive) -> pipeline stops."""
+    def test_pipeline_tdd_impl_verdict_fail_continues_to_test(
+        self, sample_task, sample_worktree, tmp_path
+    ):
+        """TDD implementor self-reports VERDICT: FAIL — pipeline must NOT bail.
+        The dedicated tester is the source of truth; test/review still run so a
+        fail can be confirmed (and a fixer can react) instead of being silently
+        marked DONE."""
 
         async def mock_run_agent(directive, ctx, *args, **kwargs):
             if isinstance(directive, TddTesterDirective):
                 return _done_result(directive.role)
+            if isinstance(directive, TddImplementorDirective):
+                return _fail_verdict_result(directive.role)
+            # Standard tester confirms the failure; reviewer never runs because
+            # the test failure routes to the fixer first.
             return _fail_verdict_result(directive.role)
 
         with (
@@ -137,13 +146,20 @@ class TestTDDImplVerdictFail:
                     repo=tmp_path,
                     use_tmux=False,
                     tdd=True,
+                    max_retries=0,
                 )
             )
 
-        assert len(results) == 2
-        assert results[0].role == Role.TESTER
-        assert results[1].role == Role.IMPLEMENTOR
+        roles = [r.role for r in results]
+        assert roles[0] == Role.TESTER  # TDD phase 1 — write failing tests
+        assert roles[1] == Role.IMPLEMENTOR  # TDD phase 2 — verdict FAIL but no early bail
+        assert (
+            Role.TESTER in roles[2:]
+        ), "Standard tester must run after TDD impl — it is the source of truth"
         assert not results[1].passed
+        # The standard tester (post-impl) should also have reported FAIL
+        post_impl_tester = next(r for r in results[2:] if r.role == Role.TESTER)
+        assert not post_impl_tester.passed
 
 
 class TestTDDImplFails:
