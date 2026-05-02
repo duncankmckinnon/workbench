@@ -465,8 +465,7 @@ async def run_merge_resolver(
 
 def _load_plan_guide() -> str:
     """Load the bundled plan-writing guide."""
-    guide_path = Path(resources.files("workbench")) / "plan_guide.md"
-    return guide_path.read_text()
+    return resources.files("workbench.directive_texts").joinpath("plan_guide.md").read_text()
 
 
 async def run_planner(
