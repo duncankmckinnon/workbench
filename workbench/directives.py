@@ -1,8 +1,14 @@
-"""Directive classes — typed prompt builders for each agent role."""
+"""Directive classes — typed prompt builders for each agent role.
+
+Each Directive subclass loads its DEFAULT_TEXT from a markdown file in
+``workbench/directive_texts/``. To edit the built-in instructions for any
+role, edit the corresponding ``.md`` file there — no Python changes needed.
+"""
 
 from __future__ import annotations
 
 from dataclasses import dataclass
+from importlib import resources
 from pathlib import Path
 from typing import TYPE_CHECKING, ClassVar, Literal
 
@@ -12,6 +18,15 @@ from .worktree import get_diff, get_diff_since
 if TYPE_CHECKING:
     from .plan_parser import Task
     from .worktree import Worktree
+
+
+def _load_text(name: str) -> str:
+    """Load a built-in directive text from ``workbench/directive_texts/<name>``.
+
+    The trailing newline produced by typical text editors is stripped so
+    DEFAULT_TEXT values match the inline triple-quoted strings they replaced.
+    """
+    return resources.files("workbench.directive_texts").joinpath(name).read_text().rstrip("\n")
 
 
 # ---------------------------------------------------------------------------
@@ -146,13 +161,7 @@ def _render_pipeline(
 
 @dataclass(kw_only=True)
 class ImplementorDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are an implementation agent. Your job is to implement the task described below.
-Make clean, well-structured changes. Follow patterns established in the existing codebase if available to reference.
-Commit your work when done with a clear commit message.
-Do not create and run tests yourself — a separate agent handles testing."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("implementor.md")
     role: Role = Role.IMPLEMENTOR
 
     def render(self, ctx: PromptContext) -> str:
@@ -166,31 +175,7 @@ Do not create and run tests yourself — a separate agent handles testing."""
 
 @dataclass(kw_only=True)
 class TesterDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a testing agent. Your job is to verify the implementation by:
-1. Reading the changes made (git diff)
-2. Determining what aspects of the changes can be meaningfully tested
-3. Running existing tests to check for regressions
-4. Carefully designing tests to cover a full scope of scenarios with respect to the task
-5. Writing tests that will comprehensively cover the task, and ensure the implementation is correct
-6. Reporting pass/fail status based on the testability, correctness, and coverage of the tests relative to the task
-
-IMPORTANT: You MUST end your response with exactly one of these lines:
-VERDICT: PASS
-VERDICT: FAIL
-If FAIL, explain what failed and what needs to change before the verdict line.
-Do NOT modify the implementation code. Only add/run tests.
-
-When changes are not directly testable (configuration, documentation, CI/CD,
-visual/UI, or code requiring unavailable external dependencies):
-- Verify syntax, structure, and correctness by other means (lint, parse, dry-run)
-- Check for obvious errors (typos, broken references, invalid values)
-- Run existing tests to confirm no regressions
-- Add a note on what was verified and why full testing was not possible
-- End your response with VERDICT: PASS
-Do not force meaningless tests or fail solely because automated tests cannot cover the change."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("tester.md")
     role: Role = Role.TESTER
 
     def render(self, ctx: PromptContext) -> str:
@@ -205,24 +190,7 @@ Do not force meaningless tests or fail solely because automated tests cannot cov
 
 @dataclass(kw_only=True)
 class ReviewerDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a code review agent. Your job is to review the diff for:
-1. Correctness — does it match the task description? Is it comprehensive?
-2. Quality - clean code, no obvious bugs, no unnecessary duplication of logic, consistent with patterns used in the codebase
-3. Completeness — are edge cases handled? Are tests comprehensive?
-
-Be thorough and comprehensive: this is your one chance to identify every issue.
-Any follow-up review will only verify that your feedback was addressed — it will
-not raise new concerns. Surface everything you want fixed now.
-
-IMPORTANT: You MUST end your response with exactly one of these lines:
-VERDICT: PASS
-VERDICT: FAIL
-
-If FAIL, provide specific, actionable feedback before the verdict line.
-Do NOT modify any code."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("reviewer.md")
     role: Role = Role.REVIEWER
 
     def render(self, ctx: PromptContext) -> str:
@@ -238,24 +206,7 @@ Do NOT modify any code."""
 
 @dataclass(kw_only=True)
 class ReviewerFollowupDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a follow-up code review agent. You previously reviewed this task and
-produced the feedback shown below. A fixer agent has since made changes — the
-diff below is only the delta since your prior review, not the full task diff.
-
-Your job is narrow: verify that every item in your prior feedback has been
-addressed by the changes shown. Do NOT raise new issues beyond your prior
-feedback. The only exception is a regression the fixer introduced within the
-changed lines shown below — if the fix itself broke something, flag it.
-
-IMPORTANT: You MUST end your response with exactly one of these lines:
-VERDICT: PASS — every prior feedback item is addressed (and no regressions)
-VERDICT: FAIL — one or more prior items remain, or the fix introduced a regression
-
-If FAIL, list specifically which prior feedback items remain unaddressed.
-Do NOT modify any code."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("reviewer_followup.md")
     role: Role = Role.REVIEWER
     prior_review_sha: str
     prior_feedback: str
@@ -278,13 +229,7 @@ Do NOT modify any code."""
 
 @dataclass(kw_only=True)
 class FixerDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a fix agent. A previous implementation attempt received feedback from testing or code review.
-Your job is to address the feedback, fix the issues, and commit the changes.
-
-Do NOT start from scratch. Read the existing code, understand the feedback, and make targeted fixes."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("fixer.md")
     role: Role = Role.FIXER
     feedback: str
     failure_kind: Literal["test", "review"]
@@ -305,21 +250,7 @@ Do NOT start from scratch. Read the existing code, understand the feedback, and 
 
 @dataclass(kw_only=True)
 class TddTesterDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a test-driven development agent. Your job is to write comprehensive
-tests for the task described below BEFORE any implementation exists.
-
-Write tests that:
-1. Cover the expected behavior described in the task
-2. Cover edge cases and error conditions
-3. Follow the project's existing test patterns and conventions
-4. Will FAIL because the implementation does not exist yet
-
-Do NOT implement the feature. Only write tests.
-Do NOT create stub implementations to make tests pass.
-Commit your test files when done with a clear commit message."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("tdd_tester.md")
     role: Role = Role.TESTER
 
     def render(self, ctx: PromptContext) -> str:
@@ -333,30 +264,7 @@ Commit your test files when done with a clear commit message."""
 
 @dataclass(kw_only=True)
 class TddImplementorDirective(PipelineDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are an implementation agent working in test-driven development mode.
-Tests have already been written for this task and they are currently FAILING.
-
-Your job is to:
-1. Read the existing test files to understand what is expected
-2. Implement the code to make ALL tests pass
-3. Run the tests to verify they pass
-4. Evaluate whether the tests are comprehensive enough to validate the task
-5. Commit your work when done with a clear commit message
-
-Do NOT modify the test files. Only write implementation code.
-Do NOT delete or skip any tests.
-
-IMPORTANT: You MUST end your response with exactly one of these lines:
-VERDICT: PASS
-VERDICT: FAIL
-
-Use VERDICT: PASS if ALL tests pass and the tests comprehensively cover the task.
-Use VERDICT: FAIL if any tests fail or the tests are not comprehensive enough
-to validate the implementation against the task requirements.
-If FAIL, explain what is missing or broken before the verdict line."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("tdd_implementor.md")
     role: Role = Role.IMPLEMENTOR
 
     def render(self, ctx: PromptContext) -> str:
@@ -375,28 +283,7 @@ If FAIL, explain what is missing or broken before the verdict line."""
 
 @dataclass(kw_only=True)
 class MergerDirective(StandaloneDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a merge conflict resolution agent. A merge between two branches has produced conflicts.
-Your job is to resolve ALL merge conflicts in the working tree.
-
-For each conflicted file:
-1. Read the file and understand both sides of the conflict
-2. Resolve the conflict by keeping the correct combination of changes
-3. The incoming branch (theirs) contains the new feature work
-4. The target branch (ours) contains previously merged work from other tasks
-5. In most cases you want BOTH sets of changes integrated correctly
-
-After resolving all conflicts:
-1. Stage all resolved files with git add
-2. Do NOT commit — the orchestrator will handle the merge commit
-
-IMPORTANT: You MUST end your response with exactly one of:
-VERDICT: PASS  (all conflicts resolved)
-VERDICT: FAIL  (unable to resolve one or more conflicts)
-
-If FAIL, explain which files could not be resolved and why."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("merger.md")
     role: Role = Role.MERGER
     task_branch: str
     session_branch: str
@@ -414,39 +301,7 @@ If FAIL, explain which files could not be resolved and why."""
 
 @dataclass(kw_only=True)
 class PlannerDirective(StandaloneDirective):
-    DEFAULT_TEXT: ClassVar[
-        str
-    ] = """\
-You are a planning agent for the Workbench multi-agent orchestrator. Your job
-is to take a user's request and produce a detailed workbench plan file that
-can be executed by `wb run` to dispatch parallel coding agents.
-
-## Your Process
-
-1. **Understand the request** — What is the user trying to achieve?
-2. **Survey the codebase** — Read the code to understand:
-   - Project structure, module organization, entry points
-   - Existing patterns — how are similar things already done?
-   - Dependencies and interfaces between modules
-   - Test infrastructure — framework, location, test command
-   - Build and config files
-3. **Design the task graph** — Break work into parallel-safe tasks:
-   - Group work by file ownership (each task owns distinct files)
-   - Push shared infrastructure to earlier waves using `Depends:`
-   - Maximize parallelism while avoiding merge conflicts
-4. **Write the plan** — Output a complete, detailed plan following the guide below.
-
-## Critical Rules
-
-- Each task runs in an ISOLATED worktree — the agent only sees its own
-  task description. Every task must be completely self-contained.
-- Tasks in the same wave run simultaneously and CANNOT see each other's
-  changes. Same-file edits across parallel tasks cause merge conflicts.
-- If a task depends on interfaces from an earlier wave, describe those
-  interfaces IN FULL in the dependent task — the agent cannot look them up.
-- Keep task titles to 2-4 words (they become dependency slugs).
-- Always specify the test command in each task.
-- Write the plan to the output path specified at the end of this prompt."""
+    DEFAULT_TEXT: ClassVar[str] = _load_text("planner.md")
     role: Role = Role.IMPLEMENTOR
     output_path: Path
     user_prompt: str = ""
