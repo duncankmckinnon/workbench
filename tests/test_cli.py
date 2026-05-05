@@ -790,6 +790,37 @@ class TestClean:
         assert "status-p1.yaml" in result.output
         assert path.exists()  # not removed
 
+    def test_default_blocks_on_freshly_seeded_pending_plan(self, git_repo):
+        """A run that wrote pending records up-front but never finished must
+        be classified as in-flight, not silently cleaned."""
+        seeded = {
+            "workbench-1": {
+                "tasks": {
+                    "task-1": {
+                        "status": "pending",
+                        "merged": False,
+                        "branch": None,
+                        "last_agent": "",
+                    },
+                    "task-2": {
+                        "status": "pending",
+                        "merged": False,
+                        "branch": None,
+                        "last_agent": "",
+                    },
+                }
+            }
+        }
+        path = self._write_status(git_repo, "seeded", seeded)
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean"])
+
+        assert result.exit_code != 0
+        assert "status-seeded.yaml" in result.output
+        assert path.exists()
+
     def test_completed_skips_incomplete_silently(self, git_repo):
         """--completed: removes completed pieces, leaves incomplete ones alone."""
         completed_path = self._write_status(git_repo, "done-plan", self._completed_session())

@@ -222,6 +222,18 @@ class SessionStatus:
             return False
         return all(rec.status == "done" and rec.merged for rec in self.tasks.values())
 
+    def seed_pending(self, task_ids) -> None:
+        """Record each task_id with status='pending' if not already present.
+
+        Called at run start so the on-disk status file reflects the full plan
+        before any agent has been dispatched. Existing records (carried
+        forward from a prior session, or already updated this run) are left
+        untouched.
+        """
+        for tid in task_ids:
+            if tid not in self.tasks:
+                self.record_task(tid, status="pending")
+
 
 def iter_status_files(repo: Path) -> list[tuple[Path, dict]]:
     """Return (path, raw_yaml_dict) for every .workbench/status-*.yaml, sorted

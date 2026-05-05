@@ -194,6 +194,14 @@ async def run_plan(
                 f"[dim]--only-failed: skipping {len(skipped_task_ids)} completed task(s)[/dim]"
             )
 
+    # Seed the status file with every task in the plan as 'pending' so the
+    # on-disk record reflects the full plan from t=0. Carried-forward records
+    # take precedence; only tasks without a prior entry get a pending record.
+    # Persist immediately so subsequent async update_task calls modify an
+    # existing file rather than racing to create it.
+    session_status.seed_pending(t.id for t in plan.tasks)
+    session_status.save(repo)
+
     console.print(f"\n[bold]Plan:[/bold] {plan.title}")
     console.print(f"[bold]Tasks:[/bold] {len(plan.tasks)} across {len(waves)} wave(s)")
     console.print(f"[bold]Concurrency:[/bold] {max_concurrent}")
