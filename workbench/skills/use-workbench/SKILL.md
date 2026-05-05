@@ -219,7 +219,7 @@ Stops after the first wave with any failed tasks. Composes with `--retry-failed`
 ### Re-run only failed tasks
 
 ```bash
-wb run plan.md -b workbench-1 --only-failed
+wb run plan.md -b workbench-1 --only-incomplete
 ```
 
 Reads `.workbench/status.json` to skip tasks that already completed. Requires `-b` to specify the session branch to resume.
@@ -407,7 +407,8 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb run plan.md --profile-name fast` — use a named profile
 - `wb run plan.md --retry-failed` — auto-retry crashed tasks
 - `wb run plan.md --fail-fast` — stop on first wave failure
-- `wb run plan.md -b workbench-1 --only-failed` — re-run only failed tasks
+- `wb resume workbench-1` — resume a session, re-running every task that isn't done + merged
+- `wb run plan.md -b workbench-1 --only-incomplete` — same as `wb resume`, but lets you override flags
 - `wb run plan.md -b workbench-1 --task task-2` — re-run a specific task
 - `wb merge -b workbench-1` — merge unmerged branches without re-running
 - `wb preview <plan>` — dry-run to see parsed tasks and waves

@@ -140,7 +140,7 @@ async def run_plan(
     keep_branches: bool = False,
     retry_failed: bool = False,
     fail_fast: bool = False,
-    only_failed: bool = False,
+    only_incomplete: bool = False,
     task_filter: set[str] | None = None,
     push: bool = False,
 ) -> list[TaskState]:
@@ -185,13 +185,13 @@ async def run_plan(
                 # Carry forward — this task is not being re-run
                 session_status.tasks[tid] = rec
 
-    # --only-failed: skip completed tasks
+    # --only-incomplete: skip completed tasks
     skipped_task_ids: set[str] = set()
-    if only_failed and prior:
+    if only_incomplete and prior:
         skipped_task_ids = prior.completed_task_ids()
         if skipped_task_ids:
             console.print(
-                f"[dim]--only-failed: skipping {len(skipped_task_ids)} completed task(s)[/dim]"
+                f"[dim]--only-incomplete: skipping {len(skipped_task_ids)} completed task(s)[/dim]"
             )
 
     # Seed the status file with every task in the plan as 'pending' so the
@@ -255,7 +255,7 @@ async def run_plan(
 
         # Initialize state for this wave
         # --task: filtered-out tasks are excluded entirely
-        # --only-failed: completed tasks are pre-marked DONE
+        # --only-incomplete: completed tasks are pre-marked DONE
         wave_states: list[TaskState] = []
         for task in wave:
             if filtered_task_ids is not None and task.id not in filtered_task_ids:
@@ -268,7 +268,7 @@ async def run_plan(
             state_map[task.id] = state
 
         # Create worktrees for all tasks in wave, branching from session branch
-        # Skip tasks pre-marked DONE by --only-failed
+        # Skip tasks pre-marked DONE by --only-incomplete
         for state in wave_states:
             if state.status == TaskStatus.DONE:
                 continue
@@ -373,7 +373,7 @@ async def run_plan(
             await asyncio.gather(*tasks, _update_display())
 
         # After the wave: merge all successful task branches into the session branch
-        # Exclude tasks that were pre-skipped by --only-failed (no worktree)
+        # Exclude tasks that were pre-skipped by --only-incomplete (no worktree)
         done_states = [
             s for s in wave_states if s.status == TaskStatus.DONE and s.worktree is not None
         ]

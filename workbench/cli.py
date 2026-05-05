@@ -438,9 +438,14 @@ def main():
     help="Stop after the first wave that has any failed tasks.",
 )
 @click.option(
-    "--only-failed",
+    "--only-incomplete",
+    "only_incomplete",
     is_flag=True,
-    help="Re-run only previously failed tasks (skip tasks already merged into session branch). Requires --session-branch.",
+    help=(
+        "Re-run every task in the session that is not yet done — both prior "
+        "failures and tasks that never started (e.g. seeded as pending). Skips "
+        "tasks already merged into the session branch. Requires --session-branch."
+    ),
 )
 @click.option(
     "--task",
@@ -494,7 +499,7 @@ def run(
     session_name: str | None,
     retry_failed: bool,
     fail_fast: bool,
-    only_failed: bool,
+    only_incomplete: bool,
     task_ids: tuple[str, ...],
     implementor_directive: str | None,
     tester_directive: str | None,
@@ -521,8 +526,8 @@ def run(
     if tdd and skip_test:
         raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
 
-    if only_failed and not session_branch:
-        raise click.ClickException("--only-failed requires --session-branch (-b).")
+    if only_incomplete and not session_branch:
+        raise click.ClickException("--only-incomplete requires --session-branch (-b).")
 
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
@@ -599,10 +604,122 @@ def run(
             keep_branches=keep_branches,
             retry_failed=retry_failed,
             fail_fast=fail_fast,
-            only_failed=only_failed,
+            only_incomplete=only_incomplete,
             task_filter=set(task_ids) if task_ids else None,
             push=push,
         )
+    )
+
+
+@main.command()
+@click.argument("session_branch")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option("--no-tmux", is_flag=True, help="Run without tmux.")
+@click.option("--agent", default="claude", show_default=True, help="Agent CLI to dispatch.")
+@click.option(
+    "--max-concurrent",
+    "-j",
+    type=int,
+    default=4,
+    show_default=True,
+    help="Max parallel tasks per wave.",
+)
+@click.option(
+    "--max-retries",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Max fix attempts after a failed test or review.",
+)
+@click.option("--tdd", is_flag=True, help="Run pending tasks in TDD mode.")
+@click.option(
+    "--profile",
+    "profile_path",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Explicit profile path.",
+)
+@click.option("--name", "profile_name", default=None, help="Named profile to resolve.")
+@click.pass_context
+def resume(
+    ctx: click.Context,
+    session_branch: str,
+    repo: Path | None,
+    no_tmux: bool,
+    agent: str,
+    max_concurrent: int,
+    max_retries: int,
+    tdd: bool,
+    profile_path: Path | None,
+    profile_name: str | None,
+):
+    """Resume a session by re-running every task that isn't done + merged.
+
+    Looks up the session in .workbench/status-*.yaml, finds the plan via the
+    recorded plan_source, and forwards to:
+
+        wb run <plan> -b <session> --only-incomplete
+
+    For finer-grained control (waves, directive overrides, selective tasks),
+    use ``wb run`` directly.
+    """
+    from .session_status import SessionStatus
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    found = SessionStatus.find_by_session(repo, session_branch)
+    if found is None:
+        raise click.ClickException(
+            f"No status file found for session '{session_branch}'. "
+            f"Use 'wb run <plan> -b {session_branch} --only-incomplete' instead."
+        )
+    if not found.plan_source:
+        raise click.ClickException(
+            f"Session '{session_branch}' has no plan_source recorded. "
+            f"Use 'wb run <plan> -b {session_branch} --only-incomplete' instead."
+        )
+
+    plan_path = Path(found.plan_source)
+    if not plan_path.exists():
+        raise click.ClickException(
+            f"Plan source not found: {plan_path}\n"
+            f"Locate the plan and use 'wb run <plan> -b {session_branch} --only-incomplete'."
+        )
+
+    console.print(f"[dim]Resuming session {session_branch} from {plan_path}[/dim]\n")
+
+    ctx.invoke(
+        run,
+        plan_path=plan_path,
+        max_concurrent=max_concurrent,
+        skip_test=False,
+        skip_review=False,
+        max_retries=max_retries,
+        agent=agent,
+        cleanup=False,
+        keep_branches=False,
+        repo=repo,
+        session_branch=session_branch,
+        wave=None,
+        start_wave=1,
+        end_wave=None,
+        no_tmux=no_tmux,
+        tdd=tdd,
+        local=False,
+        base=None,
+        profile_path=profile_path,
+        profile_name=profile_name,
+        session_name=None,
+        retry_failed=False,
+        fail_fast=False,
+        only_incomplete=True,
+        task_ids=(),
+        implementor_directive=None,
+        tester_directive=None,
+        reviewer_directive=None,
+        fixer_directive=None,
+        push=False,
     )
 
 

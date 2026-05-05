@@ -173,8 +173,11 @@ Out-of-range values are clamped automatically: `--start-wave` defaults to 1 and 
 If some tasks fail, you have options:
 
 ```bash
-# Re-run the same plan, skipping tasks that already succeeded
-wb run plan.md -b workbench-1 --only-failed
+# Resume a session: re-run every task that isn't done + merged
+wb resume workbench-1
+
+# Same thing, manual form (use this if you need to override flags)
+wb run plan.md -b workbench-1 --only-incomplete
 
 # Auto-retry tasks that crashed (not those that exhausted fix retries)
 wb run plan.md --retry-failed
@@ -186,9 +189,11 @@ wb run plan.md --fail-fast
 wb run plan.md --retry-failed --fail-fast
 ```
 
+`wb resume <session>` looks up the session in `.workbench/status-*.yaml`, finds the original plan, and re-runs every task that isn't `done + merged`. This includes tasks that failed AND tasks that never started (e.g., a crash before the wave reached them — the status file is seeded with every plan task as `pending` at run start so this case is handled correctly).
+
 `--retry-failed` distinguishes between transient failures (agent crash, timeout) and deliberate failures (exhausted all fix cycles). Only transient failures are retried.
 
-`--only-failed` reads the plan's status file to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
+`--only-incomplete` reads the plan's status file to determine which tasks already completed. It requires `-b` to specify the session branch to resume.
 
 You can also re-run specific tasks by ID or slug:
 
@@ -459,7 +464,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--end-wave N` | Stop after wave N (default: last wave) |
 | `--retry-failed` | Auto-retry tasks that crashed (not those that exhausted fix retries) |
 | `--fail-fast` | Stop after the first wave with any failed tasks |
-| `--only-failed` | Skip completed tasks from a prior run (requires `-b`) |
+| `--only-incomplete` | Skip completed tasks from a prior run (requires `-b`) |
 | `--task ID` | Run only specific tasks by ID or slug (repeatable) |
 | `--cleanup` | Remove worktrees after completion |
 | `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
@@ -468,6 +473,29 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--profile PATH` | Use a specific profile.yaml |
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
+
+### `wb resume`
+
+Sugar over `wb run <plan> -b <session> --only-incomplete`. Looks up the session in `.workbench/status-*.yaml`, finds the original plan via the recorded `plan_source`, and re-runs every task that isn't `done + merged`.
+
+```bash
+wb resume workbench-1
+wb resume workbench-1 --tdd          # if the original session was TDD
+wb resume workbench-1 --no-tmux
+```
+
+| Flag | Description |
+|---|---|
+| `--no-tmux` | Run agents as subprocesses instead of tmux |
+| `--agent CMD` | Agent CLI command (default: `claude`) |
+| `-j N` / `--max-concurrent` | Max parallel tasks per wave (default: 4) |
+| `--max-retries N` | Max fix attempts after a failed test or review (default: 2) |
+| `--tdd` | Run pending tasks in TDD mode |
+| `--profile PATH` | Use a specific profile.yaml |
+| `--name NAME` | Named profile to resolve |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+For finer-grained control (waves, directive overrides, selective tasks), use `wb run` directly.
 
 ### `wb setup`
 
