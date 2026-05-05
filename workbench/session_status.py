@@ -215,3 +215,64 @@ class SessionStatus:
     def completed_task_ids(self) -> set[str]:
         """Task IDs with status 'done' — used by --only-failed to skip."""
         return {tid for tid, rec in self.tasks.items() if rec.status == "done"}
+
+    def is_complete(self) -> bool:
+        """True iff every task is done AND merged. Empty task list returns False."""
+        if not self.tasks:
+            return False
+        return all(rec.status == "done" and rec.merged for rec in self.tasks.values())
+
+
+def iter_status_files(repo: Path) -> list[tuple[Path, dict]]:
+    """Return (path, raw_yaml_dict) for every .workbench/status-*.yaml, sorted
+    by path. Returns [] if .workbench/ does not exist."""
+    wb_dir = repo / ".workbench"
+    if not wb_dir.exists():
+        return []
+    out: list[tuple[Path, dict]] = []
+    for path in sorted(wb_dir.glob("status-*.yaml")):
+        data = yaml.safe_load(path.read_text()) or {}
+        out.append((path, data))
+    return out
+
+
+def status_file_is_complete(data: dict) -> bool:
+    """True iff every session in the file has all tasks done + merged.
+
+    False for: empty/missing sessions block, any session with empty tasks block,
+    any task with status != 'done', any task with merged != True.
+    """
+    sessions = data.get("sessions") if isinstance(data, dict) else None
+    if not sessions:
+        return False
+    for session_data in sessions.values():
+        tasks = session_data.get("tasks", {}) if isinstance(session_data, dict) else {}
+        if not tasks:
+            return False
+        for rec in tasks.values():
+            if not isinstance(rec, dict):
+                return False
+            if rec.get("status") != "done" or not rec.get("merged"):
+                return False
+    return True
+
+
+def status_file_branches(data: dict) -> set[str]:
+    """Every branch name recorded across all sessions in the file.
+
+    Records with no branch (or non-string branch) are skipped silently.
+    """
+    out: set[str] = set()
+    sessions = data.get("sessions") if isinstance(data, dict) else None
+    if not sessions:
+        return out
+    for session_data in sessions.values():
+        if not isinstance(session_data, dict):
+            continue
+        for rec in session_data.get("tasks", {}).values():
+            if not isinstance(rec, dict):
+                continue
+            branch = rec.get("branch")
+            if isinstance(branch, str) and branch:
+                out.add(branch)
+    return out
