@@ -5,7 +5,13 @@ from __future__ import annotations
 import pytest
 import yaml
 
-from workbench.session_status import SessionStatus, TaskRecord
+from workbench.session_status import (
+    SessionStatus,
+    TaskRecord,
+    iter_status_files,
+    status_file_branches,
+    status_file_is_complete,
+)
 
 
 class TestTaskRecord:
@@ -206,3 +212,186 @@ class TestFindBySession:
         assert found is not None
         assert found.session_branch == "workbench-2"
         assert found.tasks["task-1"].status == "failed"
+
+
+class TestSessionStatusIsComplete:
+    def test_empty_tasks_not_complete(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        assert ss.is_complete() is False
+
+    def test_single_done_merged(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="done", merged=True)
+        assert ss.is_complete() is True
+
+    def test_all_done_merged(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="done", merged=True)
+        ss.record_task("t2", status="done", merged=True)
+        assert ss.is_complete() is True
+
+    def test_done_but_not_merged(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="done", merged=False)
+        assert ss.is_complete() is False
+
+    def test_failed_task(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="failed", merged=True)
+        assert ss.is_complete() is False
+
+    def test_pending_task(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="pending")
+        assert ss.is_complete() is False
+
+    def test_one_complete_one_failed(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("t1", status="done", merged=True)
+        ss.record_task("t2", status="failed", merged=False)
+        assert ss.is_complete() is False
+
+
+class TestIterStatusFiles:
+    def test_missing_workbench_dir(self, tmp_path):
+        assert iter_status_files(tmp_path) == []
+
+    def test_no_status_files(self, tmp_path):
+        (tmp_path / ".workbench").mkdir()
+        assert iter_status_files(tmp_path) == []
+
+    def test_returns_one_per_status_file(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        (wb / "status-a.yaml").write_text(yaml.dump({"sessions": {}}))
+        (wb / "status-b.yaml").write_text(yaml.dump({"sessions": {"x": {"tasks": {}}}}))
+
+        result = iter_status_files(tmp_path)
+
+        assert len(result) == 2
+        # Sorted by path: status-a.yaml comes before status-b.yaml
+        assert result[0][0].name == "status-a.yaml"
+        assert result[1][0].name == "status-b.yaml"
+        assert result[0][1] == {"sessions": {}}
+        assert result[1][1] == {"sessions": {"x": {"tasks": {}}}}
+
+    def test_ignores_non_status_files(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        (wb / "profile.yaml").write_text(yaml.dump({"roles": {}}))
+        (wb / "agents.yaml").write_text(yaml.dump({}))
+        (wb / "plans").mkdir()
+        (wb / "status-real.yaml").write_text(yaml.dump({"sessions": {}}))
+
+        result = iter_status_files(tmp_path)
+
+        assert len(result) == 1
+        assert result[0][0].name == "status-real.yaml"
+
+    def test_handles_empty_yaml(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        (wb / "status-empty.yaml").write_text("")
+
+        result = iter_status_files(tmp_path)
+
+        assert len(result) == 1
+        assert result[0][1] == {}
+
+
+class TestStatusFileIsComplete:
+    def test_empty_dict(self):
+        assert status_file_is_complete({}) is False
+
+    def test_no_sessions_key(self):
+        assert status_file_is_complete({"plan_source": "/x"}) is False
+
+    def test_empty_sessions(self):
+        assert status_file_is_complete({"sessions": {}}) is False
+
+    def test_session_with_empty_tasks(self):
+        assert status_file_is_complete({"sessions": {"workbench-1": {"tasks": {}}}}) is False
+
+    def test_one_session_one_complete_task(self):
+        data = {
+            "sessions": {
+                "workbench-1": {
+                    "tasks": {"t1": {"status": "done", "merged": True, "branch": "wb/t1"}}
+                }
+            }
+        }
+        assert status_file_is_complete(data) is True
+
+    def test_one_task_unmerged(self):
+        data = {
+            "sessions": {
+                "workbench-1": {
+                    "tasks": {"t1": {"status": "done", "merged": False, "branch": "wb/t1"}}
+                }
+            }
+        }
+        assert status_file_is_complete(data) is False
+
+    def test_two_sessions_one_failing(self):
+        data = {
+            "sessions": {
+                "workbench-1": {"tasks": {"t1": {"status": "done", "merged": True}}},
+                "workbench-2": {"tasks": {"t1": {"status": "failed", "merged": False}}},
+            }
+        }
+        assert status_file_is_complete(data) is False
+
+    def test_two_sessions_both_complete(self):
+        data = {
+            "sessions": {
+                "workbench-1": {"tasks": {"t1": {"status": "done", "merged": True}}},
+                "workbench-2": {
+                    "tasks": {
+                        "t1": {"status": "done", "merged": True},
+                        "t2": {"status": "done", "merged": True},
+                    }
+                },
+            }
+        }
+        assert status_file_is_complete(data) is True
+
+
+class TestStatusFileBranches:
+    def test_empty_dict(self):
+        assert status_file_branches({}) == set()
+
+    def test_one_session_two_tasks(self):
+        data = {
+            "sessions": {
+                "workbench-1": {
+                    "tasks": {
+                        "t1": {"status": "done", "merged": True, "branch": "wb/feat-a"},
+                        "t2": {"status": "done", "merged": True, "branch": "wb/feat-b"},
+                    }
+                }
+            }
+        }
+        assert status_file_branches(data) == {"wb/feat-a", "wb/feat-b"}
+
+    def test_two_sessions_shared_branch(self):
+        data = {
+            "sessions": {
+                "workbench-1": {"tasks": {"t1": {"branch": "wb/feat-a"}}},
+                "workbench-2": {"tasks": {"t1": {"branch": "wb/feat-a"}}},
+            }
+        }
+        assert status_file_branches(data) == {"wb/feat-a"}
+
+    def test_skips_records_without_branch(self):
+        data = {
+            "sessions": {
+                "workbench-1": {
+                    "tasks": {
+                        "t1": {"status": "done", "branch": "wb/feat-a"},
+                        "t2": {"status": "pending", "branch": None},
+                        "t3": {"status": "pending"},
+                    }
+                }
+            }
+        }
+        assert status_file_branches(data) == {"wb/feat-a"}

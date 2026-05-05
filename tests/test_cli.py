@@ -708,9 +708,221 @@ def test_clean_creates_workbench_dir(git_repo):
     assert not (git_repo / ".workbench").exists()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["clean", "--yes"])
+        result = runner.invoke(main, ["clean", "--force"])
 
+    assert result.exit_code == 0
     assert (git_repo / ".workbench").is_dir()
+
+
+class TestClean:
+    """Tests for the status-aware wb clean command."""
+
+    def _write_status(self, repo: Path, slug: str, sessions: dict, plan_source: str = "") -> Path:
+        """Write a .workbench/status-<slug>.yaml with the given sessions block."""
+        wb = repo / ".workbench"
+        wb.mkdir(exist_ok=True)
+        path = wb / f"status-{slug}.yaml"
+        data: dict = {"sessions": sessions}
+        if plan_source:
+            data["plan_source"] = plan_source
+        path.write_text(yaml.dump(data))
+        return path
+
+    def _completed_session(self, branch: str = "wb/feat") -> dict:
+        return {
+            "workbench-1": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "merged": True,
+                        "branch": branch,
+                        "last_agent": "reviewer",
+                    }
+                }
+            }
+        }
+
+    def _incomplete_session(self, branch: str = "wb/inflight") -> dict:
+        return {
+            "workbench-1": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "merged": False,
+                        "branch": branch,
+                        "last_agent": "implementor",
+                    }
+                }
+            }
+        }
+
+    def test_default_empty_repo_succeeds(self, git_repo):
+        """wb clean with no status files and no worktrees: zero summary, no errors."""
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean"])
+
+        assert result.exit_code == 0
+        assert "Cleaned up:" in result.output
+
+    def test_default_completed_only_removes_status_file(self, git_repo):
+        """One completed status file with no live worktree: status file removed."""
+        path = self._write_status(git_repo, "p1", self._completed_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean"])
+
+        assert result.exit_code == 0
+        assert not path.exists()
+        assert "1 status file" in result.output
+
+    def test_default_blocks_on_incomplete_status_file(self, git_repo):
+        """Incomplete status file present: error, list it, remove nothing."""
+        path = self._write_status(git_repo, "p1", self._incomplete_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean"])
+
+        assert result.exit_code != 0
+        assert "In-flight workbench artifacts present" in result.output
+        assert "status-p1.yaml" in result.output
+        assert path.exists()  # not removed
+
+    def test_completed_skips_incomplete_silently(self, git_repo):
+        """--completed: removes completed pieces, leaves incomplete ones alone."""
+        completed_path = self._write_status(git_repo, "done-plan", self._completed_session())
+        incomplete_path = self._write_status(git_repo, "wip-plan", self._incomplete_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--completed"])
+
+        assert result.exit_code == 0
+        assert not completed_path.exists()
+        assert incomplete_path.exists()
+
+    def test_force_removes_completed_status_files(self, git_repo):
+        """--force: removes completed status files; incomplete left as run history."""
+        completed_path = self._write_status(git_repo, "done-plan", self._completed_session())
+        incomplete_path = self._write_status(git_repo, "wip-plan", self._incomplete_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--force"])
+
+        assert result.exit_code == 0
+        assert not completed_path.exists()
+        assert incomplete_path.exists()
+
+    def test_force_and_completed_mutually_exclusive(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--force", "--completed"])
+
+        assert result.exit_code != 0
+        assert "mutually exclusive" in result.output
+
+    def test_remove_plans_deletes_existing_plan_source(self, git_repo):
+        """--completed --remove-plans: deletes the plan_source file when it exists."""
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True)
+        plan_file = plans_dir / "my-plan.md"
+        plan_file.write_text("# Plan\n## Task: x\nDo it.\n")
+
+        self._write_status(
+            git_repo, "my-plan", self._completed_session(), plan_source=str(plan_file)
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--completed", "--remove-plans"])
+
+        assert result.exit_code == 0
+        assert not plan_file.exists()
+        assert "1 plan(s)" in result.output
+
+    def test_remove_plans_skips_missing_plan_source(self, git_repo):
+        """--remove-plans with a plan_source that does not exist: no error."""
+        self._write_status(
+            git_repo,
+            "my-plan",
+            self._completed_session(),
+            plan_source=str(git_repo / "does-not-exist.md"),
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--completed", "--remove-plans"])
+
+        assert result.exit_code == 0
+        assert "0 plan(s)" in result.output
+
+    def test_remove_plans_refuses_outside_repo(self, git_repo, tmp_path_factory):
+        """--remove-plans with a plan_source resolving outside the repo: warn + skip.
+
+        The git_repo fixture aliases tmp_path, so we need a sibling tmp path
+        for a file genuinely outside the repo.
+        """
+        outside_dir = tmp_path_factory.mktemp("outside")
+        outside_plan = outside_dir / "outside.md"
+        outside_plan.write_text("# Plan outside repo")
+
+        self._write_status(
+            git_repo,
+            "my-plan",
+            self._completed_session(),
+            plan_source=str(outside_plan),
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--completed", "--remove-plans"])
+
+        assert result.exit_code == 0
+        assert outside_plan.exists()  # not removed
+        assert "outside repo" in result.output
+
+    def test_force_ignores_remove_plans(self, git_repo):
+        """Under --force, --remove-plans is ignored; plan source survives."""
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True)
+        plan_file = plans_dir / "kept.md"
+        plan_file.write_text("# kept")
+
+        self._write_status(git_repo, "kept", self._completed_session(), plan_source=str(plan_file))
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--force", "--remove-plans"])
+
+        assert result.exit_code == 0
+        assert plan_file.exists()  # --force does NOT touch plan source
+
+    def test_dry_run_changes_nothing(self, git_repo):
+        """--dry-run prints would-remove lines; filesystem stays untouched."""
+        path = self._write_status(git_repo, "p1", self._completed_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert path.exists()
+        assert "would remove" in result.output.lower()
+        assert "Would remove:" in result.output
+
+    def test_dry_run_with_incomplete_does_not_error(self, git_repo):
+        """--dry-run avoids the in-flight error so the user can preview the plan."""
+        self._write_status(git_repo, "wip", self._incomplete_session())
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--dry-run"])
+
+        assert result.exit_code == 0
+        assert "Would remove:" in result.output
 
 
 # ---------------------------------------------------------------------------

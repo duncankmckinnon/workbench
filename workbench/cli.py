@@ -769,42 +769,246 @@ def status(repo: Path | None):
         console.print(f"  {line}")
 
 
-@main.command()
-@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-@click.confirmation_option(prompt="Remove all workbench worktrees?")
-def clean(repo: Path | None):
-    """Remove all workbench worktrees and branches."""
-    repo = repo or _find_repo_root()
-    _ensure_workbench_dir(repo)
+def _list_workbench_worktrees(repo: Path) -> list[tuple[str, str | None]]:
+    """Return [(path, branch_or_none), ...] for every workbench worktree.
+
+    Parses ``git worktree list --porcelain``. A worktree is "workbench" if its
+    path contains ``.workbench`` (the convention for ``wb run``-created trees).
+    Branch is recovered from the porcelain ``branch refs/heads/<name>`` line.
+    """
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
         cwd=repo,
         capture_output=True,
         text=True,
     )
-
-    removed = 0
+    worktrees: list[tuple[str, str | None]] = []
+    current_path: str | None = None
+    current_branch: str | None = None
     for line in result.stdout.splitlines():
-        if line.startswith("worktree ") and ".workbench" in line:
-            path = line.split("worktree ", 1)[1]
-            subprocess.run(
-                ["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True
-            )
-            removed += 1
+        if line.startswith("worktree "):
+            if current_path is not None and ".workbench" in current_path:
+                worktrees.append((current_path, current_branch))
+            current_path = line.split("worktree ", 1)[1]
+            current_branch = None
+        elif line.startswith("branch refs/heads/"):
+            current_branch = line.split("branch refs/heads/", 1)[1]
+    if current_path is not None and ".workbench" in current_path:
+        worktrees.append((current_path, current_branch))
+    return worktrees
 
-    # Clean up wb/ branches
+
+def _list_wb_branches(repo: Path) -> list[str]:
+    """Return every ``wb/*`` branch name."""
     result = subprocess.run(
         ["git", "branch", "--list", "wb/*"],
         cwd=repo,
         capture_output=True,
         text=True,
     )
-    for line in result.stdout.splitlines():
-        branch = line.strip()
-        if branch:
-            subprocess.run(["git", "branch", "-D", branch], cwd=repo, capture_output=True)
+    return [line.strip().lstrip("* ") for line in result.stdout.splitlines() if line.strip()]
 
-    console.print(f"[green]Cleaned up {removed} worktree(s).[/green]")
+
+def _resolve_plan_source(plan_source: str, repo: Path) -> Path | None:
+    """Resolve a plan_source string to a Path inside the repo, or return None.
+
+    Returns the resolved Path if it exists and is inside the repo. Returns None
+    in all other cases (missing field, file does not exist, outside the repo).
+    """
+    if not plan_source:
+        return None
+    try:
+        resolved = Path(plan_source).expanduser().resolve()
+    except OSError:
+        return None
+    if not resolved.exists():
+        return None
+    try:
+        if not resolved.is_relative_to(repo.resolve()):
+            return None
+    except ValueError:
+        return None
+    return resolved
+
+
+@main.command()
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.option(
+    "--force",
+    is_flag=True,
+    help="Remove all worktrees and wb/* branches, including in-flight ones.",
+)
+@click.option(
+    "--completed",
+    is_flag=True,
+    help="Only remove artifacts for completed plans; skip in-flight ones silently.",
+)
+@click.option(
+    "--remove-plans",
+    is_flag=True,
+    help="Also delete plan source markdown for completed plans.",
+)
+@click.option(
+    "--dry-run",
+    is_flag=True,
+    help="Print what would be removed without removing anything.",
+)
+def clean(
+    repo: Path | None,
+    force: bool,
+    completed: bool,
+    remove_plans: bool,
+    dry_run: bool,
+):
+    """Remove workbench worktrees, branches, and completed-plan status files.
+
+    Default mode removes only artifacts belonging to completed plans (every
+    task done + merged). Refuses if any in-flight worktrees, ``wb/*`` branches,
+    or incomplete status files exist; pass --completed to skip them silently
+    or --force to wipe everything regardless.
+    """
+    from .session_status import iter_status_files, status_file_branches, status_file_is_complete
+
+    if force and completed:
+        raise click.ClickException("--force and --completed are mutually exclusive")
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    # 1. Partition status files into completed vs incomplete.
+    files = iter_status_files(repo)
+    completed_files: list[tuple[Path, dict]] = []
+    incomplete_files: list[tuple[Path, dict]] = []
+    for path, data in files:
+        if status_file_is_complete(data):
+            completed_files.append((path, data))
+        else:
+            incomplete_files.append((path, data))
+
+    completed_branches: set[str] = set()
+    for _, data in completed_files:
+        completed_branches |= status_file_branches(data)
+
+    # 2. Enumerate live worktrees and branches.
+    worktrees = _list_workbench_worktrees(repo)
+    branches = _list_wb_branches(repo)
+
+    # 3. Classify each.
+    completed_worktrees = [(p, b) for p, b in worktrees if b in completed_branches]
+    inflight_worktrees = [(p, b) for p, b in worktrees if b not in completed_branches]
+    completed_wb_branches = [b for b in branches if b in completed_branches]
+    inflight_wb_branches = [b for b in branches if b not in completed_branches]
+
+    # 4. Default mode: refuse if anything is in-flight.
+    if not force and not completed:
+        blockers: list[str] = []
+        for path, _ in incomplete_files:
+            blockers.append(f"  status file: {path.relative_to(repo)}")
+        for path, branch in inflight_worktrees:
+            label = branch or "(detached)"
+            blockers.append(f"  worktree:    {path} [{label}]")
+        for branch in inflight_wb_branches:
+            blockers.append(f"  branch:      {branch}")
+        if blockers and not dry_run:
+            raise click.ClickException(
+                "In-flight workbench artifacts present:\n"
+                + "\n".join(blockers)
+                + "\n\nRun with --completed to skip these, or --force to remove everything."
+            )
+
+    # 5. Decide the removal set.
+    if force:
+        wt_to_remove = worktrees
+        br_to_remove = branches
+        sf_to_remove = [p for p, _ in completed_files]
+        plan_files: list[Path] = []  # --remove-plans is ignored under --force
+    else:
+        wt_to_remove = completed_worktrees
+        br_to_remove = completed_wb_branches
+        sf_to_remove = [p for p, _ in completed_files]
+        plan_files = []
+        if remove_plans:
+            for _, data in completed_files:
+                src = data.get("plan_source", "") if isinstance(data, dict) else ""
+                resolved = _resolve_plan_source(src, repo)
+                if resolved is not None:
+                    plan_files.append(resolved)
+                elif src and not Path(src).expanduser().resolve().exists():
+                    pass  # silently skip missing
+                elif src:
+                    console.print(f"[yellow]⚠[/yellow] skipping plan source outside repo: {src}")
+
+    # 6. Execute (or preview).
+    counts = {"worktrees": 0, "branches": 0, "status": 0, "plans": 0}
+    verb = "would remove" if dry_run else "removed"
+    style = "[dim]would remove[/dim]" if dry_run else "[green]✓[/green] removed"
+
+    for path, branch in wt_to_remove:
+        if dry_run:
+            console.print(f"{style} worktree {path}")
+        else:
+            r = subprocess.run(
+                ["git", "worktree", "remove", path, "--force"],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode == 0:
+                console.print(f"{style} worktree {path}")
+            else:
+                console.print(f"[red]✗[/red] failed to remove worktree {path}: {r.stderr.strip()}")
+                continue
+        counts["worktrees"] += 1
+
+    for branch in br_to_remove:
+        if dry_run:
+            console.print(f"{style} branch {branch}")
+        else:
+            r = subprocess.run(
+                ["git", "branch", "-D", branch],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            )
+            if r.returncode == 0:
+                console.print(f"{style} branch {branch}")
+            else:
+                console.print(f"[red]✗[/red] failed to remove branch {branch}: {r.stderr.strip()}")
+                continue
+        counts["branches"] += 1
+
+    for path in sf_to_remove:
+        rel = path.relative_to(repo)
+        if dry_run:
+            console.print(f"{style} status file {rel}")
+        else:
+            path.unlink()
+            console.print(f"{style} status file {rel}")
+        counts["status"] += 1
+
+    for path in plan_files:
+        try:
+            rel = path.relative_to(repo)
+        except ValueError:
+            rel = path
+        if dry_run:
+            console.print(f"{style} plan {rel}")
+        else:
+            path.unlink()
+            console.print(f"{style} plan {rel}")
+        counts["plans"] += 1
+
+    # 7. Summary
+    summary = (
+        f"{counts['worktrees']} worktree(s), "
+        f"{counts['branches']} branch(es), "
+        f"{counts['status']} status file(s), "
+        f"{counts['plans']} plan(s)"
+    )
+    if dry_run:
+        console.print(f"\n[bold]Would remove:[/bold] {summary}")
+    else:
+        console.print(f"\n[green]Cleaned up:[/green] {summary}")
 
 
 @main.command()
