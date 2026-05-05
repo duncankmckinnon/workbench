@@ -252,6 +252,61 @@ class TestSessionStatusIsComplete:
         assert ss.is_complete() is False
 
 
+class TestSeedPending:
+    def test_adds_new_tasks_as_pending(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.seed_pending(["task-1", "task-2", "task-3"])
+
+        assert set(ss.tasks.keys()) == {"task-1", "task-2", "task-3"}
+        for rec in ss.tasks.values():
+            assert rec.status == "pending"
+            assert rec.merged is False
+            assert rec.branch is None
+
+    def test_preserves_existing_records(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.record_task("task-1", status="done", branch="wb/done", merged=True)
+        ss.seed_pending(["task-1", "task-2"])
+
+        # task-1 unchanged; task-2 newly seeded as pending
+        assert ss.tasks["task-1"].status == "done"
+        assert ss.tasks["task-1"].merged is True
+        assert ss.tasks["task-1"].branch == "wb/done"
+        assert ss.tasks["task-2"].status == "pending"
+
+    def test_round_trip_with_pending(self, tmp_path):
+        (tmp_path / ".workbench").mkdir()
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.seed_pending(["task-1", "task-2"])
+        ss.save(tmp_path)
+
+        loaded = SessionStatus.load(tmp_path, "p", "workbench-1")
+        assert loaded is not None
+        assert loaded.tasks["task-1"].status == "pending"
+        assert loaded.tasks["task-2"].status == "pending"
+        assert loaded.is_complete() is False
+
+    def test_seeded_pending_makes_status_file_incomplete(self, tmp_path):
+        """A freshly seeded status file must NOT be classified as complete."""
+        (tmp_path / ".workbench").mkdir()
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.seed_pending(["task-1", "task-2"])
+        ss.save(tmp_path)
+
+        path = tmp_path / ".workbench" / "status-p.yaml"
+        data = yaml.safe_load(path.read_text())
+        assert status_file_is_complete(data) is False
+
+    def test_idempotent(self):
+        ss = SessionStatus(plan_slug="p", session_branch="workbench-1")
+        ss.seed_pending(["task-1"])
+        ss.seed_pending(["task-1", "task-2"])
+
+        assert set(ss.tasks.keys()) == {"task-1", "task-2"}
+        # task-1 was pending after first call and still pending after second
+        assert ss.tasks["task-1"].status == "pending"
+
+
 class TestIterStatusFiles:
     def test_missing_workbench_dir(self, tmp_path):
         assert iter_status_files(tmp_path) == []
