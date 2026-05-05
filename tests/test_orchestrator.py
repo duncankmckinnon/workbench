@@ -499,13 +499,13 @@ async def test_fail_fast_allows_full_run_on_success(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# --only-failed
+# --only-incomplete
 # ---------------------------------------------------------------------------
 
 
 @pytest.mark.asyncio
-async def test_only_failed_skips_completed_tasks(tmp_path):
-    """--only-failed skips tasks recorded as 'done' in status.json."""
+async def test_only_incomplete_skips_completed_tasks(tmp_path):
+    """--only-incomplete skips tasks recorded as 'done' in status.json."""
     plan = _make_two_task_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir(parents=True, exist_ok=True)
@@ -537,7 +537,7 @@ async def test_only_failed_skips_completed_tasks(tmp_path):
             repo=repo,
             use_tmux=False,
             session_branch="workbench-1",
-            only_failed=True,
+            only_incomplete=True,
         )
 
     # Only task-2 (Bad Task) should have gone through the pipeline
@@ -547,8 +547,8 @@ async def test_only_failed_skips_completed_tasks(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_only_failed_runs_all_when_no_status(tmp_path):
-    """--only-failed with no prior status.json runs everything."""
+async def test_only_incomplete_runs_all_when_no_status(tmp_path):
+    """--only-incomplete with no prior status.json runs everything."""
     plan = _make_two_task_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir(parents=True, exist_ok=True)
@@ -575,15 +575,15 @@ async def test_only_failed_runs_all_when_no_status(tmp_path):
             repo=repo,
             use_tmux=False,
             session_branch="workbench-1",
-            only_failed=True,
+            only_incomplete=True,
         )
 
     assert sorted(pipeline_calls) == ["task-1", "task-2"]
 
 
 @pytest.mark.asyncio
-async def test_only_failed_ignores_different_session(tmp_path):
-    """--only-failed ignores status.json from a different session branch."""
+async def test_only_incomplete_ignores_different_session(tmp_path):
+    """--only-incomplete ignores status.json from a different session branch."""
     plan = _make_two_task_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir(parents=True, exist_ok=True)
@@ -615,7 +615,7 @@ async def test_only_failed_ignores_different_session(tmp_path):
             repo=repo,
             use_tmux=False,
             session_branch="workbench-1",
-            only_failed=True,
+            only_incomplete=True,
         )
 
     # All tasks should run since the status was from a different session

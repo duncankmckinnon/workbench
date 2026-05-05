@@ -1,7 +1,7 @@
 """Persistent session status tracking.
 
 Writes per-task status to ``.workbench/status-<plan>.yaml`` so that
-``--only-failed`` can reliably skip already-completed tasks,
+``--only-incomplete`` can reliably skip already-completed tasks,
 even when the process was interrupted mid-wave.
 
 Files are named by plan slug. Inside each file, sessions are keyed
@@ -213,7 +213,7 @@ class SessionStatus:
     # -- queries --------------------------------------------------------------
 
     def completed_task_ids(self) -> set[str]:
-        """Task IDs with status 'done' — used by --only-failed to skip."""
+        """Task IDs with status 'done' — used by --only-incomplete to skip."""
         return {tid for tid, rec in self.tasks.items() if rec.status == "done"}
 
     def is_complete(self) -> bool:

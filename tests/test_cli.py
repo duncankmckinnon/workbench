@@ -2229,7 +2229,7 @@ class TestRunWithProfile:
 
 
 # ---------------------------------------------------------------------------
-# wb run --retry-failed / --fail-fast / --only-failed flags
+# wb run --retry-failed / --fail-fast / --only-incomplete flags
 # ---------------------------------------------------------------------------
 
 
@@ -2279,36 +2279,146 @@ def test_run_fail_fast_flag(git_repo, tmp_path):
     assert captured.get("fail_fast") is True
 
 
-def test_run_only_failed_requires_session_branch(git_repo, tmp_path):
-    """--only-failed without --session-branch should error."""
+def test_run_only_incomplete_requires_session_branch(git_repo, tmp_path):
+    """--only-incomplete without --session-branch should error."""
     plan = tmp_path / "plan.md"
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["run", str(plan), "--no-tmux", "--only-failed"])
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux", "--only-incomplete"])
 
     assert result.exit_code != 0
-    assert "--only-failed requires --session-branch" in result.output
+    assert "--only-incomplete requires --session-branch" in result.output
 
 
-def test_run_only_failed_with_session_branch(git_repo, tmp_path):
-    """--only-failed with --session-branch should pass both to run_plan."""
+def test_run_only_incomplete_with_session_branch(git_repo, tmp_path):
+    """--only-incomplete with --session-branch should pass through to run_plan."""
     result, captured = _run_cli_with_capture(
-        git_repo, tmp_path, ["--only-failed", "-b", "workbench-1"]
+        git_repo, tmp_path, ["--only-incomplete", "-b", "workbench-1"]
     )
     assert result.exit_code == 0, result.output
-    assert captured.get("only_failed") is True
+    assert captured.get("only_incomplete") is True
     assert captured.get("session_branch") == "workbench-1"
 
 
 def test_run_flags_default_to_false(git_repo, tmp_path):
-    """Without flags, retry_failed, fail_fast, and only_failed default to False."""
+    """Without flags, retry_failed, fail_fast, and only_incomplete default to False."""
     result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
     assert result.exit_code == 0, result.output
     assert captured.get("retry_failed") is False
     assert captured.get("fail_fast") is False
-    assert captured.get("only_failed") is False
+    assert captured.get("only_incomplete") is False
+
+
+# ---------------------------------------------------------------------------
+# wb resume
+# ---------------------------------------------------------------------------
+
+
+class TestResume:
+    """Tests for wb resume <session-branch>."""
+
+    def _write_status(self, repo: Path, slug: str, session_branch: str, plan_source: str) -> Path:
+        from workbench.session_status import SessionStatus
+
+        ss = SessionStatus(plan_slug=slug, session_branch=session_branch, plan_source=plan_source)
+        ss.record_task("task-1", status="pending")
+        ss.save(repo)
+        return repo / ".workbench" / f"status-{slug}.yaml"
+
+    def test_resume_unknown_session_errors(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["resume", "workbench-doesnotexist"])
+
+        assert result.exit_code != 0
+        assert "No status file found" in result.output
+        assert "workbench-doesnotexist" in result.output
+
+    def test_resume_missing_plan_source_errors(self, git_repo):
+        from workbench.session_status import SessionStatus
+
+        ss = SessionStatus(plan_slug="orphan", session_branch="workbench-1", plan_source="")
+        ss.record_task("task-1", status="pending")
+        ss.save(git_repo)
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["resume", "workbench-1"])
+
+        assert result.exit_code != 0
+        assert "no plan_source recorded" in result.output
+
+    def test_resume_plan_source_does_not_exist_errors(self, git_repo):
+        self._write_status(git_repo, "gone", "workbench-1", plan_source="/nonexistent/plan.md")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["resume", "workbench-1"])
+
+        assert result.exit_code != 0
+        assert "Plan source not found" in result.output
+
+    def test_resume_forwards_to_run_with_only_incomplete(self, git_repo):
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plans_dir / "demo.md"
+        plan_path.write_text("# Plan\n## Task: hello\nDo it.\n")
+        self._write_status(git_repo, "demo", "workbench-1", plan_source=str(plan_path))
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli.run_plan") as mock_run_plan,
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.asyncio") as mock_asyncio,
+            patch("workbench.cli.check_tmux_available", return_value=True),
+        ):
+            import asyncio
+
+            async def fake_run_plan(**kwargs):
+                return []
+
+            mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+            mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+            result = runner.invoke(main, ["resume", "workbench-1", "--no-tmux"])
+
+        assert result.exit_code == 0, result.output
+        kwargs = mock_run_plan.call_args.kwargs
+        assert kwargs["session_branch"] == "workbench-1"
+        assert kwargs["only_incomplete"] is True
+        # Plan path passed through
+        assert Path(str(kwargs["plan"].source)).name == "demo.md"
+
+    def test_resume_passes_through_tdd(self, git_repo):
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plans_dir / "demo.md"
+        plan_path.write_text("# Plan\n## Task: hello\nDo it.\n")
+        self._write_status(git_repo, "demo", "workbench-1", plan_source=str(plan_path))
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli.run_plan") as mock_run_plan,
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.asyncio") as mock_asyncio,
+            patch("workbench.cli.check_tmux_available", return_value=True),
+        ):
+            import asyncio
+
+            async def fake_run_plan(**kwargs):
+                return []
+
+            mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+            mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+            result = runner.invoke(main, ["resume", "workbench-1", "--no-tmux", "--tdd"])
+
+        assert result.exit_code == 0, result.output
+        kwargs = mock_run_plan.call_args.kwargs
+        assert kwargs["tdd"] is True
+        assert kwargs["only_incomplete"] is True
 
 
 # ---------------------------------------------------------------------------
