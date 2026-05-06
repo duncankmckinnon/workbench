@@ -313,3 +313,251 @@ class TestDocConsistency:
         skill = _read(SKILL_MD)
         assert "directive_extend" in readme
         assert "directive_extend" in skill
+
+
+# ---------------------------------------------------------------------------
+# README.md — Plan frontmatter section
+# ---------------------------------------------------------------------------
+
+# The 17 allowed frontmatter keys per the schema specification.
+FRONTMATTER_KEYS = [
+    "session_branch",
+    "name",
+    "base",
+    "local",
+    "agent",
+    "profile",
+    "profile_name",
+    "max_concurrent",
+    "max_retries",
+    "tdd",
+    "skip_test",
+    "skip_review",
+    "retry_failed",
+    "fail_fast",
+    "cleanup",
+    "keep_branches",
+    "push",
+]
+
+
+class TestReadmeFrontmatterSection:
+    """README.md must contain a Plan frontmatter section in Getting started."""
+
+    def test_frontmatter_heading_exists(self):
+        content = _read(README)
+        assert "### Plan frontmatter (optional)" in content
+
+    def test_frontmatter_after_preview_before_run(self):
+        content = _read(README)
+        preview_pos = content.index("wb preview plan.md")
+        fm_pos = content.index("### Plan frontmatter (optional)")
+        run_pos = content.index("### 3. Run the plan")
+        assert preview_pos < fm_pos < run_pos
+
+    def test_frontmatter_shows_yaml_block(self):
+        content = _read(README)
+        assert "---\nsession_branch:" in content or "---\r\nsession_branch:" in content
+
+    def test_frontmatter_backwards_compat_note(self):
+        content = _read(README)
+        # Must note that plans without frontmatter work as before
+        assert "without frontmatter" in content.lower() or "Without frontmatter" in content
+
+    def test_cli_overrides_frontmatter_note(self):
+        content = _read(README)
+        assert (
+            "CLI flags always override frontmatter" in content
+            or "CLI flags override frontmatter" in content
+        )
+
+    def test_links_to_schema_table(self):
+        content = _read(README)
+        assert "frontmatter-readable-flags" in content.lower()
+
+
+class TestReadmeFrontmatterSchemaTable:
+    """README.md CLI reference must have the full frontmatter schema table."""
+
+    def test_schema_heading_exists(self):
+        content = _read(README)
+        assert "#### Frontmatter-readable flags" in content
+
+    def test_schema_table_has_all_17_keys(self):
+        content = _read(README)
+        # Extract the section after the heading
+        start = content.index("#### Frontmatter-readable flags")
+        # Find the next heading (### or ####)
+        rest = content[start:]
+        next_heading = rest.find("\n### ", 1)
+        if next_heading == -1:
+            next_heading = len(rest)
+        table_section = rest[:next_heading]
+        for key in FRONTMATTER_KEYS:
+            assert f"`{key}`" in table_section, f"README frontmatter table missing key: {key}"
+
+    def test_schema_table_has_3_columns(self):
+        content = _read(README)
+        start = content.index("#### Frontmatter-readable flags")
+        rest = content[start:]
+        # Header row should have Key | CLI flag | Type
+        assert "| Key | CLI flag | Type |" in rest
+
+    def test_unknown_keys_raise_error_noted(self):
+        content = _read(README)
+        start = content.index("#### Frontmatter-readable flags")
+        rest = content[start : start + 2000]
+        assert "unknown keys" in rest.lower() or "Unknown keys" in rest
+
+    def test_schema_table_row_count(self):
+        """Table must have exactly 17 data rows (one per allowed key)."""
+        content = _read(README)
+        start = content.index("#### Frontmatter-readable flags")
+        next_heading = content.find("\n### ", start + 1)
+        table_section = content[start:next_heading] if next_heading != -1 else content[start:]
+        # Count rows starting with | ` (data rows have backtick-quoted keys)
+        data_rows = [line for line in table_section.splitlines() if line.startswith("| `")]
+        assert len(data_rows) == 17, f"Expected 17 data rows, got {len(data_rows)}"
+
+
+class TestReadmeResumesFrontmatterNote:
+    """wb resume section must note frontmatter is read from plan_source."""
+
+    def test_resume_frontmatter_note(self):
+        content = _read(README)
+        # Find the wb resume section
+        resume_pos = content.index("### `wb resume`")
+        rest = content[resume_pos : resume_pos + 1000]
+        assert "frontmatter" in rest.lower()
+        assert "plan_source" in rest
+
+    def test_resume_precedence_note(self):
+        content = _read(README)
+        resume_pos = content.index("### `wb resume`")
+        rest = content[resume_pos : resume_pos + 1000]
+        assert "precedence" in rest.lower() or "same" in rest.lower()
+
+
+# ---------------------------------------------------------------------------
+# SKILL.md — Plan run-config (frontmatter) section
+# ---------------------------------------------------------------------------
+
+
+class TestSkillFrontmatterSection:
+    """SKILL.md must contain a Plan run-config (frontmatter) section."""
+
+    def test_frontmatter_heading_exists(self):
+        content = _read(SKILL_MD)
+        assert "## Plan run-config (frontmatter)" in content
+
+    def test_frontmatter_between_plan_format_and_plan_sections(self):
+        content = _read(SKILL_MD)
+        plan_format_pos = content.index("## Plan Format")
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        plan_sections_pos = content.index("### Plan Sections")
+        assert plan_format_pos < fm_pos < plan_sections_pos
+
+    def test_frontmatter_shows_yaml_example(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        rest = content[fm_pos : fm_pos + 2000]
+        assert "session_branch:" in rest
+        assert "tdd:" in rest
+
+    def test_schema_table_has_all_17_keys(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        # Use "### Plan Sections" as the boundary (next sibling subsection)
+        end_pos = content.index("### Plan Sections")
+        section = content[fm_pos:end_pos]
+        for key in FRONTMATTER_KEYS:
+            assert f"`{key}`" in section, f"SKILL.md frontmatter table missing key: {key}"
+
+    def test_schema_table_row_count(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        end_pos = content.index("### Plan Sections")
+        section = content[fm_pos:end_pos]
+        data_rows = [line for line in section.splitlines() if line.startswith("| `")]
+        assert len(data_rows) == 17, f"Expected 17 data rows, got {len(data_rows)}"
+
+    def test_precedence_documented(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        rest = content[fm_pos : fm_pos + 3000]
+        assert "### Precedence" in rest
+        assert "CLI flag > frontmatter > built-in default" in rest
+
+    def test_not_allowed_keys_documented(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        rest = content[fm_pos : fm_pos + 3000]
+        assert "### Not allowed in frontmatter" in rest
+        assert "--repo" in rest
+        assert "--no-tmux" in rest
+        assert "--only-incomplete" in rest
+
+    def test_unknown_keys_raise_error(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        rest = content[fm_pos : fm_pos + 3000]
+        assert "unknown keys" in rest.lower() or "Unknown keys" in rest
+
+    def test_click_parameter_source_mentioned(self):
+        content = _read(SKILL_MD)
+        fm_pos = content.index("## Plan run-config (frontmatter)")
+        rest = content[fm_pos : fm_pos + 3000]
+        assert "get_parameter_source" in rest
+
+
+class TestSkillKeyCommandsFrontmatter:
+    """SKILL.md Key commands section must mention frontmatter for wb run."""
+
+    def test_wb_run_mentions_frontmatter(self):
+        content = _read(SKILL_MD)
+        key_cmds_pos = content.index("## Key commands")
+        rest = content[key_cmds_pos : key_cmds_pos + 1000]
+        # Find the wb run line
+        lines = rest.splitlines()
+        run_line = [l for l in lines if "wb run <plan>" in l]
+        assert len(run_line) == 1, "Expected exactly one 'wb run <plan>' line in Key commands"
+        assert "frontmatter" in run_line[0].lower()
+
+
+# ---------------------------------------------------------------------------
+# Cross-document consistency — frontmatter
+# ---------------------------------------------------------------------------
+
+
+class TestDocFrontmatterConsistency:
+    """README.md and SKILL.md must be consistent on frontmatter keys."""
+
+    def test_both_have_same_schema_keys(self):
+        readme = _read(README)
+        skill = _read(SKILL_MD)
+        for key in FRONTMATTER_KEYS:
+            assert f"`{key}`" in readme, f"README missing frontmatter key: {key}"
+            assert f"`{key}`" in skill, f"SKILL.md missing frontmatter key: {key}"
+
+    def test_both_mention_cli_overrides(self):
+        readme = _read(README)
+        skill = _read(SKILL_MD)
+        # Both should state CLI wins over frontmatter
+        assert "cli flag" in readme.lower() or "CLI flags" in readme
+        assert "cli flag" in skill.lower() or "CLI flag" in skill
+
+    def test_both_show_frontmatter_example(self):
+        readme = _read(README)
+        skill = _read(SKILL_MD)
+        assert "session_branch:" in readme
+        assert "session_branch:" in skill
+
+    def test_readme_example_is_subset_of_skill_example(self):
+        """README shows 3-4 representative fields; SKILL shows more."""
+        readme = _read(README)
+        skill = _read(SKILL_MD)
+        # Both should have tdd and session_branch in their examples
+        assert "tdd: true" in readme
+        assert "tdd: true" in skill
+        assert "session_branch: workbench-auth" in readme
+        assert "session_branch: workbench-auth" in skill

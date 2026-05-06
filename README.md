@@ -136,6 +136,25 @@ Tasks without dependencies run in the earliest wave. Keep titles short (2-4 word
 
 Use `wb preview plan.md` to dry-run and verify tasks and waves before executing.
 
+### Plan frontmatter (optional)
+
+Plans can declare run-time defaults in a YAML frontmatter block at the top of the file (before `# Title`). Without frontmatter, plans behave exactly as today.
+
+```markdown
+---
+session_branch: workbench-auth
+base: feature-auth
+tdd: true
+max_concurrent: 6
+---
+# Auth refactor
+
+## Context
+...
+```
+
+CLI flags always override frontmatter values. See [Frontmatter-readable flags](#frontmatter-readable-flags) in the CLI reference for the full schema.
+
 ### 3. Run the plan
 
 ```bash
@@ -474,9 +493,33 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
+#### Frontmatter-readable flags
+
+Plans may declare these keys in a YAML frontmatter block (`---` delimiters) at the top of the file. Values act as defaults; explicit CLI flags always win. Unknown keys raise an error.
+
+| Key | CLI flag | Type |
+|---|---|---|
+| `session_branch` | `-b` / `--session-branch` | string |
+| `name` | `--name` | string |
+| `base` | `--base` | string |
+| `local` | `--local` | bool |
+| `agent` | `--agent` | string |
+| `profile` | `--profile` | string (path) |
+| `profile_name` | `--profile-name` | string |
+| `max_concurrent` | `-j` / `--max-concurrent` | int (>= 1) |
+| `max_retries` | `--max-retries` | int (>= 0) |
+| `tdd` | `--tdd` | bool |
+| `skip_test` | `--skip-test` | bool |
+| `skip_review` | `--skip-review` | bool |
+| `retry_failed` | `--retry-failed` | bool |
+| `fail_fast` | `--fail-fast` | bool |
+| `cleanup` | `--cleanup` | bool |
+| `keep_branches` | `--keep-branches` | bool |
+| `push` | `--push` | bool |
+
 ### `wb resume`
 
-Sugar over `wb run <plan> -b <session> --only-incomplete`. Looks up the session in `.workbench/status-*.yaml`, finds the original plan via the recorded `plan_source`, and re-runs every task that isn't `done + merged`.
+Sugar over `wb run <plan> -b <session> --only-incomplete`. Looks up the session in `.workbench/status-*.yaml`, finds the original plan via the recorded `plan_source`, and re-runs every task that isn't `done + merged`. Frontmatter is read from the plan referenced by the session's `plan_source`; same precedence rules as `wb run`.
 
 ```bash
 wb resume workbench-1
