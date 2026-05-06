@@ -2863,3 +2863,131 @@ def test_agents_remove_not_found(git_repo):
 
     assert result.exit_code != 0
     assert "not found" in result.output
+
+
+# ---------------------------------------------------------------------------
+# Frontmatter run_config → CLI merge
+# ---------------------------------------------------------------------------
+
+
+def _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, extra_args=None):
+    """Invoke `wb run` with a plan containing frontmatter and capture run_plan kwargs."""
+    import asyncio
+
+    plan = tmp_path / "plan.md"
+    plan.write_text(plan_text)
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_run_plan(**kwargs):
+            return []
+
+        mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux"] + (extra_args or []))
+
+        captured = dict(mock_run_plan.call_args.kwargs) if mock_run_plan.called else {}
+
+    return result, captured
+
+
+class TestRunConfigFrontmatter:
+    """Tests for frontmatter run_config merging into CLI flags."""
+
+    def test_frontmatter_tdd_no_cli_flag(self, git_repo, tmp_path):
+        """Plan with tdd: true, no CLI --tdd → tdd is True."""
+        plan_text = "---\ntdd: true\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(
+            git_repo, tmp_path, plan_text, ["-b", "workbench-1"]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured.get("tdd") is True
+
+    def test_frontmatter_tdd_with_cli_skip_test_errors(self, git_repo, tmp_path):
+        """Plan with tdd: true, CLI --skip-test → mutual-exclusivity error."""
+        plan_text = "---\ntdd: true\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, _ = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, ["--skip-test"])
+        assert result.exit_code != 0
+        assert "--tdd and --skip-test are mutually exclusive" in result.output
+
+    def test_cli_overrides_frontmatter_string(self, git_repo, tmp_path):
+        """Plan with agent: gemini, CLI --agent claude → agent == 'claude'."""
+        plan_text = "---\nagent: gemini\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(
+            git_repo, tmp_path, plan_text, ["--agent", "claude"]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured.get("agent_cmd") == "claude"
+
+    def test_cli_overrides_frontmatter_int(self, git_repo, tmp_path):
+        """Plan with max_concurrent: 8, CLI -j 2 → max_concurrent == 2."""
+        plan_text = "---\nmax_concurrent: 8\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, ["-j", "2"])
+        assert result.exit_code == 0, result.output
+        assert captured.get("max_concurrent") == 2
+
+    def test_frontmatter_session_branch_used_when_no_b(self, git_repo, tmp_path):
+        """Plan with session_branch: workbench-feat, no CLI -b → session_branch used."""
+        plan_text = (
+            "---\nsession_branch: workbench-feat\n---\n# Plan\n## Task: hello\nDo something\n"
+        )
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code == 0, result.output
+        assert captured.get("session_branch") == "workbench-feat"
+
+    def test_frontmatter_session_branch_overridden_by_b(self, git_repo, tmp_path):
+        """Plan with session_branch: workbench-feat, CLI -b workbench-other → overridden."""
+        plan_text = (
+            "---\nsession_branch: workbench-feat\n---\n# Plan\n## Task: hello\nDo something\n"
+        )
+        result, captured = _run_cli_with_frontmatter(
+            git_repo, tmp_path, plan_text, ["-b", "workbench-other"]
+        )
+        assert result.exit_code == 0, result.output
+        assert captured.get("session_branch") == "workbench-other"
+
+    def test_frontmatter_max_concurrent_used(self, git_repo, tmp_path):
+        """Plan with max_concurrent: 7 → max_concurrent == 7."""
+        plan_text = "---\nmax_concurrent: 7\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code == 0, result.output
+        assert captured.get("max_concurrent") == 7
+
+    def test_frontmatter_profile_path_resolved(self, git_repo, tmp_path):
+        """Plan with profile: /abs/path/profile.yaml → profile_path set."""
+        profile = tmp_path / "profile.yaml"
+        profile.write_text("roles: {}\n")
+        plan_text = f"---\nprofile: {profile}\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code == 0, result.output
+        assert captured.get("profile_path") == str(profile)
+
+    def test_frontmatter_unknown_key_surfaces_error(self, git_repo, tmp_path):
+        """Plan with bogus: 1 → exits non-zero with key name in message."""
+        plan_text = "---\nbogus: 1\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, _ = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code != 0
+        assert "bogus" in result.output
+
+    def test_no_frontmatter_unchanged(self, git_repo, tmp_path):
+        """Plan without frontmatter → all defaults unchanged."""
+        plan_text = "# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code == 0, result.output
+        assert captured.get("tdd") is False
+        assert captured.get("max_concurrent") == 4
+        assert captured.get("agent_cmd") == "claude"
+        assert captured.get("session_branch") is None
+
+    def test_frontmatter_tdd_explicit_cli_tdd_passes(self, git_repo, tmp_path):
+        """Plan with tdd: true, CLI --tdd → tdd is True (both agree)."""
+        plan_text = "---\ntdd: true\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, ["--tdd"])
+        assert result.exit_code == 0, result.output
+        assert captured.get("tdd") is True
