@@ -57,6 +57,51 @@ def _default_directive_text(role: str, sub_mode: str | None = None) -> str:
 
 console = Console()
 
+# ---------------------------------------------------------------------------
+# Frontmatter → CLI parameter merging
+# ---------------------------------------------------------------------------
+
+_FRONTMATTER_TO_PARAM: dict[str, str] = {
+    "session_branch": "session_branch",
+    "name": "session_name",
+    "base": "base",
+    "local": "local",
+    "agent": "agent",
+    "profile": "profile_path",
+    "profile_name": "profile_name",
+    "max_concurrent": "max_concurrent",
+    "max_retries": "max_retries",
+    "tdd": "tdd",
+    "skip_test": "skip_test",
+    "skip_review": "skip_review",
+    "retry_failed": "retry_failed",
+    "fail_fast": "fail_fast",
+    "cleanup": "cleanup",
+    "keep_branches": "keep_branches",
+    "push": "push",
+}
+
+
+def _apply_plan_run_config(
+    ctx: click.Context,
+    plan_run_config: dict[str, object],
+    flag_values: dict[str, object],
+) -> dict[str, object]:
+    """For each plan-shaped flag, fall back to the frontmatter value when
+    the user did not pass an explicit CLI flag.  CLI explicit > frontmatter
+    > built-in default.  The returned dict has only the keys passed in
+    *flag_values*; other frontmatter keys are silently ignored at this layer
+    (the parser already validated the schema).
+    """
+    out = dict(flag_values)
+    for name in flag_values:
+        if name not in plan_run_config:
+            continue
+        source = ctx.get_parameter_source(name)
+        if source is None or source == click.core.ParameterSource.DEFAULT:
+            out[name] = plan_run_config[name]
+    return out
+
 
 def _find_repo_root(start: Path = None) -> Path:
     """Find the git repo root from the current directory."""
@@ -523,15 +568,60 @@ def run(
             "Or use --no-tmux to run without it."
         )
 
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    try:
+        plan = parse_plan(plan_path.resolve())
+    except ValueError as e:
+        raise click.ClickException(str(e))
+
+    # Merge frontmatter run_config into effective flag values
+    ctx = click.get_current_context()
+    mapped_run_config = {_FRONTMATTER_TO_PARAM[k]: v for k, v in plan.run_config.items()}
+    flag_values = {
+        "session_branch": session_branch,
+        "session_name": session_name,
+        "base": base,
+        "local": local,
+        "agent": agent,
+        "profile_path": profile_path,
+        "profile_name": profile_name,
+        "max_concurrent": max_concurrent,
+        "max_retries": max_retries,
+        "tdd": tdd,
+        "skip_test": skip_test,
+        "skip_review": skip_review,
+        "retry_failed": retry_failed,
+        "fail_fast": fail_fast,
+        "cleanup": cleanup,
+        "keep_branches": keep_branches,
+        "push": push,
+    }
+    effective = _apply_plan_run_config(ctx, mapped_run_config, flag_values)
+    session_branch = effective["session_branch"]
+    session_name = effective["session_name"]
+    base = effective["base"]
+    local = effective["local"]
+    agent = effective["agent"]
+    profile_path = effective["profile_path"]
+    profile_name = effective["profile_name"]
+    max_concurrent = effective["max_concurrent"]
+    max_retries = effective["max_retries"]
+    tdd = effective["tdd"]
+    skip_test = effective["skip_test"]
+    skip_review = effective["skip_review"]
+    retry_failed = effective["retry_failed"]
+    fail_fast = effective["fail_fast"]
+    cleanup = effective["cleanup"]
+    keep_branches = effective["keep_branches"]
+    push = effective["push"]
+
     if tdd and skip_test:
         raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
 
     if only_incomplete and not session_branch:
         raise click.ClickException("--only-incomplete requires --session-branch (-b).")
-
-    repo = repo or _find_repo_root()
-    _ensure_workbench_dir(repo)
-    plan = parse_plan(plan_path.resolve())
 
     if not plan.tasks:
         raise click.ClickException("No tasks found in plan. Use '## Task: <title>' sections.")
@@ -727,7 +817,10 @@ def resume(
 @click.argument("plan_path", type=click.Path(exists=True, path_type=Path))
 def preview(plan_path: Path):
     """Preview tasks parsed from a plan (dry run)."""
-    plan = parse_plan(plan_path.resolve())
+    try:
+        plan = parse_plan(plan_path.resolve())
+    except ValueError as e:
+        raise click.ClickException(str(e))
 
     if not plan.tasks:
         raise click.ClickException("No tasks found in plan.")
@@ -1269,7 +1362,10 @@ def merge(
 
     plan_slug = None
     if plan_path:
-        plan = parse_plan(plan_path.resolve())
+        try:
+            plan = parse_plan(plan_path.resolve())
+        except ValueError as e:
+            raise click.ClickException(str(e))
         plan_slug = plan.slug
 
     asyncio.run(
