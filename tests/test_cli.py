@@ -2233,7 +2233,7 @@ class TestRunWithProfile:
 # ---------------------------------------------------------------------------
 
 
-def _run_cli_with_capture(git_repo, tmp_path, extra_args):
+def _run_cli_with_capture(git_repo, tmp_path, extra_args, plan_text=None):
     """Helper to invoke `wb run` with a fake run_plan that captures kwargs.
 
     Returns (CliRunner result, kwargs dict passed to run_plan).
@@ -2241,7 +2241,7 @@ def _run_cli_with_capture(git_repo, tmp_path, extra_args):
     import asyncio
 
     plan = tmp_path / "plan.md"
-    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+    plan.write_text(plan_text or "# Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()
 
@@ -2871,30 +2871,11 @@ def test_agents_remove_not_found(git_repo):
 
 
 def _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, extra_args=None):
-    """Invoke `wb run` with a plan containing frontmatter and capture run_plan kwargs."""
-    import asyncio
+    """Invoke `wb run` with a plan containing frontmatter and capture run_plan kwargs.
 
-    plan = tmp_path / "plan.md"
-    plan.write_text(plan_text)
-
-    runner = CliRunner()
-    with (
-        patch("workbench.cli.run_plan") as mock_run_plan,
-        patch("workbench.cli._find_repo_root", return_value=git_repo),
-        patch("workbench.cli.asyncio") as mock_asyncio,
-    ):
-
-        async def fake_run_plan(**kwargs):
-            return []
-
-        mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
-        mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
-
-        result = runner.invoke(main, ["run", str(plan), "--no-tmux"] + (extra_args or []))
-
-        captured = dict(mock_run_plan.call_args.kwargs) if mock_run_plan.called else {}
-
-    return result, captured
+    Thin wrapper around ``_run_cli_with_capture`` that accepts custom plan text.
+    """
+    return _run_cli_with_capture(git_repo, tmp_path, extra_args or [], plan_text=plan_text)
 
 
 class TestRunConfigFrontmatter:
@@ -2984,6 +2965,13 @@ class TestRunConfigFrontmatter:
         assert captured.get("max_concurrent") == 4
         assert captured.get("agent_cmd") == "claude"
         assert captured.get("session_branch") is None
+
+    def test_frontmatter_only_incomplete_not_allowed(self, git_repo, tmp_path):
+        """only_incomplete in frontmatter → parser rejects it as unknown key."""
+        plan_text = "---\nonly_incomplete: true\n---\n# Plan\n## Task: hello\nDo something\n"
+        result, _ = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
+        assert result.exit_code != 0
+        assert "only_incomplete" in result.output
 
     def test_frontmatter_tdd_explicit_cli_tdd_passes(self, git_repo, tmp_path):
         """Plan with tdd: true, CLI --tdd → tdd is True (both agree)."""
