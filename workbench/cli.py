@@ -81,6 +81,13 @@ _FRONTMATTER_TO_PARAM: dict[str, str] = {
     "push": "push",
 }
 
+# Click's --profile option converts the string to a Path via
+# type=click.Path(path_type=Path); frontmatter values bypass that, so we
+# coerce here to keep downstream code (Profile.resolve calls .exists()) happy.
+_FRONTMATTER_PARAM_COERCIONS: dict[str, type] = {
+    "profile_path": Path,
+}
+
 
 def _apply_plan_run_config(
     ctx: click.Context,
@@ -99,7 +106,9 @@ def _apply_plan_run_config(
             continue
         source = ctx.get_parameter_source(name)
         if source is None or source == click.core.ParameterSource.DEFAULT:
-            out[name] = plan_run_config[name]
+            value = plan_run_config[name]
+            coerce = _FRONTMATTER_PARAM_COERCIONS.get(name)
+            out[name] = coerce(value) if coerce else value
     return out
 
 
@@ -416,7 +425,10 @@ def main():
     "--session-branch",
     "-b",
     default=None,
-    help="Resume from an existing session branch (e.g. workbench-1).",
+    help=(
+        "Session branch name to use for this run. Created from --base if it "
+        "doesn't exist; reused if it does. Alias for --name."
+    ),
 )
 @click.option(
     "--wave",
@@ -470,7 +482,11 @@ def main():
     "--name",
     "session_name",
     default=None,
-    help="Name the session branch (creates workbench-<name> instead of workbench-<N>).",
+    help=(
+        "Session branch name to use for this run. Created from --base if it "
+        "doesn't exist; reused if it does. Alias for --session-branch (-b). "
+        "Without either, the session is auto-numbered as workbench-<N>."
+    ),
 )
 @click.option(
     "--retry-failed",

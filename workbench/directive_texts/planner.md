@@ -35,7 +35,7 @@ Emit a `---`-delimited YAML frontmatter block at the very top of every plan, BEF
 
 **Rules:**
 - Only use keys from the schema below. Unknown keys cause a parse error.
-- Omit `session_branch` and `name` unless the user explicitly named the session.
+- `session_branch` and `name` are aliases — both declare the session branch for this plan. Set one (not both) when the user explicitly named the session; pair with `base` if the session should branch from somewhere other than `main`. The orchestrator creates the branch from `base` if it doesn't exist and reuses it on subsequent runs.
 - Include keys where you have an opinion (e.g. `tdd`, `agent`, `max_concurrent`).
 - Omit keys where the built-in default is fine.
 
@@ -43,8 +43,8 @@ Emit a `---`-delimited YAML frontmatter block at the very top of every plan, BEF
 
 | Key | Type |
 |---|---|
-| `session_branch` | string |
-| `name` | string |
+| `session_branch` | string (alias of `name`) |
+| `name` | string (alias of `session_branch`) |
 | `base` | string |
 | `local` | bool |
 | `agent` | string |

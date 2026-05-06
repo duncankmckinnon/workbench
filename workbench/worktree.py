@@ -44,6 +44,16 @@ def delete_branch(repo: Path, branch: str) -> None:
     )
 
 
+def branch_exists(repo: Path, branch: str) -> bool:
+    """Return True if a local branch with this name exists."""
+    result = subprocess.run(
+        ["git", "show-ref", "--verify", "--quiet", f"refs/heads/{branch}"],
+        cwd=repo,
+        capture_output=True,
+    )
+    return result.returncode == 0
+
+
 def get_main_branch(repo: Path) -> str:
     """Detect the main/default branch."""
     result = subprocess.run(

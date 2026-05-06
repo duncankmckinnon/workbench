@@ -2941,13 +2941,19 @@ class TestRunConfigFrontmatter:
         assert captured.get("max_concurrent") == 7
 
     def test_frontmatter_profile_path_resolved(self, git_repo, tmp_path):
-        """Plan with profile: /abs/path/profile.yaml → profile_path set."""
+        """Plan with profile: /abs/path/profile.yaml → profile_path set as Path.
+
+        Must be a Path (not str) so downstream code (Profile.resolve) can call
+        Path methods like .exists() on it — matching what click's --profile
+        option produces via type=click.Path(path_type=Path).
+        """
         profile = tmp_path / "profile.yaml"
         profile.write_text("roles: {}\n")
         plan_text = f"---\nprofile: {profile}\n---\n# Plan\n## Task: hello\nDo something\n"
         result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text)
         assert result.exit_code == 0, result.output
-        assert captured.get("profile_path") == str(profile)
+        assert captured.get("profile_path") == profile
+        assert isinstance(captured.get("profile_path"), Path)
 
     def test_frontmatter_unknown_key_surfaces_error(self, git_repo, tmp_path):
         """Plan with bogus: 1 → exits non-zero with key name in message."""
