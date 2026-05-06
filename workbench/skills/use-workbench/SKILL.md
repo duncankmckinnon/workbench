@@ -53,6 +53,57 @@ Detailed description of what to implement...
 <What tests to write, what command to run, what passing looks like>
 ```
 
+## Plan run-config (frontmatter)
+
+Plans can declare run-time defaults in a `---`-delimited YAML block at the very top of the file, before `# Title`:
+
+```markdown
+---
+session_branch: workbench-auth
+base: feature-auth
+tdd: true
+agent: claude
+max_concurrent: 6
+profile_name: fast
+---
+# Auth refactor
+
+## Context
+...
+```
+
+### Schema
+
+| Key | CLI flag | Type |
+|---|---|---|
+| `session_branch` | `-b` / `--session-branch` | string |
+| `name` | `--name` | string |
+| `base` | `--base` | string |
+| `local` | `--local` | bool |
+| `agent` | `--agent` | string |
+| `profile` | `--profile` | string (path) |
+| `profile_name` | `--profile-name` | string |
+| `max_concurrent` | `-j` / `--max-concurrent` | int (>= 1) |
+| `max_retries` | `--max-retries` | int (>= 0) |
+| `tdd` | `--tdd` | bool |
+| `skip_test` | `--skip-test` | bool |
+| `skip_review` | `--skip-review` | bool |
+| `retry_failed` | `--retry-failed` | bool |
+| `fail_fast` | `--fail-fast` | bool |
+| `cleanup` | `--cleanup` | bool |
+| `keep_branches` | `--keep-branches` | bool |
+| `push` | `--push` | bool |
+
+### Precedence
+
+CLI flag > frontmatter > built-in default. Determined via `click.Context.get_parameter_source()`.
+
+### Not allowed in frontmatter
+
+`--repo`, `--no-tmux`, `-w`/`--start-wave`/`--end-wave`, `--task`, `--only-incomplete`, and `*-directive` flags are per-invocation and not plan-shaped — they stay CLI-only.
+
+Unknown keys raise `ValueError` — typos are never silently ignored.
+
 ### Plan Sections
 
 - `## Context` — Injected into every agent's prompt. Describe the project, what's being built, and why.
@@ -395,7 +446,7 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 
 ## Key commands
 
-- `wb run <plan>` — execute a plan with parallel agents
+- `wb run <plan>` — execute a plan; CLI flags override frontmatter declared at the top of the plan
 - `wb run plan.md --name auth-feature` — name the session branch
 - `wb run plan.md --keep-branches` — keep task branches after merging
 - `wb run plan.md --tdd` — test-driven: tests first, then implement
