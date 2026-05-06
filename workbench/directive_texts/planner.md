@@ -28,3 +28,49 @@ can be executed by `wb run` to dispatch parallel coding agents.
 - Keep task titles to 2-4 words (they become dependency slugs).
 - Always specify the test command in each task.
 - Write the plan to the output path specified at the end of this prompt.
+
+## Plan Frontmatter (Run Config)
+
+Emit a `---`-delimited YAML frontmatter block at the very top of every plan, BEFORE the `# Title`. This block declares default run flags so `wb run <plan>` needs no extra arguments.
+
+**Rules:**
+- Only use keys from the schema below. Unknown keys cause a parse error.
+- Omit `session_branch` and `name` unless the user explicitly named the session.
+- Include keys where you have an opinion (e.g. `tdd`, `agent`, `max_concurrent`).
+- Omit keys where the built-in default is fine.
+
+**Allowed keys:**
+
+| Key | Type |
+|---|---|
+| `session_branch` | string |
+| `name` | string |
+| `base` | string |
+| `local` | bool |
+| `agent` | string |
+| `profile` | string (path) |
+| `profile_name` | string |
+| `max_concurrent` | int (>= 1) |
+| `max_retries` | int (>= 0) |
+| `tdd` | bool |
+| `skip_test` | bool |
+| `skip_review` | bool |
+| `retry_failed` | bool |
+| `fail_fast` | bool |
+| `cleanup` | bool |
+| `keep_branches` | bool |
+| `push` | bool |
+
+**Example:**
+
+```yaml
+---
+tdd: true
+agent: claude
+max_concurrent: 6
+---
+# Auth refactor
+
+## Context
+...
+```
