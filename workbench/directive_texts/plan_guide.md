@@ -33,6 +33,73 @@ Detailed description of what to implement...
 <What tests to write, what command to run, what passing looks like>
 ```
 
+## Run Config (YAML Frontmatter)
+
+Plans can declare default run flags in a YAML frontmatter block at the very top of the file, before `# Title`. When present, `wb run <plan>` uses these values as defaults — no extra CLI flags needed.
+
+### Format
+
+The frontmatter must be the first non-blank content in the file, delimited by `---`:
+
+```yaml
+---
+tdd: true
+agent: claude
+base: feature-auth
+max_concurrent: 6
+profile_name: fast
+---
+# Plan Title
+
+## Context
+...
+```
+
+### Allowed Keys
+
+| Key | Type | CLI equivalent |
+|---|---|---|
+| `session_branch` | string | `-b` / `--session-branch` |
+| `name` | string | `--name` |
+| `base` | string | `--base` |
+| `local` | bool | `--local` |
+| `agent` | string | `--agent` |
+| `profile` | string (path) | `--profile` |
+| `profile_name` | string | `--profile-name` |
+| `max_concurrent` | int (>= 1) | `-j` / `--max-concurrent` |
+| `max_retries` | int (>= 0) | `--max-retries` |
+| `tdd` | bool | `--tdd` |
+| `skip_test` | bool | `--skip-test` |
+| `skip_review` | bool | `--skip-review` |
+| `retry_failed` | bool | `--retry-failed` |
+| `fail_fast` | bool | `--fail-fast` |
+| `cleanup` | bool | `--cleanup` |
+| `keep_branches` | bool | `--keep-branches` |
+| `push` | bool | `--push` |
+
+Unknown keys raise an error — typos are not silently ignored.
+
+### Precedence
+
+1. **Explicit CLI flag** — always wins.
+2. **Frontmatter value** — used when the CLI flag was not passed.
+3. **Built-in default** — used when neither CLI nor frontmatter specifies a value.
+
+Mutual-exclusivity checks (e.g. `--tdd` + `--skip-test`) apply to the effective values regardless of source.
+
+### What is NOT allowed in frontmatter
+
+The following flags are per-invocation and stay CLI-only:
+
+- `--task`, `-w` / `--start-wave` / `--end-wave` — select a subset of tasks to run
+- `--repo`, `--no-tmux` — environment-specific
+- `--only-incomplete` — resumption control
+- `*-directive` overrides — per-invocation prompt customization
+
+### Frontmatter is optional
+
+Plans without a frontmatter block work exactly as before — all flags come from the CLI or built-in defaults.
+
 ### Plan Sections
 
 - `## Context` — Injected into every agent's prompt. Describe the project, what's being built, and why.
