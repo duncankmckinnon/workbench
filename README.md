@@ -271,10 +271,13 @@ When all waves finish, the session branch (`workbench-N`) contains the combined 
 
 By default, workbench fetches `origin/main` and creates the session branch from the latest remote state.
 
+`--name` and `-b` / `--session-branch` are aliases — both declare the session branch identity. The orchestrator creates the branch from `--base` if it doesn't yet exist, or reuses it on resume.
+
 | Flag | Session branch | Base | Source | Use case |
 |------|----------------|------|--------|----------|
 | *(default)* | `workbench-N` | `main` | `origin/main` (fetched) | Start from latest remote |
-| `--name my-feature` | `my-feature` | `main` | `origin/main` (fetched) | Named session branch |
+| `--name my-feature` | `my-feature` | `main` | `origin/main` (fetched) | Named session branch (created or reused) |
+| `-b my-feature` | `my-feature` | `main` | `origin/main` (fetched) | Same as `--name` |
 | `--local` | `workbench-N` | `main` | local `main` | Build on unpushed local work |
 | `--base <branch>` | `workbench-N` | `<branch>` | `origin/<branch>` (fetched) | Branch from a specific remote branch |
 | `--base <branch> --local` | `workbench-N` | `<branch>` | local `<branch>` | Branch from a local feature branch |
@@ -477,7 +480,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--no-tmux` | Run agents as subprocesses instead of tmux |
 | `--base BRANCH` | Base branch to start from (default: `main`) |
 | `--local` | Branch from local ref instead of fetching origin |
-| `-b NAME` / `--session-branch` | Resume an existing session branch |
+| `-b NAME` / `--session-branch` | Session branch name; created from `--base` if missing, reused if it exists. Alias of `--name`. |
 | `-w N` / `--wave` | Run only wave N (clamped to valid range) |
 | `--start-wave N` | Start from wave N, run through end (default: 1) |
 | `--end-wave N` | Stop after wave N (default: last wave) |
@@ -499,8 +502,8 @@ Plans may declare these keys in a YAML frontmatter block (`---` delimiters) at t
 
 | Key | CLI flag | Type |
 |---|---|---|
-| `session_branch` | `-b` / `--session-branch` | string |
-| `name` | `--name` | string |
+| `session_branch` | `-b` / `--session-branch` | string (alias of `name`) |
+| `name` | `--name` | string (alias of `session_branch`) |
 | `base` | `--base` | string |
 | `local` | `--local` | bool |
 | `agent` | `--agent` | string |

@@ -76,8 +76,8 @@ profile_name: fast
 
 | Key | CLI flag | Type |
 |---|---|---|
-| `session_branch` | `-b` / `--session-branch` | string |
-| `name` | `--name` | string |
+| `session_branch` | `-b` / `--session-branch` | string (alias of `name`) |
+| `name` | `--name` | string (alias of `session_branch`) |
 | `base` | `--base` | string |
 | `local` | `--local` | bool |
 | `agent` | `--agent` | string |
@@ -97,6 +97,16 @@ profile_name: fast
 ### Precedence
 
 CLI flag > frontmatter > built-in default. Determined via `click.Context.get_parameter_source()`.
+
+### Session branch semantics
+
+`session_branch` and `name` are aliases — both declare the session branch identity for this plan. The orchestrator:
+
+- **Creates** the branch from `base` (default: `main`) if it doesn't exist yet — first run "just works".
+- **Reuses** the branch if it already exists — subsequent runs resume the same session.
+- Auto-numbers a new `workbench-<N>` branch when neither field is set.
+
+Set both `session_branch` and `name` only by mistake; if they differ, `session_branch` wins and a warning is printed.
 
 ### Not allowed in frontmatter
 

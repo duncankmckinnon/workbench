@@ -1207,3 +1207,131 @@ async def test_task_filter_multiple(tmp_path):
 
     assert sorted(pipeline_calls) == ["task-1", "task-3"]
     assert len(results) == 2
+
+
+class TestSessionBranchResolution:
+    """session_branch and session_name are aliases — both create-on-missing,
+    reuse-if-exists. Without either, the orchestrator auto-numbers a session.
+    """
+
+    @pytest.mark.asyncio
+    async def test_session_branch_missing_is_created_from_base(self, tmp_path):
+        """session_branch set to a non-existent branch → create from base."""
+        plan = _make_plan()
+        captured = {}
+
+        async def fake_pipeline(**kwargs):
+            return []
+
+        with (
+            patch("workbench.orchestrator.branch_exists", return_value=False),
+            patch("workbench.orchestrator.create_session_branch") as mock_create,
+            patch("workbench.orchestrator.create_worktree") as mock_wt,
+            patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+            patch("workbench.orchestrator.merge_into_session") as mock_merge,
+            patch("workbench.orchestrator.delete_branch"),
+        ):
+            mock_create.return_value = "bootstrap"
+            mock_wt.return_value = MagicMock(branch="wb/test", path=tmp_path / "wt")
+            mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+            await run_plan(
+                plan=plan,
+                repo=tmp_path,
+                session_branch="bootstrap",
+                base_branch="extension",
+                use_tmux=False,
+            )
+
+        mock_create.assert_called_once()
+        kwargs = mock_create.call_args.kwargs
+        assert kwargs["session_name"] == "bootstrap"
+        assert kwargs["base"] == "extension"
+
+    @pytest.mark.asyncio
+    async def test_session_branch_existing_is_reused(self, tmp_path):
+        """session_branch that exists → no create_session_branch call."""
+        plan = _make_plan()
+
+        async def fake_pipeline(**kwargs):
+            return []
+
+        with (
+            patch("workbench.orchestrator.branch_exists", return_value=True),
+            patch("workbench.orchestrator.create_session_branch") as mock_create,
+            patch("workbench.orchestrator.create_worktree") as mock_wt,
+            patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+            patch("workbench.orchestrator.merge_into_session") as mock_merge,
+            patch("workbench.orchestrator.delete_branch"),
+        ):
+            mock_wt.return_value = MagicMock(branch="wb/test", path=tmp_path / "wt")
+            mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+            await run_plan(
+                plan=plan,
+                repo=tmp_path,
+                session_branch="bootstrap",
+                base_branch="extension",
+                use_tmux=False,
+            )
+
+        mock_create.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_session_name_alias_creates_when_missing(self, tmp_path):
+        """session_name alone (no session_branch) → same create-on-missing behavior."""
+        plan = _make_plan()
+
+        async def fake_pipeline(**kwargs):
+            return []
+
+        with (
+            patch("workbench.orchestrator.branch_exists", return_value=False),
+            patch("workbench.orchestrator.create_session_branch") as mock_create,
+            patch("workbench.orchestrator.create_worktree") as mock_wt,
+            patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+            patch("workbench.orchestrator.merge_into_session") as mock_merge,
+            patch("workbench.orchestrator.delete_branch"),
+        ):
+            mock_create.return_value = "bootstrap"
+            mock_wt.return_value = MagicMock(branch="wb/test", path=tmp_path / "wt")
+            mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+            await run_plan(
+                plan=plan,
+                repo=tmp_path,
+                session_name="bootstrap",
+                base_branch="extension",
+                use_tmux=False,
+            )
+
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["session_name"] == "bootstrap"
+        assert mock_create.call_args.kwargs["base"] == "extension"
+
+    @pytest.mark.asyncio
+    async def test_neither_provided_auto_numbers_session(self, tmp_path):
+        """No session_branch / session_name → auto-numbered (session_name=None)."""
+        plan = _make_plan()
+
+        async def fake_pipeline(**kwargs):
+            return []
+
+        with (
+            patch("workbench.orchestrator.branch_exists") as mock_exists,
+            patch("workbench.orchestrator.create_session_branch") as mock_create,
+            patch("workbench.orchestrator.create_worktree") as mock_wt,
+            patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+            patch("workbench.orchestrator.merge_into_session") as mock_merge,
+            patch("workbench.orchestrator.delete_branch"),
+        ):
+            mock_create.return_value = "workbench-1"
+            mock_wt.return_value = MagicMock(branch="wb/test", path=tmp_path / "wt")
+            mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+            await run_plan(plan=plan, repo=tmp_path, use_tmux=False)
+
+        mock_create.assert_called_once()
+        assert mock_create.call_args.kwargs["session_name"] is None
+        # branch_exists not consulted when nothing was declared
+        mock_exists.assert_not_called()

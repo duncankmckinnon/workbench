@@ -18,11 +18,13 @@ from .profile import Profile
 from .session_status import SessionStatus
 from .worktree import (
     Worktree,
+    branch_exists,
     cleanup_merge_worktree,
     complete_merge,
     create_session_branch,
     create_worktree,
     delete_branch,
+    get_main_branch,
     get_merged_branches,
     merge_into_session,
     push_session_branch,
@@ -151,10 +153,28 @@ async def run_plan(
     all_states: list[TaskState] = []
     state_map: dict[str, TaskState] = {}
 
-    # Use existing session branch or create a new one
-    if session_branch is None:
+    # session_branch and session_name are aliases for "the session branch name
+    # to use for this run". Both create-from-base if missing and reuse if it
+    # already exists. session_branch wins if both are set; warn if they differ.
+    declared = session_branch or session_name
+    if session_branch and session_name and session_branch != session_name:
+        console.print(
+            f"[yellow]Both session_branch ({session_branch!r}) and name "
+            f"({session_name!r}) were provided; using {session_branch!r}.[/yellow]"
+        )
+    if declared is None:
         session_branch = create_session_branch(
-            repo, local=local, base=base_branch, session_name=session_name
+            repo, local=local, base=base_branch, session_name=None
+        )
+    elif branch_exists(repo, declared):
+        session_branch = declared
+    else:
+        console.print(
+            f"[dim]Session branch {declared!r} does not exist — "
+            f"creating from {base_branch or get_main_branch(repo)!r}...[/dim]"
+        )
+        session_branch = create_session_branch(
+            repo, local=local, base=base_branch, session_name=declared
         )
 
     # Initialize session status tracking
