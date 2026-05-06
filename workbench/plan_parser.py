@@ -5,6 +5,9 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Any
+
+import yaml
 
 
 @dataclass
@@ -22,6 +25,104 @@ class Task:
         return re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")
 
 
+_RUN_CONFIG_SCHEMA: dict[str, type | tuple[type, ...]] = {
+    "session_branch": str,
+    "name": str,
+    "base": str,
+    "local": bool,
+    "agent": str,
+    "profile": str,
+    "profile_name": str,
+    "max_concurrent": int,
+    "max_retries": int,
+    "tdd": bool,
+    "skip_test": bool,
+    "skip_review": bool,
+    "retry_failed": bool,
+    "fail_fast": bool,
+    "cleanup": bool,
+    "keep_branches": bool,
+    "push": bool,
+}
+
+
+def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
+    """Extract and validate YAML frontmatter from plan text.
+
+    Returns (run_config, remainder) where remainder is the text after
+    the frontmatter block (or the full text if no frontmatter found).
+    """
+    lines = text.split("\n")
+
+    # Find the first non-blank line
+    first_nonblank = -1
+    for i, line in enumerate(lines):
+        if line.strip():
+            first_nonblank = i
+            break
+
+    if first_nonblank == -1 or lines[first_nonblank].strip() != "---":
+        return {}, text
+
+    # Scan for closing ---
+    closing = -1
+    for i in range(first_nonblank + 1, len(lines)):
+        if lines[i].strip() == "---":
+            closing = i
+            break
+
+    if closing == -1:
+        return {}, text
+
+    body = "\n".join(lines[first_nonblank + 1 : closing])
+    remainder = "\n".join(lines[closing + 1 :])
+
+    parsed = yaml.safe_load(body)
+    if parsed is None:
+        return {}, remainder
+
+    if not isinstance(parsed, dict):
+        raise ValueError(f"Plan frontmatter must be a YAML mapping, got: {type(parsed).__name__}")
+
+    # Validate keys and types
+    allowed = _RUN_CONFIG_SCHEMA
+    for key, value in parsed.items():
+        if key not in allowed:
+            raise ValueError(
+                f"Unknown plan frontmatter key: {key!r}. "
+                f"Allowed keys: {', '.join(sorted(allowed))}"
+            )
+        expected = allowed[key]
+        if expected is bool:
+            if type(value) is not bool:
+                raise ValueError(
+                    f"Plan frontmatter key {key!r} must be of type bool, "
+                    f"got {type(value).__name__}"
+                )
+        elif expected is int:
+            if type(value) is bool or not isinstance(value, int):
+                raise ValueError(
+                    f"Plan frontmatter key {key!r} must be of type int, "
+                    f"got {type(value).__name__}"
+                )
+        else:
+            if not isinstance(value, expected):
+                expected_name = expected.__name__ if isinstance(expected, type) else str(expected)
+                raise ValueError(
+                    f"Plan frontmatter key {key!r} must be of type {expected_name}, "
+                    f"got {type(value).__name__}"
+                )
+
+    if "max_concurrent" in parsed and parsed["max_concurrent"] < 1:
+        raise ValueError(
+            f"Plan frontmatter max_concurrent must be >= 1, got {parsed['max_concurrent']}"
+        )
+    if "max_retries" in parsed and parsed["max_retries"] < 0:
+        raise ValueError(f"Plan frontmatter max_retries must be >= 0, got {parsed['max_retries']}")
+
+    return parsed, remainder
+
+
 @dataclass
 class Plan:
     """A parsed plan containing tasks."""
@@ -31,6 +132,7 @@ class Plan:
     source: Path
     context: str = ""
     conventions: str = ""
+    run_config: dict[str, Any] = field(default_factory=dict)
 
     @property
     def slug(self) -> str:
@@ -77,6 +179,7 @@ def parse_plan(path: Path) -> Plan:
     ...
     """
     text = path.read_text()
+    run_config, text = _extract_frontmatter(text)
     lines = text.split("\n")
 
     # Extract plan title
@@ -171,4 +274,5 @@ def parse_plan(path: Path) -> Plan:
         source=path,
         context=plan_context,
         conventions=plan_conventions,
+        run_config=run_config,
     )

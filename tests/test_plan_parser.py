@@ -1,5 +1,7 @@
 """Tests for the plan parser module."""
 
+import pytest
+
 from workbench.plan_parser import parse_plan
 
 
@@ -123,3 +125,149 @@ def test_task_slug(tmp_path):
     plan_file.write_text("# Plan\n\n" "## Task: Add User Authentication\n" "Implement auth.\n")
     plan = parse_plan(plan_file)
     assert plan.tasks[0].slug == "add-user-authentication"
+
+
+class TestRunConfigFrontmatter:
+    def test_no_frontmatter_returns_empty_dict(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("# My Plan\n\n## Task: Do stuff\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config == {}
+
+    def test_empty_frontmatter(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\n---\n# Title\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config == {}
+        assert len(plan.tasks) == 1
+
+    def test_simple_string_field(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\nsession_branch: workbench-feat\n---\n# Plan\n## Task: x\nDo it.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.run_config["session_branch"] == "workbench-feat"
+
+    def test_bool_field(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\ntdd: true\n---\n# Plan\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config["tdd"] is True
+
+    def test_int_field(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_concurrent: 8\n---\n# Plan\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config["max_concurrent"] == 8
+
+    def test_multiple_fields(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\n"
+            "session_branch: wb-auth\n"
+            "base: feature-auth\n"
+            "tdd: true\n"
+            "agent: claude\n"
+            "max_concurrent: 6\n"
+            "profile_name: fast\n"
+            "---\n"
+            "# Auth refactor\n\n"
+            "## Context\n\nSome context here.\n\n"
+            "## Task: First\nDo first.\n\n"
+            "## Task: Second\nDo second.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.run_config["session_branch"] == "wb-auth"
+        assert plan.run_config["base"] == "feature-auth"
+        assert plan.run_config["tdd"] is True
+        assert plan.run_config["agent"] == "claude"
+        assert plan.run_config["max_concurrent"] == 6
+        assert plan.run_config["profile_name"] == "fast"
+        assert plan.title == "Auth refactor"
+        assert "Some context here." in plan.context
+        assert len(plan.tasks) == 2
+
+    def test_unknown_key_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nbogus: true\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r"Unknown.*bogus"):
+            parse_plan(plan_file)
+
+    def test_wrong_type_string_for_bool(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text('---\ntdd: "yes"\n---\n# Plan\n## Task: x\nDo it.\n')
+        with pytest.raises(ValueError, match=r"tdd.*bool"):
+            parse_plan(plan_file)
+
+    def test_wrong_type_int_as_bool(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\ntdd: 1\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r"tdd.*bool"):
+            parse_plan(plan_file)
+
+    def test_wrong_type_bool_as_int(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_concurrent: true\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r"max_concurrent.*int"):
+            parse_plan(plan_file)
+
+    def test_max_concurrent_zero_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_concurrent: 0\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r">= 1"):
+            parse_plan(plan_file)
+
+    def test_max_concurrent_negative_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_concurrent: -1\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r">= 1"):
+            parse_plan(plan_file)
+
+    def test_max_retries_negative_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_retries: -1\n---\n# Plan\n## Task: x\nDo it.\n")
+        with pytest.raises(ValueError, match=r">= 0"):
+            parse_plan(plan_file)
+
+    def test_max_retries_zero_ok(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\nmax_retries: 0\n---\n# Plan\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config["max_retries"] == 0
+
+    def test_non_mapping_frontmatter_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\n- item\n---\n# Title\n## Task: x\nDo.\n")
+        with pytest.raises(ValueError, match=r"must be a YAML mapping"):
+            parse_plan(plan_file)
+
+    def test_frontmatter_not_at_top_is_ignored(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("# Title\n\n---\ntdd: true\n---\n\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config == {}
+
+    def test_existing_plan_format_still_works(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "# Directive Refactor\n\n"
+            "## Context\n\n"
+            "Refactor directive handling for clarity.\n\n"
+            "## Conventions\n\n"
+            "- Python 3.11+\n"
+            "- Use dataclasses\n\n"
+            "## Task: Extract directives\n"
+            "Files: workbench/directives.py\n"
+            "Move directive text to separate markdown files.\n\n"
+            "## Task: Update references\n"
+            "Files: workbench/cli.py, workbench/orchestrator.py\n"
+            "Depends: extract-directives\n"
+            "Update all imports and references.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.title == "Directive Refactor"
+        assert len(plan.tasks) == 2
+        assert plan.run_config == {}
+        assert plan.tasks[0].files == ["workbench/directives.py"]
+        assert plan.tasks[1].depends_on == ["task-1"]
