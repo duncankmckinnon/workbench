@@ -7,7 +7,7 @@ inputs:
     required: true
   tap-repo:
     description: GitHub tap repository (owner/repo)
-    default: duncankmckinnon/homebrew-workbench
+    default: duncankmckinnon/homebrew-tap
   formula-name:
     description: Formula file name (without .rb)
     default: workbench
