@@ -66,12 +66,13 @@ runs:
         WORKDIR=$(mktemp -d)
         git clone "https://x-access-token:${TAP_TOKEN}@github.com/${TAP_REPO}.git" "${WORKDIR}/tap"
 
-        # Copy formula template from this repo, patch in version + sha
+        # Copy formula template from this repo, patch in version + sha.
+        # Anchor to 2-space class-level indent so resource blocks (4-space) are not rewritten.
         DEST="${WORKDIR}/tap/Formula/${FORMULA}.rb"
         mkdir -p "${WORKDIR}/tap/Formula"
         cp "${GITHUB_WORKSPACE}/Formula/${FORMULA}.rb" "${DEST}"
-        sed -i "s|url \".*\"|url \"${TARBALL_URL}\"|"   "${DEST}"
-        sed -i "s|sha256 \".*\"|sha256 \"${SHA256}\"|"  "${DEST}"
+        sed -i "s|^  url \".*\"|  url \"${TARBALL_URL}\"|"   "${DEST}"
+        sed -i "s|^  sha256 \".*\"|  sha256 \"${SHA256}\"|"  "${DEST}"
 
         cd "${WORKDIR}/tap"
         git config user.name "github-actions[bot]"
