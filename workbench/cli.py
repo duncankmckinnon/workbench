@@ -389,7 +389,7 @@ def _install_skills(
 
 
 @click.group()
-@click.version_option()
+@click.version_option(package_name="wbcli")
 def main():
     """Workbench - lightweight multi-agent orchestrator.
 
