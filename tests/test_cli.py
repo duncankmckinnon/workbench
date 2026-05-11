@@ -2987,3 +2987,514 @@ class TestRunConfigFrontmatter:
         result, captured = _run_cli_with_frontmatter(git_repo, tmp_path, plan_text, ["--tdd"])
         assert result.exit_code == 0, result.output
         assert captured.get("tdd") is True
+
+
+# ---------------------------------------------------------------------------
+# wb run --final-review
+# ---------------------------------------------------------------------------
+
+
+def _write_status_file(repo, plan_slug, session_branch, tasks, final_reviews=None, plan_source=""):
+    """Write a status.yaml for testing."""
+    wb = repo / ".workbench" / plan_slug
+    wb.mkdir(parents=True, exist_ok=True)
+    session_data = {"tasks": tasks}
+    if final_reviews:
+        session_data["final_reviews"] = final_reviews
+    data = {"sessions": {session_branch: session_data}}
+    if plan_source:
+        data["plan_source"] = plan_source
+    (wb / "status.yaml").write_text(yaml.dump(data))
+
+
+def _make_plan_in_dir(base_dir, plan_slug="my-plan"):
+    """Create a plan.md inside a named directory, returning the plan path."""
+    plan_dir = base_dir / plan_slug
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan = plan_dir / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+    return plan
+
+
+def test_run_final_review_flag_invokes_orchestration(git_repo, tmp_path):
+    """--final-review should invoke run_final_review after run_plan."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    # Pre-create a status file so the post-run lookup finds merged tasks
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+        pr_url="https://github.com/test/test/pull/1",
+    )
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan) as mock_run_plan,
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
+    assert "PASS" in result.output
+
+
+def test_run_final_review_skipped_when_no_tasks_merge(git_repo, tmp_path):
+    """--final-review with 0 merged tasks should not invoke run_final_review."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    # Status with no merged tasks
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "failed",
+                "branch": "wb/feat",
+                "merged": False,
+                "last_agent": "implementor",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli.run_final_review") as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert not mock_final_review.called
+
+
+def test_merge_review_flag_invokes_orchestration(git_repo, tmp_path):
+    """wb merge --review should invoke run_final_review after merging."""
+    from workbench.session_status import FinalReviewRecord, SessionStatus
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    # Create a SessionStatus with merged tasks and plan_source
+    status = SessionStatus(
+        plan_slug="my-plan",
+        session_branch="workbench-1",
+        plan_source=str(plan),
+    )
+    status.record_task("task-1", "done", "wb/feat", merged=True, last_agent="reviewer")
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_merge(**kwargs):
+        return status
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.merge_unmerged", side_effect=fake_merge),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["merge", "-b", "workbench-1", "--review", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
+
+
+def test_final_review_standalone_command(git_repo, tmp_path):
+    """wb final-review session-branch should invoke run_final_review."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["final-review", "workbench-1", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
+    assert "PASS" in result.output
+
+
+def test_final_review_standalone_no_session_error(git_repo):
+    """wb final-review with nonexistent session should error."""
+    runner = CliRunner()
+
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["final-review", "nonexistent-session", "--no-tmux"])
+
+    assert result.exit_code != 0
+    assert "No status file found" in result.output
+
+
+def test_status_shows_final_review_summary(git_repo):
+    """wb status should show final review summary when reviews exist."""
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        final_reviews=[
+            {
+                "timestamp": "2026-05-10T00:00:00Z",
+                "verdict": "pass",
+                "report_path": ".workbench/my-plan/reviews/workbench-1/report.md",
+                "requirements_path": ".workbench/my-plan/reviews/workbench-1/requirements.md",
+                "summarizer_agent": "claude",
+                "reviewer_agent": "claude",
+                "pr_url": "https://github.com/test/test/pull/1",
+            }
+        ],
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "Final review" in result.output
+    assert "PASS" in result.output
+    assert "1 run(s)" in result.output
+
+
+def test_status_shows_not_run_when_no_reviews(git_repo):
+    """wb status should show 'not run' when no final reviews exist."""
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["status"])
+
+    assert result.exit_code == 0, result.output
+    assert "not run" in result.output
+
+
+def test_pr_title_override_passed_through(git_repo, tmp_path):
+    """--pr-title should propagate to run_final_review kwargs."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["final-review", "workbench-1", "--no-tmux", "--pr-title", "My title"],
+        )
+
+    assert result.exit_code == 0, result.output
+    captured = dict(mock_final_review.call_args.kwargs)
+    assert captured.get("pr_title") == "My title"
+
+
+def test_skip_pr_flag_propagates(git_repo, tmp_path):
+    """--skip-pr should pass skip_pr=True to run_final_review."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["final-review", "workbench-1", "--no-tmux", "--skip-pr"],
+        )
+
+    assert result.exit_code == 0, result.output
+    captured = dict(mock_final_review.call_args.kwargs)
+    assert captured.get("skip_pr") is True
+
+
+def test_frontmatter_final_review_true_runs_review_without_flag(git_repo, tmp_path):
+    """Plan frontmatter final_review: true should trigger review without --final-review flag."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan_text = "---\nfinal_review: true\n---\n# Plan\n## Task: hello\nDo something\n"
+    plan_dir = tmp_path / "my-plan"
+    plan_dir.mkdir()
+    plan = plan_dir / "plan.md"
+    plan.write_text(plan_text)
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
+
+
+def test_cli_flag_overrides_frontmatter(git_repo, tmp_path):
+    """--final-review flag should override frontmatter final_review: false."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan_text = "---\nfinal_review: false\n---\n# Plan\n## Task: hello\nDo something\n"
+    plan_dir = tmp_path / "my-plan"
+    plan_dir.mkdir()
+    plan = plan_dir / "plan.md"
+    plan.write_text(plan_text)
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
