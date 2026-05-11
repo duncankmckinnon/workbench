@@ -490,9 +490,9 @@ async def run_planner(
 
     adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
 
-    plans_dir = repo / ".workbench" / "plans"
-    plans_dir.mkdir(parents=True, exist_ok=True)
-    output_path = plans_dir / f"{plan_name}.md"
+    plan_dir = repo / ".workbench" / plan_name
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    output_path = plan_dir / "plan.md"
 
     text = profile.planner.directive if profile else ""
     plan_guide = _load_plan_guide()

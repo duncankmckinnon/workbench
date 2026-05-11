@@ -139,6 +139,15 @@ class Plan:
         return re.sub(r"[^a-z0-9]+", "-", self.title.lower()).strip("-")
 
     @property
+    def folder_id(self) -> str:
+        """The parent folder name of the plan source file.
+
+        Used for filesystem paths (status files, review output) instead
+        of the content-derived ``slug``.
+        """
+        return self.source.parent.name
+
+    @property
     def independent_groups(self) -> list[list[Task]]:
         """Group tasks into waves based on dependencies.
 
