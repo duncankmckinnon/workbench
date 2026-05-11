@@ -13,7 +13,16 @@ from workbench.profile import ModeConfig, Profile, RoleConfig
 # Helpers
 # ---------------------------------------------------------------------------
 
-ALL_ROLE_NAMES = ["implementor", "tester", "reviewer", "fixer", "merger", "planner"]
+ALL_ROLE_NAMES = [
+    "implementor",
+    "tester",
+    "reviewer",
+    "fixer",
+    "merger",
+    "planner",
+    "summarizer",
+    "branch_reviewer",
+]
 
 
 def _write_yaml(path: Path, data: dict) -> Path:
@@ -56,6 +65,18 @@ class TestDefaultProfile:
         assert profile.planner.agent == "claude"
         assert profile.planner.directive == ""
 
+    def test_default_summarizer(self):
+        """Profile.default().summarizer is RoleConfig(agent='claude', directive='')."""
+        profile = Profile.default()
+        assert profile.summarizer.agent == "claude"
+        assert profile.summarizer.directive == ""
+
+    def test_default_branch_reviewer(self):
+        """Profile.default().branch_reviewer is RoleConfig(agent='claude', directive='')."""
+        profile = Profile.default()
+        assert profile.branch_reviewer.agent == "claude"
+        assert profile.branch_reviewer.directive == ""
+
     def test_default_sub_modes_are_none(self):
         """Default profile has no sub-modes configured."""
         profile = Profile.default()
@@ -80,7 +101,15 @@ class TestFromYamlAgent:
         profile = Profile.from_yaml(yaml_path)
         assert profile.reviewer.agent == "gemini"
         # All others unchanged
-        for role_name in ["implementor", "tester", "fixer", "merger", "planner"]:
+        for role_name in [
+            "implementor",
+            "tester",
+            "fixer",
+            "merger",
+            "planner",
+            "summarizer",
+            "branch_reviewer",
+        ]:
             assert getattr(profile, role_name).agent == "claude"
 
     def test_override_multiple_role_agents(self, tmp_path):
@@ -172,6 +201,65 @@ class TestFromYamlPlanner:
 
 
 # ---------------------------------------------------------------------------
+# Profile.from_yaml() — summarizer and branch_reviewer roles
+# ---------------------------------------------------------------------------
+
+
+class TestFromYamlNewRoles:
+    def test_summarizer_parses(self, tmp_path):
+        """Summarizer role parses from YAML."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"summarizer": {"agent": "gemini", "directive": "Summarize reqs"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.summarizer.agent == "gemini"
+        assert profile.summarizer.directive == "Summarize reqs"
+
+    def test_branch_reviewer_parses(self, tmp_path):
+        """Branch reviewer role parses from YAML."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"branch_reviewer": {"agent": "codex", "directive": "Review branch"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.branch_reviewer.agent == "codex"
+        assert profile.branch_reviewer.directive == "Review branch"
+
+    def test_both_new_roles_roundtrip(self, tmp_path):
+        """YAML with both new roles configured round-trips identically."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {
+                "roles": {
+                    "summarizer": {"agent": "claude", "directive": "Sum directive"},
+                    "branch_reviewer": {"agent": "codex", "directive": "BR directive"},
+                }
+            },
+        )
+        profile = Profile.from_yaml(yaml_path)
+        out = tmp_path / "roundtrip.yaml"
+        profile.save(out)
+        reloaded = Profile.from_yaml(out)
+        assert reloaded.summarizer.agent == "claude"
+        assert reloaded.summarizer.directive == "Sum directive"
+        assert reloaded.branch_reviewer.agent == "codex"
+        assert reloaded.branch_reviewer.directive == "BR directive"
+
+    def test_neither_new_role_configured_uses_defaults(self, tmp_path):
+        """YAML with neither new role still produces valid defaults."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"tester": {"agent": "gemini"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.summarizer.agent == "claude"
+        assert profile.summarizer.directive == ""
+        assert profile.branch_reviewer.agent == "claude"
+        assert profile.branch_reviewer.directive == ""
+
+
+# ---------------------------------------------------------------------------
 # Profile.from_yaml() — TDD sub-mode
 # ---------------------------------------------------------------------------
 
@@ -260,6 +348,14 @@ class TestSubModeValidation:
             ("reviewer", "tdd", "reviewer does not support a 'tdd' sub-mode"),
             ("implementor", "followup", "implementor does not support a 'followup' sub-mode"),
             ("tester", "followup", "tester does not support a 'followup' sub-mode"),
+            ("summarizer", "tdd", "summarizer does not support a 'tdd' sub-mode"),
+            ("summarizer", "followup", "summarizer does not support a 'followup' sub-mode"),
+            ("branch_reviewer", "tdd", "branch_reviewer does not support a 'tdd' sub-mode"),
+            (
+                "branch_reviewer",
+                "followup",
+                "branch_reviewer does not support a 'followup' sub-mode",
+            ),
         ],
     )
     def test_invalid_sub_mode_raises(self, tmp_path, role_name, sub_mode, expected_msg):
