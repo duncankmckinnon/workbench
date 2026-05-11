@@ -23,9 +23,11 @@ from .directives import (
     TddTesterDirective,
     TesterDirective,
 )
+from .final_review import run_final_review
 from .orchestrator import merge_unmerged, run_plan
 from .plan_parser import parse_plan
 from .profile import ModeConfig, Profile, RoleConfig
+from .session_status import FinalReviewRecord, SessionStatus
 from .tmux import check_tmux_available
 
 # Maps role name to the Directive class whose DEFAULT_TEXT seeds the role.
@@ -79,6 +81,7 @@ _FRONTMATTER_TO_PARAM: dict[str, str] = {
     "cleanup": "cleanup",
     "keep_branches": "keep_branches",
     "push": "push",
+    "final_review": "final_review",
 }
 
 # Click's --profile option converts the string to a Path via
@@ -110,6 +113,56 @@ def _apply_plan_run_config(
             coerce = _FRONTMATTER_PARAM_COERCIONS.get(name)
             out[name] = coerce(value) if coerce else value
     return out
+
+
+def _resolve_final_review_args(
+    repo: Path,
+    session_branch: str,
+    plan_slug: str,
+    base_branch: str,
+    plan_source: Path,
+    merged_task_titles: list[str],
+    agent: str,
+    no_tmux: bool,
+    profile: Profile | None,
+    summarizer_directive: str | None,
+    branch_reviewer_directive: str | None,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    skip_pr: bool,
+) -> dict:
+    """Build kwargs dict for run_final_review from CLI flags + session info."""
+    return dict(
+        repo=repo,
+        session_branch=session_branch,
+        plan_slug=plan_slug,
+        base_branch=base_branch,
+        plan_source=plan_source,
+        merged_task_titles=merged_task_titles,
+        agent_cmd=agent,
+        use_tmux=not no_tmux,
+        profile=profile,
+        summarizer_directive=summarizer_directive,
+        branch_reviewer_directive=branch_reviewer_directive,
+        pr_title=pr_title,
+        pr_body_file=pr_body_file,
+        pr_base=pr_base,
+        skip_pr=skip_pr,
+    )
+
+
+def _print_final_review_result(record: FinalReviewRecord) -> None:
+    """Print a one-line summary of a final review result."""
+    verdict_style = {
+        "pass": "green",
+        "fail": "red",
+        "error": "yellow",
+    }.get(record.verdict, "dim")
+    location = record.pr_url or record.report_path
+    console.print(
+        f"Final review: [{verdict_style}]{record.verdict.upper()}[/{verdict_style}] — {location}"
+    )
 
 
 def _find_repo_root(start: Path = None) -> Path:
@@ -537,6 +590,33 @@ def main():
     is_flag=True,
     help="Push the session branch to origin after merging (sets upstream tracking).",
 )
+@click.option(
+    "--final-review",
+    "final_review",
+    is_flag=True,
+    help="Run a final whole-branch review after merges complete.",
+)
+@click.option("--pr-title", default=None, type=str, help="Override the PR title.")
+@click.option(
+    "--pr-body-file",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a file whose content becomes the PR body.",
+)
+@click.option("--pr-base", default=None, type=str, help="Override the PR base branch.")
+@click.option("--skip-pr", is_flag=True, help="Skip PR creation even on PASS verdict.")
+@click.option(
+    "--summarizer-directive",
+    default=None,
+    type=str,
+    help="Override the requirements summarizer agent's instructions.",
+)
+@click.option(
+    "--branch-reviewer-directive",
+    default=None,
+    type=str,
+    help="Override the branch reviewer agent's instructions.",
+)
 def run(
     plan_path: Path,
     max_concurrent: int,
@@ -567,6 +647,13 @@ def run(
     reviewer_directive: str | None,
     fixer_directive: str | None,
     push: bool,
+    final_review: bool,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    skip_pr: bool,
+    summarizer_directive: str | None,
+    branch_reviewer_directive: str | None,
 ):
     """Run a plan with parallel agents.
 
@@ -613,6 +700,7 @@ def run(
         "cleanup": cleanup,
         "keep_branches": keep_branches,
         "push": push,
+        "final_review": final_review,
     }
     effective = _apply_plan_run_config(ctx, mapped_run_config, flag_values)
     session_branch = effective["session_branch"]
@@ -632,6 +720,7 @@ def run(
     cleanup = effective["cleanup"]
     keep_branches = effective["keep_branches"]
     push = effective["push"]
+    final_review = effective["final_review"]
 
     if tdd and skip_test:
         raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
@@ -715,6 +804,48 @@ def run(
             push=push,
         )
     )
+
+    # Final review after run completes
+    if final_review:
+        plan_slug = plan.folder_id
+        status = SessionStatus.load(repo, plan_slug, session_branch) if session_branch else None
+        if status is None:
+            # session_branch was auto-generated; scan for it
+            for path in sorted((repo / ".workbench").glob("*/status.yaml")):
+                if path.parent.name == plan_slug:
+                    data = yaml.safe_load(path.read_text()) or {}
+                    for sb in data.get("sessions") or {}:
+                        status = SessionStatus.load(repo, plan_slug, sb)
+                        session_branch = sb
+                        break
+                    break
+
+        if status:
+            merged_tasks = {tid for tid, rec in status.tasks.items() if rec.merged}
+            merged_titles = [t.title for t in plan.tasks if t.id in merged_tasks]
+            if merged_titles:
+                profile_obj = Profile.resolve(
+                    repo, profile_path=profile_path, profile_name=profile_name
+                )
+                review_args = _resolve_final_review_args(
+                    repo=repo,
+                    session_branch=session_branch or status.session_branch,
+                    plan_slug=plan_slug,
+                    base_branch=base or "main",
+                    plan_source=plan_path.resolve(),
+                    merged_task_titles=merged_titles,
+                    agent=agent,
+                    no_tmux=no_tmux,
+                    profile=profile_obj,
+                    summarizer_directive=summarizer_directive,
+                    branch_reviewer_directive=branch_reviewer_directive,
+                    pr_title=pr_title,
+                    pr_body_file=pr_body_file,
+                    pr_base=pr_base,
+                    skip_pr=skip_pr,
+                )
+                record = asyncio.run(run_final_review(**review_args))
+                _print_final_review_result(record)
 
 
 @main.command()
@@ -826,6 +957,13 @@ def resume(
         reviewer_directive=None,
         fixer_directive=None,
         push=False,
+        final_review=False,
+        pr_title=None,
+        pr_body_file=None,
+        pr_base=None,
+        skip_pr=False,
+        summarizer_directive=None,
+        branch_reviewer_directive=None,
     )
 
 
@@ -976,6 +1114,8 @@ def plan(
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def status(repo: Path | None):
     """Show active worktrees from workbench."""
+    from .session_status import iter_status_files
+
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
     result = subprocess.run(
@@ -988,11 +1128,33 @@ def status(repo: Path | None):
 
     if not wb_trees:
         console.print("[dim]No active workbench worktrees.[/dim]")
-        return
+    else:
+        console.print(f"[bold]Active workbench worktrees ({len(wb_trees)}):[/bold]\n")
+        for line in wb_trees:
+            console.print(f"  {line}")
 
-    console.print(f"[bold]Active workbench worktrees ({len(wb_trees)}):[/bold]\n")
-    for line in wb_trees:
-        console.print(f"  {line}")
+    # Show final review status per session
+    for _path, data in iter_status_files(repo):
+        sessions = data.get("sessions", {})
+        for sb, session_data in sessions.items():
+            if not isinstance(session_data, dict):
+                continue
+            reviews = session_data.get("final_reviews", [])
+            if not reviews:
+                console.print(f"\n  Final review ({sb}): [dim]not run[/dim]")
+            else:
+                latest = reviews[-1]
+                verdict = latest.get("verdict", "unknown")
+                verdict_style = {"pass": "green", "fail": "red", "error": "yellow"}.get(
+                    verdict, "dim"
+                )
+                location = latest.get("pr_url") or latest.get("report_path", "")
+                n = len(reviews)
+                console.print(
+                    f"\n  Final review ({sb}, {n} run(s), "
+                    f"latest [{verdict_style}]{verdict.upper()}[/{verdict_style}]): "
+                    f"{location}"
+                )
 
 
 def _list_workbench_worktrees(repo: Path) -> list[tuple[str, str | None]]:
@@ -1342,6 +1504,33 @@ def stop(cleanup: bool, repo: Path | None):
     is_flag=True,
     help="Push the session branch to origin after merging (sets upstream tracking).",
 )
+@click.option(
+    "--review",
+    "run_review",
+    is_flag=True,
+    help="Run a final review after merging.",
+)
+@click.option("--pr-title", default=None, type=str, help="Override the PR title.")
+@click.option(
+    "--pr-body-file",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a file whose content becomes the PR body.",
+)
+@click.option("--pr-base", default=None, type=str, help="Override the PR base branch.")
+@click.option("--skip-pr", is_flag=True, help="Skip PR creation even on PASS verdict.")
+@click.option(
+    "--summarizer-directive",
+    default=None,
+    type=str,
+    help="Override the requirements summarizer agent's instructions.",
+)
+@click.option(
+    "--branch-reviewer-directive",
+    default=None,
+    type=str,
+    help="Override the branch reviewer agent's instructions.",
+)
 def merge(
     session_branch: str,
     plan_path: Path | None,
@@ -1350,6 +1539,13 @@ def merge(
     no_tmux: bool,
     keep_branches: bool,
     push: bool,
+    run_review: bool,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    skip_pr: bool,
+    summarizer_directive: str | None,
+    branch_reviewer_directive: str | None,
 ):
     """Merge completed-but-unmerged task branches into the session branch.
 
@@ -1377,6 +1573,7 @@ def merge(
     _ensure_workbench_dir(repo)
 
     plan_slug = None
+    plan = None
     if plan_path:
         try:
             plan = parse_plan(plan_path.resolve())
@@ -1384,7 +1581,7 @@ def merge(
             raise click.ClickException(str(e))
         plan_slug = plan.folder_id
 
-    asyncio.run(
+    status = asyncio.run(
         merge_unmerged(
             repo=repo,
             session_branch=session_branch,
@@ -1395,6 +1592,188 @@ def merge(
             push=push,
         )
     )
+
+    # Final review after merge
+    if run_review:
+        merged_count = sum(1 for rec in status.tasks.values() if rec.merged)
+        if merged_count > 0:
+            # Load plan for task titles
+            plan_source_path = Path(status.plan_source) if status.plan_source else None
+            if plan is None and plan_source_path and plan_source_path.exists():
+                try:
+                    plan = parse_plan(plan_source_path.resolve())
+                except ValueError:
+                    plan = None
+
+            if plan is None:
+                console.print(
+                    "[yellow]Cannot run final review: plan source not available.[/yellow]"
+                )
+            else:
+                merged_tasks = {tid for tid, rec in status.tasks.items() if rec.merged}
+                merged_titles = [t.title for t in plan.tasks if t.id in merged_tasks]
+                if merged_titles:
+                    # Derive base_branch from plan frontmatter or default
+                    base_branch = plan.run_config.get("base", "main")
+                    review_args = _resolve_final_review_args(
+                        repo=repo,
+                        session_branch=session_branch,
+                        plan_slug=status.plan_slug,
+                        base_branch=base_branch,
+                        plan_source=plan.source,
+                        merged_task_titles=merged_titles,
+                        agent=agent,
+                        no_tmux=no_tmux,
+                        profile=None,
+                        summarizer_directive=summarizer_directive,
+                        branch_reviewer_directive=branch_reviewer_directive,
+                        pr_title=pr_title,
+                        pr_body_file=pr_body_file,
+                        pr_base=pr_base,
+                        skip_pr=skip_pr,
+                    )
+                    record = asyncio.run(run_final_review(**review_args))
+                    _print_final_review_result(record)
+
+
+@main.command("final-review")
+@click.argument("session_branch")
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI to dispatch.",
+)
+@click.option("--no-tmux", is_flag=True, help="Run without tmux.")
+@click.option("--pr-title", default=None, type=str, help="Override the PR title.")
+@click.option(
+    "--pr-body-file",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a file whose content becomes the PR body.",
+)
+@click.option("--pr-base", default=None, type=str, help="Override the PR base branch.")
+@click.option("--skip-pr", is_flag=True, help="Skip PR creation even on PASS verdict.")
+@click.option(
+    "--summarizer-directive",
+    default=None,
+    type=str,
+    help="Override the requirements summarizer agent's instructions.",
+)
+@click.option(
+    "--branch-reviewer-directive",
+    default=None,
+    type=str,
+    help="Override the branch reviewer agent's instructions.",
+)
+@click.option(
+    "--profile",
+    "profile_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a profile.yaml to use.",
+)
+@click.option("--profile-name", default=None, help="Named profile to resolve.")
+def final_review_cmd(
+    session_branch: str,
+    repo: Path | None,
+    agent: str,
+    no_tmux: bool,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    skip_pr: bool,
+    summarizer_directive: str | None,
+    branch_reviewer_directive: str | None,
+    profile_path: Path | None,
+    profile_name: str | None,
+):
+    """Run a final whole-branch review for a session.
+
+    \b
+    Looks up the session status, loads the plan, and runs the two-agent
+    review sequence (requirements summarizer + branch reviewer).
+
+    \b
+    Example:
+      wb final-review workbench-1
+      wb final-review workbench-1 --skip-pr
+      wb final-review workbench-1 --pr-title "My feature"
+    """
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    found = SessionStatus.find_by_session(repo, session_branch)
+    if found is None:
+        raise click.ClickException(
+            f"No status file found for session '{session_branch}'. "
+            f"Run 'wb run' first to create a session."
+        )
+
+    if not found.plan_source:
+        raise click.ClickException(
+            f"Session '{session_branch}' has no plan_source recorded. "
+            f"Cannot determine the plan to review."
+        )
+
+    plan_source = Path(found.plan_source)
+    if not plan_source.exists():
+        raise click.ClickException(
+            f"Plan source not found: {plan_source}\n"
+            f"The plan file may have been moved or deleted."
+        )
+
+    try:
+        plan = parse_plan(plan_source.resolve())
+    except ValueError as e:
+        raise click.ClickException(f"Failed to parse plan: {e}")
+
+    # Compute merged task titles
+    merged_tasks = {tid for tid, rec in found.tasks.items() if rec.merged}
+    merged_titles = [t.title for t in plan.tasks if t.id in merged_tasks]
+
+    if not merged_titles:
+        raise click.ClickException(
+            f"No merged tasks found for session '{session_branch}'. "
+            f"Merge tasks first with 'wb merge -b {session_branch}'."
+        )
+
+    # Derive base_branch from plan frontmatter or default
+    base_branch = plan.run_config.get("base", "main")
+
+    profile_obj = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
+
+    review_args = _resolve_final_review_args(
+        repo=repo,
+        session_branch=session_branch,
+        plan_slug=found.plan_slug,
+        base_branch=base_branch,
+        plan_source=plan_source.resolve(),
+        merged_task_titles=merged_titles,
+        agent=agent,
+        no_tmux=no_tmux,
+        profile=profile_obj,
+        summarizer_directive=summarizer_directive,
+        branch_reviewer_directive=branch_reviewer_directive,
+        pr_title=pr_title,
+        pr_body_file=pr_body_file,
+        pr_base=pr_base,
+        skip_pr=skip_pr,
+    )
+    record = asyncio.run(run_final_review(**review_args))
+    _print_final_review_result(record)
 
 
 @main.command()

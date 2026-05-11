@@ -43,6 +43,7 @@ _RUN_CONFIG_SCHEMA: dict[str, type | tuple[type, ...]] = {
     "cleanup": bool,
     "keep_branches": bool,
     "push": bool,
+    "final_review": bool,
 }
 
 

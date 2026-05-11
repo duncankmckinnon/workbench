@@ -76,6 +76,7 @@ profile_name: fast
 | `cleanup` | bool | `--cleanup` |
 | `keep_branches` | bool | `--keep-branches` |
 | `push` | bool | `--push` |
+| `final_review` | bool | `--final-review` |
 
 Unknown keys raise an error — typos are not silently ignored.
 
