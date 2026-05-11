@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -27,7 +28,11 @@ def _make_plan(title: str = "Test Plan", tasks: list[Task] | None = None) -> Pla
                 depends_on=[],
             )
         ]
-    return Plan(title=title, tasks=tasks, source=Path("/fake/plan.md"), context="", conventions="")
+    # folder_id derives from parent dir name; match it to the slug
+    slug = re.sub(r"[^a-z0-9]+", "-", title.lower()).strip("-")
+    return Plan(
+        title=title, tasks=tasks, source=Path(f"/{slug}/plan.md"), context="", conventions=""
+    )
 
 
 @pytest.mark.asyncio
