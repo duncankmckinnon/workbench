@@ -166,6 +166,9 @@ async def _run_review_sequence(
     # 7. Create session-branch worktree for reviewer
     wt_path = repo / ".workbench" / plan_slug / ".review-wt" / session_branch
     wt_path.parent.mkdir(parents=True, exist_ok=True)
+    reviewer_returncode = 1
+    reviewer_output = ""
+    reviewer_cost: dict = {}
     try:
         _create_review_worktree(repo, wt_path, session_branch)
 
@@ -180,12 +183,13 @@ async def _run_review_sequence(
         )
         reviewer_prompt = reviewer_dir.render()
 
-        reviewer_cost: dict = {}
         try:
             cmd = reviewer_adapter.build_command(reviewer_prompt, wt_path)
             if use_tmux:
                 session_name = "wb-final-review-branch-reviewer"
-                returncode, raw_output = await run_in_tmux(session_name, cmd, wt_path)
+                reviewer_returncode, reviewer_output = await run_in_tmux(
+                    session_name, cmd, wt_path
+                )
             else:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
@@ -194,14 +198,30 @@ async def _run_review_sequence(
                     stderr=asyncio.subprocess.PIPE,
                 )
                 stdout, stderr = await proc.communicate()
-                returncode = proc.returncode
-                raw_output = stdout.decode("utf-8", errors="replace")
+                reviewer_returncode = proc.returncode
+                reviewer_output = stdout.decode("utf-8", errors="replace")
 
-            _output_text, reviewer_cost = reviewer_adapter.parse_output(raw_output)
+            _output_text, reviewer_cost = reviewer_adapter.parse_output(reviewer_output)
         except Exception as e:
-            returncode = 1
-            raw_output = f"Branch reviewer error: {e}"
+            reviewer_returncode = 1
+            reviewer_output = f"Branch reviewer error: {e}"
 
+    except Exception as e:
+        # Worktree creation or setup failure — persist an error record
+        reviewer_output = f"Worktree/reviewer setup error: {e}"
+        report_path.write_text(reviewer_output, encoding="utf-8")
+        combined_cost = {"cost_usd": summarizer_cost.get("cost_usd", 0.0)}
+        record = _build_record(
+            verdict="error",
+            report_path=report_path,
+            requirements_path=requirements_path,
+            repo=repo,
+            summarizer_agent=summarizer_agent_cmd,
+            reviewer_agent=reviewer_agent_cmd,
+            cost=combined_cost,
+        )
+        await _persist_record(repo, plan_slug, session_branch, record)
+        return record
     finally:
         _cleanup_review_worktree(repo, wt_path)
 
@@ -210,10 +230,11 @@ async def _run_review_sequence(
     combined_cost = {"cost_usd": total_cost}
 
     # Check reviewer success
-    if returncode != 0 or not report_path.exists():
+    if reviewer_returncode != 0 or not report_path.exists():
         if not report_path.exists():
             report_path.write_text(
-                f"Branch reviewer failed (exit={returncode}).\n\n{raw_output[:2000]}",
+                f"Branch reviewer failed (exit={reviewer_returncode}).\n\n"
+                f"{reviewer_output[:2000]}",
                 encoding="utf-8",
             )
         record = _build_record(

@@ -384,6 +384,47 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
 
 
 @pytest.mark.asyncio
+async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_repo):
+    """Worktree creation failure persists an error record instead of crashing."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.02})
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        # Summarizer succeeds and writes requirements
+        req_path.parent.mkdir(parents=True, exist_ok=True)
+        req_path.write_text(
+            "## Requirements\n- Stuff\n## Non-goals\n- None\n## Acceptance criteria\n- Works"
+        )
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    def fail_worktree(*args, **kwargs):
+        raise subprocess.CalledProcessError(128, "git worktree add")
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree", side_effect=fail_worktree),
+        patch("workbench.final_review._cleanup_review_worktree"),
+    ):
+        record = await run_final_review(**base_kwargs)
+
+    assert record.verdict == "error"
+    assert record.pr_url is None
+    # Verify the error was persisted
+    status = SessionStatus.load(tmp_repo, "my-plan", "workbench-1")
+    assert status is not None
+    assert len(status.final_reviews) == 1
+    assert status.final_reviews[0].verdict == "error"
+
+
+@pytest.mark.asyncio
 async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
     """Two concurrent invocations → the second raises RuntimeError."""
     # Pre-create the lock file
