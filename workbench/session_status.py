@@ -1,11 +1,14 @@
 """Persistent session status tracking.
 
-Writes per-task status to ``.workbench/status-<plan>.yaml`` so that
+Writes per-task status to ``.workbench/<plan>/status.yaml`` so that
 ``--only-incomplete`` can reliably skip already-completed tasks,
 even when the process was interrupted mid-wave.
 
 Files are named by plan slug. Inside each file, sessions are keyed
 by session branch, so multiple runs of the same plan coexist.
+
+Legacy layout (``.workbench/status-<plan>.yaml``) is still read as a
+fallback, but new writes always use the per-plan folder layout.
 """
 
 from __future__ import annotations
@@ -48,7 +51,7 @@ class TaskRecord:
 class SessionStatus:
     """Read/write session status to disk.
 
-    File: ``.workbench/status-<plan_slug>.yaml``
+    File: ``.workbench/<plan_slug>/status.yaml``
     Structure::
 
         plan_source: /path/to/plan.md
@@ -72,6 +75,10 @@ class SessionStatus:
 
     @staticmethod
     def path_for(repo: Path, plan_slug: str) -> Path:
+        return repo / ".workbench" / plan_slug / "status.yaml"
+
+    @staticmethod
+    def legacy_path_for(repo: Path, plan_slug: str) -> Path:
         return repo / ".workbench" / f"status-{plan_slug}.yaml"
 
     def save(self, repo: Path) -> None:
@@ -124,12 +131,15 @@ class SessionStatus:
     def load(cls, repo: Path, plan_slug: str, session_branch: str) -> SessionStatus | None:
         """Load status for a specific plan and session branch.
 
-        Returns None if the file doesn't exist or the session branch
-        is not found in the file.
+        Tries the new per-plan folder layout first, then falls back to
+        the legacy flat-file path. Returns None if neither exists or
+        the session branch is not found in the file.
         """
         path = cls.path_for(repo, plan_slug)
         if not path.exists():
-            return None
+            path = cls.legacy_path_for(repo, plan_slug)
+            if not path.exists():
+                return None
         data = yaml.safe_load(path.read_text()) or {}
         sessions = data.get("sessions", {})
         session_data = sessions.get(session_branch)
@@ -149,20 +159,35 @@ class SessionStatus:
     def find_by_session(cls, repo: Path, session_branch: str) -> SessionStatus | None:
         """Find a session across all status files.
 
-        Scans ``.workbench/status-*.yaml`` for one containing the given
-        session branch. Returns the matching ``SessionStatus``, or None
-        if no match is found. Raises ``ValueError`` if multiple status
-        files contain the same session branch.
+        Scans both new (``<plan>/status.yaml``) and legacy
+        (``status-*.yaml``) layouts. New layout wins when both exist
+        for the same plan slug.
+
+        Returns the matching ``SessionStatus``, or None if no match is
+        found. Raises ``ValueError`` if multiple status files contain
+        the same session branch.
         """
         wb_dir = repo / ".workbench"
         if not wb_dir.exists():
             return None
 
-        matches: list[SessionStatus] = []
+        # Collect (slug -> (path, data)) with new layout taking precedence
+        slug_entries: dict[str, tuple[Path, dict]] = {}
+
+        # Legacy layout: status-<slug>.yaml
         for path in sorted(wb_dir.glob("status-*.yaml")):
-            # Extract plan slug from filename: status-<slug>.yaml
             slug = path.stem.removeprefix("status-")
             data = yaml.safe_load(path.read_text()) or {}
+            slug_entries[slug] = (path, data)
+
+        # New layout: <slug>/status.yaml — overwrites legacy if both exist
+        for path in sorted(wb_dir.glob("*/status.yaml")):
+            slug = path.parent.name
+            data = yaml.safe_load(path.read_text()) or {}
+            slug_entries[slug] = (path, data)
+
+        matches: list[SessionStatus] = []
+        for slug, (_path, data) in slug_entries.items():
             sessions = data.get("sessions", {})
             if session_branch in sessions:
                 session_data = sessions[session_branch]
@@ -236,16 +261,30 @@ class SessionStatus:
 
 
 def iter_status_files(repo: Path) -> list[tuple[Path, dict]]:
-    """Return (path, raw_yaml_dict) for every .workbench/status-*.yaml, sorted
-    by path. Returns [] if .workbench/ does not exist."""
+    """Return (path, raw_yaml_dict) for every status file, sorted by slug.
+
+    Scans both new (``<plan>/status.yaml``) and legacy (``status-*.yaml``)
+    layouts. When both exist for the same plan slug, the new layout wins.
+    Returns [] if .workbench/ does not exist.
+    """
     wb_dir = repo / ".workbench"
     if not wb_dir.exists():
         return []
-    out: list[tuple[Path, dict]] = []
+
+    # slug -> (path, data); new layout overwrites legacy
+    slug_entries: dict[str, tuple[Path, dict]] = {}
+
     for path in sorted(wb_dir.glob("status-*.yaml")):
+        slug = path.stem.removeprefix("status-")
         data = yaml.safe_load(path.read_text()) or {}
-        out.append((path, data))
-    return out
+        slug_entries[slug] = (path, data)
+
+    for path in sorted(wb_dir.glob("*/status.yaml")):
+        slug = path.parent.name
+        data = yaml.safe_load(path.read_text()) or {}
+        slug_entries[slug] = (path, data)
+
+    return [(p, d) for p, d in sorted(slug_entries.values(), key=lambda x: x[0])]
 
 
 def status_file_is_complete(data: dict) -> bool:

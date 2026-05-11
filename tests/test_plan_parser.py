@@ -120,6 +120,15 @@ def test_plan_title(tmp_path):
     assert plan.title == "My Great Plan"
 
 
+def test_folder_id_returns_parent_name(tmp_path):
+    plan_dir = tmp_path / "my-project"
+    plan_dir.mkdir()
+    plan_file = plan_dir / "plan.md"
+    plan_file.write_text("# My Great Plan\n\n## Task: X\nDo X.\n")
+    plan = parse_plan(plan_file)
+    assert plan.folder_id == "my-project"
+
+
 def test_task_slug(tmp_path):
     plan_file = tmp_path / "plan.md"
     plan_file.write_text("# Plan\n\n" "## Task: Add User Authentication\n" "Implement auth.\n")

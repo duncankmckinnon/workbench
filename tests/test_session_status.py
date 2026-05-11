@@ -89,7 +89,7 @@ class TestSessionStatus:
         ss = SessionStatus(plan_slug=PLAN_SLUG, session_branch=SESSION)
         ss.record_task("task-1", status="done")
         ss.save(tmp_path)
-        assert (tmp_path / ".workbench" / f"status-{PLAN_SLUG}.yaml").exists()
+        assert (tmp_path / ".workbench" / PLAN_SLUG / "status.yaml").exists()
 
     def test_record_task_overwrites(self):
         ss = SessionStatus(plan_slug=PLAN_SLUG, session_branch=SESSION)
@@ -104,7 +104,7 @@ class TestSessionStatus:
         ss.record_task("task-1", status="done", branch="wb/feat")
         ss.save(tmp_path)
 
-        raw = (tmp_path / ".workbench" / f"status-{PLAN_SLUG}.yaml").read_text()
+        raw = (tmp_path / ".workbench" / PLAN_SLUG / "status.yaml").read_text()
         data = yaml.safe_load(raw)
         assert SESSION in data["sessions"]
         assert "task-1" in data["sessions"][SESSION]["tasks"]
@@ -136,8 +136,8 @@ class TestSessionStatus:
         ss2.record_task("task-1", status="failed")
         ss2.save(tmp_path)
 
-        assert (tmp_path / ".workbench" / "status-plan-a.yaml").exists()
-        assert (tmp_path / ".workbench" / "status-plan-b.yaml").exists()
+        assert (tmp_path / ".workbench" / "plan-a" / "status.yaml").exists()
+        assert (tmp_path / ".workbench" / "plan-b" / "status.yaml").exists()
 
         loaded_a = SessionStatus.load(tmp_path, "plan-a", SESSION)
         loaded_b = SessionStatus.load(tmp_path, "plan-b", SESSION)
@@ -154,6 +154,71 @@ class TestSessionStatus:
 
         loaded = SessionStatus.load(tmp_path, PLAN_SLUG, SESSION)
         assert loaded.plan_source == "/path/to/plan.md"
+
+
+class TestNewLayout:
+    """Tests for the per-plan folder layout."""
+
+    def test_save_creates_new_layout(self, tmp_path):
+        ss = SessionStatus(plan_slug="my-plan", session_branch=SESSION)
+        ss.record_task("task-1", status="done")
+        ss.save(tmp_path)
+        assert (tmp_path / ".workbench" / "my-plan" / "status.yaml").exists()
+        assert not (tmp_path / ".workbench" / "status-my-plan.yaml").exists()
+
+    def test_load_reads_new_layout(self, tmp_path):
+        ss = SessionStatus(plan_slug="my-plan", session_branch=SESSION)
+        ss.record_task("task-1", status="done", branch="wb/feat")
+        ss.save(tmp_path)
+
+        loaded = SessionStatus.load(tmp_path, "my-plan", SESSION)
+        assert loaded is not None
+        assert loaded.tasks["task-1"].status == "done"
+
+    def test_load_falls_back_to_legacy(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        legacy = wb / "status-old-plan.yaml"
+        legacy.write_text(
+            yaml.dump(
+                {
+                    "sessions": {
+                        SESSION: {"tasks": {"task-1": {"status": "done", "merged": True}}}
+                    },
+                }
+            )
+        )
+
+        loaded = SessionStatus.load(tmp_path, "old-plan", SESSION)
+        assert loaded is not None
+        assert loaded.tasks["task-1"].status == "done"
+
+    def test_load_prefers_new_over_legacy(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        # Write legacy
+        legacy = wb / "status-my-plan.yaml"
+        legacy.write_text(
+            yaml.dump(
+                {
+                    "sessions": {SESSION: {"tasks": {"task-1": {"status": "failed"}}}},
+                }
+            )
+        )
+        # Write new layout with different data
+        new_dir = wb / "my-plan"
+        new_dir.mkdir()
+        (new_dir / "status.yaml").write_text(
+            yaml.dump(
+                {
+                    "sessions": {SESSION: {"tasks": {"task-1": {"status": "done"}}}},
+                }
+            )
+        )
+
+        loaded = SessionStatus.load(tmp_path, "my-plan", SESSION)
+        assert loaded is not None
+        assert loaded.tasks["task-1"].status == "done"
 
 
 class TestFindBySession:
@@ -212,6 +277,48 @@ class TestFindBySession:
         assert found is not None
         assert found.session_branch == "workbench-2"
         assert found.tasks["task-1"].status == "failed"
+
+    def test_deduplicates_legacy_and_new(self, tmp_path):
+        """When both layouts exist for same slug, new layout wins."""
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        # Legacy file
+        (wb / "status-my-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "sessions": {"workbench-1": {"tasks": {"task-1": {"status": "failed"}}}},
+                }
+            )
+        )
+        # New layout with different data
+        plan_dir = wb / "my-plan"
+        plan_dir.mkdir()
+        (plan_dir / "status.yaml").write_text(
+            yaml.dump(
+                {
+                    "sessions": {"workbench-1": {"tasks": {"task-1": {"status": "done"}}}},
+                }
+            )
+        )
+
+        found = SessionStatus.find_by_session(tmp_path, "workbench-1")
+        assert found is not None
+        assert found.tasks["task-1"].status == "done"
+
+    def test_finds_session_in_legacy_only(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        (wb / "status-old-plan.yaml").write_text(
+            yaml.dump(
+                {
+                    "sessions": {"workbench-1": {"tasks": {"task-1": {"status": "done"}}}},
+                }
+            )
+        )
+
+        found = SessionStatus.find_by_session(tmp_path, "workbench-1")
+        assert found is not None
+        assert found.plan_slug == "old-plan"
 
 
 class TestSessionStatusIsComplete:
@@ -293,7 +400,7 @@ class TestSeedPending:
         ss.seed_pending(["task-1", "task-2"])
         ss.save(tmp_path)
 
-        path = tmp_path / ".workbench" / "status-p.yaml"
+        path = tmp_path / ".workbench" / "p" / "status.yaml"
         data = yaml.safe_load(path.read_text())
         assert status_file_is_complete(data) is False
 
@@ -352,6 +459,42 @@ class TestIterStatusFiles:
 
         assert len(result) == 1
         assert result[0][1] == {}
+
+    def test_returns_new_layout_files(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        plan_dir = wb / "my-plan"
+        plan_dir.mkdir()
+        (plan_dir / "status.yaml").write_text(yaml.dump({"sessions": {"x": {"tasks": {}}}}))
+
+        result = iter_status_files(tmp_path)
+        assert len(result) == 1
+        assert result[0][0] == plan_dir / "status.yaml"
+
+    def test_returns_both_layouts_deduplicated(self, tmp_path):
+        wb = tmp_path / ".workbench"
+        wb.mkdir()
+        # Legacy file for plan-a
+        (wb / "status-plan-a.yaml").write_text(yaml.dump({"sessions": {"old": {"tasks": {}}}}))
+        # New layout for plan-a (should win)
+        plan_dir = wb / "plan-a"
+        plan_dir.mkdir()
+        (plan_dir / "status.yaml").write_text(yaml.dump({"sessions": {"new": {"tasks": {}}}}))
+        # Legacy-only plan-b
+        (wb / "status-plan-b.yaml").write_text(yaml.dump({"sessions": {}}))
+
+        result = iter_status_files(tmp_path)
+        assert len(result) == 2
+        slugs = []
+        for path, data in result:
+            if path.name == "status.yaml":
+                slugs.append(path.parent.name)
+                # plan-a should come from the new layout
+                assert "new" in data.get("sessions", {})
+            else:
+                slugs.append(path.stem.removeprefix("status-"))
+        assert "plan-a" in slugs
+        assert "plan-b" in slugs
 
 
 class TestStatusFileIsComplete:

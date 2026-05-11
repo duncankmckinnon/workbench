@@ -1382,7 +1382,7 @@ def merge(
             plan = parse_plan(plan_path.resolve())
         except ValueError as e:
             raise click.ClickException(str(e))
-        plan_slug = plan.slug
+        plan_slug = plan.folder_id
 
     asyncio.run(
         merge_unmerged(

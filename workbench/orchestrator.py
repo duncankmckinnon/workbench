@@ -178,7 +178,7 @@ async def run_plan(
         )
 
     # Initialize session status tracking
-    plan_slug = plan.slug
+    plan_slug = plan.folder_id
     plan_source = str(plan.source)
     session_status = SessionStatus(
         plan_slug=plan_slug,
