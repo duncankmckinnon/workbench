@@ -6,6 +6,7 @@ import pytest
 import yaml
 
 from workbench.session_status import (
+    FinalReviewRecord,
     SessionStatus,
     TaskRecord,
     iter_status_files,
@@ -593,3 +594,101 @@ class TestStatusFileBranches:
             }
         }
         assert status_file_branches(data) == {"wb/feat-a"}
+
+
+class TestFinalReviewRecord:
+    def _sample_record(self, **overrides) -> FinalReviewRecord:
+        defaults = {
+            "timestamp": "2026-05-10T14:22:31Z",
+            "verdict": "pass",
+            "report_path": ".workbench/my-plan/reviews/wb-1/report.md",
+            "requirements_path": ".workbench/my-plan/reviews/wb-1/requirements.md",
+            "summarizer_agent": "claude",
+            "reviewer_agent": "claude",
+            "cost_usd": 0.42,
+            "pr_url": "https://github.com/org/repo/pull/7",
+        }
+        defaults.update(overrides)
+        return FinalReviewRecord(**defaults)
+
+    def test_final_review_record_round_trip(self):
+        rec = self._sample_record()
+        data = rec.to_dict()
+        restored = FinalReviewRecord.from_dict(data)
+        assert restored.timestamp == rec.timestamp
+        assert restored.verdict == rec.verdict
+        assert restored.report_path == rec.report_path
+        assert restored.requirements_path == rec.requirements_path
+        assert restored.summarizer_agent == rec.summarizer_agent
+        assert restored.reviewer_agent == rec.reviewer_agent
+        assert restored.cost_usd == rec.cost_usd
+        assert restored.pr_url == rec.pr_url
+
+    def test_final_review_record_missing_fields_use_defaults(self):
+        data = {
+            "timestamp": "2026-05-10T14:22:31Z",
+            "verdict": "fail",
+            "report_path": "r.md",
+            "requirements_path": "req.md",
+            "summarizer_agent": "claude",
+            "reviewer_agent": "claude",
+        }
+        rec = FinalReviewRecord.from_dict(data)
+        assert rec.cost_usd == 0.0
+        assert rec.pr_url is None
+
+    def test_session_save_persists_final_reviews(self, tmp_path):
+        (tmp_path / ".workbench").mkdir()
+        ss = SessionStatus(plan_slug=PLAN_SLUG, session_branch=SESSION)
+        ss.record_task("task-1", status="done")
+        ss.final_reviews.append(self._sample_record(verdict="fail"))
+        ss.final_reviews.append(self._sample_record(verdict="pass"))
+        ss.save(tmp_path)
+
+        loaded = SessionStatus.load(tmp_path, PLAN_SLUG, SESSION)
+        assert loaded is not None
+        assert len(loaded.final_reviews) == 2
+        assert loaded.final_reviews[0].verdict == "fail"
+        assert loaded.final_reviews[1].verdict == "pass"
+
+    def test_session_save_preserves_other_sessions_final_reviews(self, tmp_path):
+        (tmp_path / ".workbench").mkdir()
+
+        # Save session A with a review
+        ss_a = SessionStatus(plan_slug=PLAN_SLUG, session_branch="session-a")
+        ss_a.record_task("task-1", status="done")
+        ss_a.final_reviews.append(self._sample_record(verdict="pass"))
+        ss_a.save(tmp_path)
+
+        # Save session B (no reviews) to the same file
+        ss_b = SessionStatus(plan_slug=PLAN_SLUG, session_branch="session-b")
+        ss_b.record_task("task-1", status="failed")
+        ss_b.save(tmp_path)
+
+        # Reload session A — its review must still be there
+        loaded_a = SessionStatus.load(tmp_path, PLAN_SLUG, "session-a")
+        assert loaded_a is not None
+        assert len(loaded_a.final_reviews) == 1
+        assert loaded_a.final_reviews[0].verdict == "pass"
+
+    @pytest.mark.asyncio
+    async def test_append_final_review_is_locked(self, tmp_path):
+        import asyncio
+
+        (tmp_path / ".workbench").mkdir()
+        ss = SessionStatus(plan_slug=PLAN_SLUG, session_branch=SESSION)
+        ss.record_task("task-1", status="done")
+        ss.save(tmp_path)
+
+        n = 20
+        coros = [
+            ss.append_final_review(tmp_path, self._sample_record(verdict=f"pass-{i}"))
+            for i in range(n)
+        ]
+        await asyncio.gather(*coros)
+
+        assert len(ss.final_reviews) == n
+        # Verify persistence
+        loaded = SessionStatus.load(tmp_path, PLAN_SLUG, SESSION)
+        assert loaded is not None
+        assert len(loaded.final_reviews) == n
