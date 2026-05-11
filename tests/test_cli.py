@@ -2586,7 +2586,9 @@ def test_merge_passes_args_with_plan(git_repo, tmp_path):
     """wb merge -b workbench-1 --plan plan.md should pass plan_slug."""
     import asyncio
 
-    plan = tmp_path / "plan.md"
+    plan_dir = tmp_path / "my-plan"
+    plan_dir.mkdir()
+    plan = plan_dir / "plan.md"
     plan.write_text("# My Plan\n## Task: hello\nDo something\n")
 
     runner = CliRunner()

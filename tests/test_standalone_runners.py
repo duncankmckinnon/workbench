@@ -334,7 +334,7 @@ class TestPlannerBackwardCompat:
         """Prompt from run_planner with no override matches
         PlannerDirective(...).render() directly."""
         plan_name = "my-plan"
-        output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
+        output_path = tmp_repo / ".workbench" / plan_name / "plan.md"
 
         expected = PlannerDirective(
             output_path=output_path,
@@ -351,7 +351,7 @@ class TestPlannerBackwardCompat:
 
     def test_with_user_prompt_matches(self, mock_adapter, tmp_repo):
         plan_name = "auth-plan"
-        output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
+        output_path = tmp_repo / ".workbench" / plan_name / "plan.md"
         user_prompt = "Add JWT authentication"
 
         expected = PlannerDirective(
@@ -371,7 +371,7 @@ class TestPlannerBackwardCompat:
 
     def test_with_source_content_matches(self, mock_adapter, tmp_repo):
         plan_name = "refactor"
-        output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
+        output_path = tmp_repo / ".workbench" / plan_name / "plan.md"
         source_content = "# Spec\nBuild the widget system.\n"
 
         expected = PlannerDirective(
@@ -391,7 +391,7 @@ class TestPlannerBackwardCompat:
 
     def test_with_both_user_and_source_matches(self, mock_adapter, tmp_repo):
         plan_name = "full"
-        output_path = tmp_repo / ".workbench" / "plans" / f"{plan_name}.md"
+        output_path = tmp_repo / ".workbench" / plan_name / "plan.md"
         user_prompt = "Focus on security"
         source_content = "# Design\nAdd auth module.\n"
 
@@ -495,7 +495,7 @@ class TestPlannerResult:
                     adapter=mock_adapter,
                 )
             )
-        assert (repo / ".workbench" / "plans").is_dir()
+        assert (repo / ".workbench" / "plan").is_dir()
 
 
 # ── run_planner signature ────────────────────────────────────────────
@@ -574,7 +574,7 @@ class TestPlannerPromptContent:
             tmp_repo=tmp_repo,
             plan_name="my-plan",
         )
-        expected_path = str(tmp_repo / ".workbench" / "plans" / "my-plan.md")
+        expected_path = str(tmp_repo / ".workbench" / "my-plan" / "plan.md")
         assert expected_path in prompt
 
     def test_contains_explore_instruction(self, mock_adapter, tmp_repo):

@@ -386,7 +386,7 @@ def test_run_planner_success(tmp_path):
 
     assert result.status == TaskStatus.DONE
     assert result.task_id == "planner-test-plan"
-    assert (tmp_path / ".workbench" / "plans").is_dir()
+    assert (tmp_path / ".workbench" / "test-plan").is_dir()
     mock_adapter.build_command.assert_called_once()
 
 
