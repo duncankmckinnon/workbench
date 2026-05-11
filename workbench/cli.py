@@ -871,7 +871,7 @@ def preview(plan_path: Path):
     "--name",
     "-n",
     default="plan",
-    help="Name for the plan file (default: plan). Produces .workbench/plans/<name>.md.",
+    help="Name for the plan file (default: plan). Produces .workbench/<name>/plan.md.",
 )
 @click.option(
     "--agent",
@@ -892,7 +892,7 @@ def plan(
 
     \b
     The planner agent explores the codebase, then writes a detailed plan
-    to .workbench/plans/<name>.md that can be executed with `wb run`.
+    to .workbench/<name>/plan.md that can be executed with `wb run`.
 
     \b
     Example:

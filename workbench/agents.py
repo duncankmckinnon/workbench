@@ -481,7 +481,7 @@ async def run_planner(
     """Spawn a planner agent to generate a workbench plan.
 
     The agent explores the codebase, then writes a plan file to
-    ``.workbench/plans/<plan_name>.md``.
+    ``.workbench/<plan_name>/plan.md``.
 
     Provide ``user_prompt`` for generation from scratch, ``source_content``
     to transform an existing document, or both for guided transformation.
