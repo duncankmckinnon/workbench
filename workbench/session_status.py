@@ -48,6 +48,45 @@ class TaskRecord:
 
 
 @dataclass
+class FinalReviewRecord:
+    """One persisted final-review run."""
+
+    timestamp: str  # ISO 8601 UTC, e.g. "2026-05-10T14:22:31Z"
+    verdict: str  # "pass" | "fail" | "error"
+    report_path: str  # repo-relative path to report.md
+    requirements_path: str  # repo-relative path to requirements.md
+    summarizer_agent: str  # e.g. "claude"
+    reviewer_agent: str  # e.g. "claude"
+    cost_usd: float = 0.0
+    pr_url: str | None = None
+
+    def to_dict(self) -> dict:
+        return {
+            "timestamp": self.timestamp,
+            "verdict": self.verdict,
+            "report_path": self.report_path,
+            "requirements_path": self.requirements_path,
+            "summarizer_agent": self.summarizer_agent,
+            "reviewer_agent": self.reviewer_agent,
+            "cost_usd": self.cost_usd,
+            "pr_url": self.pr_url,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> FinalReviewRecord:
+        return cls(
+            timestamp=data.get("timestamp", ""),
+            verdict=data.get("verdict", ""),
+            report_path=data.get("report_path", ""),
+            requirements_path=data.get("requirements_path", ""),
+            summarizer_agent=data.get("summarizer_agent", ""),
+            reviewer_agent=data.get("reviewer_agent", ""),
+            cost_usd=data.get("cost_usd", 0.0),
+            pr_url=data.get("pr_url"),
+        )
+
+
+@dataclass
 class SessionStatus:
     """Read/write session status to disk.
 
@@ -69,6 +108,7 @@ class SessionStatus:
     session_branch: str
     plan_source: str = ""
     tasks: dict[str, TaskRecord] = field(default_factory=dict)
+    final_reviews: list[FinalReviewRecord] = field(default_factory=list)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, repr=False)
 
     # -- persistence ----------------------------------------------------------
@@ -96,9 +136,12 @@ class SessionStatus:
             existing = yaml.safe_load(path.read_text()) or {}
 
         sessions = existing.get("sessions", {})
-        sessions[self.session_branch] = {
+        session_data: dict = {
             "tasks": {tid: rec.to_dict() for tid, rec in self.tasks.items()},
         }
+        if self.final_reviews:
+            session_data["final_reviews"] = [r.to_dict() for r in self.final_reviews]
+        sessions[self.session_branch] = session_data
 
         data = {"sessions": sessions}
         if self.plan_source:
@@ -127,6 +170,12 @@ class SessionStatus:
             self.mark_merged(task_id)
             self.save(repo)
 
+    async def append_final_review(self, repo: Path, record: FinalReviewRecord) -> None:
+        """Atomically append a final-review record and save under a lock."""
+        async with self._lock:
+            self.final_reviews.append(record)
+            self.save(repo)
+
     @classmethod
     def load(cls, repo: Path, plan_slug: str, session_branch: str) -> SessionStatus | None:
         """Load status for a specific plan and session branch.
@@ -148,11 +197,15 @@ class SessionStatus:
         tasks = {
             tid: TaskRecord.from_dict(rec) for tid, rec in session_data.get("tasks", {}).items()
         }
+        final_reviews = [
+            FinalReviewRecord.from_dict(r) for r in session_data.get("final_reviews", [])
+        ]
         return cls(
             plan_slug=plan_slug,
             session_branch=session_branch,
             plan_source=data.get("plan_source", ""),
             tasks=tasks,
+            final_reviews=final_reviews,
         )
 
     @classmethod
@@ -195,12 +248,16 @@ class SessionStatus:
                     tid: TaskRecord.from_dict(rec)
                     for tid, rec in session_data.get("tasks", {}).items()
                 }
+                final_reviews = [
+                    FinalReviewRecord.from_dict(r) for r in session_data.get("final_reviews", [])
+                ]
                 matches.append(
                     cls(
                         plan_slug=slug,
                         session_branch=session_branch,
                         plan_source=data.get("plan_source", ""),
                         tasks=tasks,
+                        final_reviews=final_reviews,
                     )
                 )
 
