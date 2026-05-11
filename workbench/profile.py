@@ -11,7 +11,16 @@ import yaml
 # Roles that support each sub-mode
 _TDD_ROLES = {"implementor", "tester"}
 _FOLLOWUP_ROLES = {"reviewer"}
-_ALL_ROLE_NAMES = ("implementor", "tester", "reviewer", "fixer", "merger", "planner")
+_ALL_ROLE_NAMES = (
+    "implementor",
+    "tester",
+    "reviewer",
+    "fixer",
+    "merger",
+    "planner",
+    "summarizer",
+    "branch_reviewer",
+)
 
 
 @dataclass
@@ -40,6 +49,8 @@ class Profile:
     fixer: RoleConfig = field(default_factory=RoleConfig)
     merger: RoleConfig = field(default_factory=RoleConfig)
     planner: RoleConfig = field(default_factory=RoleConfig)
+    summarizer: RoleConfig = field(default_factory=RoleConfig)
+    branch_reviewer: RoleConfig = field(default_factory=RoleConfig)
 
     _ROLE_NAMES: tuple[str, ...] = _ALL_ROLE_NAMES
 
@@ -53,6 +64,8 @@ class Profile:
             fixer=RoleConfig(agent="claude", directive=""),
             merger=RoleConfig(agent="claude", directive=""),
             planner=RoleConfig(agent="claude", directive=""),
+            summarizer=RoleConfig(agent="claude", directive=""),
+            branch_reviewer=RoleConfig(agent="claude", directive=""),
         )
 
     @classmethod
