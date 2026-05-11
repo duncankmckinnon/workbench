@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import shlex
 import shutil
 from pathlib import Path
 
@@ -60,7 +61,8 @@ async def create_pr(
         stdout, stderr = await proc.communicate()
 
         if proc.returncode == 0:
-            pr_url = stdout.decode().strip().splitlines()[-1]
+            lines = stdout.decode().strip().splitlines()
+            pr_url = lines[-1] if lines else ""
             return True, pr_url
         else:
             return False, stderr.decode().strip()
@@ -104,8 +106,8 @@ def _format_suggested_command(
     """Return a suggested gh pr create command for the user to run manually."""
     return (
         f"gh pr create"
-        f" --base {base_branch}"
-        f" --head {session_branch}"
-        f" --title {title!r}"
-        f" --body-file {body_file_path}"
+        f" --base {shlex.quote(base_branch)}"
+        f" --head {shlex.quote(session_branch)}"
+        f" --title {shlex.quote(title)}"
+        f" --body-file {shlex.quote(body_file_path)}"
     )
