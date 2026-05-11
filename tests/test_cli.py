@@ -1503,6 +1503,8 @@ class TestProfileShow:
                         "fixer": {"directive": "Custom fix directive"},
                         "merger": {"directive": "Custom merge directive"},
                         "planner": {"directive": "Custom plan directive"},
+                        "summarizer": {"directive": "Custom summarizer directive"},
+                        "branch_reviewer": {"directive": "Custom branch reviewer directive"},
                     }
                 }
             )
