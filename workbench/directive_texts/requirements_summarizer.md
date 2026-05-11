@@ -14,6 +14,7 @@ and produce a structured requirements digest that a reviewer can check against.
 - Be exhaustive: every testable expectation in the plan should appear as a bullet.
 - Group related requirements under a single bullet when they share a theme.
 - Each acceptance criterion should be independently verifiable from the codebase.
+- Do not copy implementation details directly, attempt to capture the intention behind the task
 
 ## Output Format
 
