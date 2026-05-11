@@ -442,7 +442,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb plan "<prompt>"` | Generate a plan from a natural language description |
 | `wb run <plan>` | Execute a plan with parallel agents |
 | `wb merge -b <branch>` | Merge completed-but-unmerged task branches (auto-detects plan) |
-| `wb final-review <branch>` | Run a whole-branch review (requirements summarizer + branch reviewer) and optionally open a PR |
+| `wb final-review <branch>` / `wb review <branch>` | Run a whole-branch review (requirements summarizer + branch reviewer) and optionally open a PR |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
 | `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
@@ -585,7 +585,7 @@ For finer-grained control (waves, directive overrides, selective tasks), use `wb
 | `--branch-reviewer-directive TEXT` | Override the branch reviewer agent's instructions |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 
-### `wb final-review`
+### `wb final-review` (alias: `wb review`)
 
 Run a whole-branch review for a completed session. Two agents run in sequence: a **requirements summarizer** extracts a structured digest from the plan, then a **branch reviewer** evaluates the session-branch diff against that digest and writes a markdown report. On `VERDICT: PASS`, workbench opens a GitHub PR via `gh pr create`. On `VERDICT: FAIL`, no PR is created; the report lists specific findings with file/line evidence and concrete suggested fixes for a human to address.
 

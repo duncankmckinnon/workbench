@@ -3212,6 +3212,54 @@ def test_final_review_standalone_command(git_repo, tmp_path):
     assert "PASS" in result.output
 
 
+def test_review_is_alias_for_final_review(git_repo, tmp_path):
+    """wb review should be an alias for wb final-review."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-11T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["review", "workbench-1", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.called
+    assert "PASS" in result.output
+
+
 def test_final_review_standalone_no_session_error(git_repo):
     """wb final-review with nonexistent session should error."""
     runner = CliRunner()

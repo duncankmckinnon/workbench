@@ -93,6 +93,7 @@ profile_name: fast
 | `cleanup` | `--cleanup` | bool |
 | `keep_branches` | `--keep-branches` | bool |
 | `push` | `--push` | bool |
+| `final_review` | `--final-review` | bool |
 
 ### Precedence
 
