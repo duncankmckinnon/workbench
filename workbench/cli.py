@@ -1776,6 +1776,9 @@ def final_review_cmd(
     _print_final_review_result(record)
 
 
+main.add_command(final_review_cmd, name="review")
+
+
 @main.command()
 @click.option(
     "--agent",

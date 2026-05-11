@@ -338,6 +338,7 @@ FRONTMATTER_KEYS = [
     "cleanup",
     "keep_branches",
     "push",
+    "final_review",
 ]
 
 
@@ -410,14 +411,15 @@ class TestReadmeFrontmatterSchemaTable:
         assert "unknown keys" in rest.lower() or "Unknown keys" in rest
 
     def test_schema_table_row_count(self):
-        """Table must have exactly 17 data rows (one per allowed key)."""
+        """Table must have one data row per allowed key."""
         content = _read(README)
         start = content.index("#### Frontmatter-readable flags")
         next_heading = content.find("\n### ", start + 1)
         table_section = content[start:next_heading] if next_heading != -1 else content[start:]
         # Count rows starting with | ` (data rows have backtick-quoted keys)
         data_rows = [line for line in table_section.splitlines() if line.startswith("| `")]
-        assert len(data_rows) == 17, f"Expected 17 data rows, got {len(data_rows)}"
+        expected = len(FRONTMATTER_KEYS)
+        assert len(data_rows) == expected, f"Expected {expected} data rows, got {len(data_rows)}"
 
 
 class TestReadmeResumesFrontmatterNote:
@@ -479,7 +481,8 @@ class TestSkillFrontmatterSection:
         end_pos = content.index("### Plan Sections")
         section = content[fm_pos:end_pos]
         data_rows = [line for line in section.splitlines() if line.startswith("| `")]
-        assert len(data_rows) == 17, f"Expected 17 data rows, got {len(data_rows)}"
+        expected = len(FRONTMATTER_KEYS)
+        assert len(data_rows) == expected, f"Expected {expected} data rows, got {len(data_rows)}"
 
     def test_precedence_documented(self):
         content = _read(SKILL_MD)
