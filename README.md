@@ -84,7 +84,7 @@ wb plan --from existing-spec.md
 wb plan "Focus on security" --from claude-plan.md --name secure-auth
 ```
 
-The planner agent explores your codebase — reading project structure, existing patterns, test infrastructure, and conventions — then writes a detailed plan to `.workbench/plans/<name>.md`. On completion it prints commands for reviewing, previewing, and running the result.
+The planner agent explores your codebase — reading project structure, existing patterns, test infrastructure, and conventions — then writes a detailed plan to `.workbench/<name>/plan.md`. On completion it prints commands for reviewing, previewing, and running the result.
 
 Use `--from` to transform an existing document (e.g. a Claude plan, a spec, or rough notes) into workbench format. Add a prompt alongside `--from` for additional guidance on the transformation.
 
@@ -168,7 +168,7 @@ Workbench parses the plan, groups tasks into dependency waves, creates isolated 
 implement → test → fix  → review → fix (retry up to --max-retries)
 ```
 
-After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/status-<plan>.yaml` as each task completes, keyed by session branch.
+After each wave, successful task branches are merged into a session branch (`workbench-N`). Merge conflicts between parallel branches are automatically resolved by a merger agent. Task outcomes are tracked in `.workbench/<plan>/status.yaml` as each task completes, keyed by session branch.
 
 Use `--push` to push the session branch to origin when done:
 
@@ -209,7 +209,7 @@ wb run plan.md --fail-fast
 wb run plan.md --retry-failed --fail-fast
 ```
 
-`wb resume <session>` looks up the session in `.workbench/status-*.yaml`, finds the original plan, and re-runs every task that isn't `done + merged`. This includes tasks that failed AND tasks that never started (e.g., a crash before the wave reached them — the status file is seeded with every plan task as `pending` at run start so this case is handled correctly).
+`wb resume <session>` looks up the session in `.workbench/<plan>/status.yaml` (legacy `.workbench/status-*.yaml` is still read), finds the original plan, and re-runs every task that isn't `done + merged`. This includes tasks that failed AND tasks that never started (e.g., a crash before the wave reached them — the status file is seeded with every plan task as `pending` at run start so this case is handled correctly).
 
 `--retry-failed` distinguishes between transient failures (agent crash, timeout) and deliberate failures (exhausted all fix cycles). Only transient failures are retried.
 
@@ -339,6 +339,9 @@ Use `directive` to replace the default instructions, or `directive_extend` to ap
 | `reviewer` | Reviews the diff for correctness and quality |
 | `fixer` | Addresses feedback from failed tests or reviews |
 | `merger` | Resolves merge conflicts between parallel branches |
+| `planner` | Generates a plan from a prompt or source document (used by `wb plan`) |
+| `summarizer` | Extracts requirements from the plan during final review |
+| `branch_reviewer` | Reviews the whole session branch against the requirements digest |
 
 Each role supports these fields:
 
@@ -428,7 +431,7 @@ wb run plan.md --reviewer-directive "Focus only on security issues."
 wb run plan.md --tester-directive "Run pytest with -x flag, fail fast."
 ```
 
-Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directive`, `--fixer-directive`.
+Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directive`, `--fixer-directive`, `--summarizer-directive`, `--branch-reviewer-directive`.
 
 ## CLI reference
 
@@ -439,6 +442,7 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb plan "<prompt>"` | Generate a plan from a natural language description |
 | `wb run <plan>` | Execute a plan with parallel agents |
 | `wb merge -b <branch>` | Merge completed-but-unmerged task branches (auto-detects plan) |
+| `wb final-review <branch>` | Run a whole-branch review (requirements summarizer + branch reviewer) and optionally open a PR |
 | `wb preview <plan>` | Dry-run: show parsed tasks and waves |
 | `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
@@ -458,12 +462,12 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 
 Takes an optional prompt argument and/or `--from` flag. At least one must be provided.
 
-The planner agent surveys the codebase (project structure, patterns, test infrastructure) and writes a detailed plan to `.workbench/plans/<name>.md`. Use `--from` to transform an existing document into workbench format.
+The planner agent surveys the codebase (project structure, patterns, test infrastructure) and writes a detailed plan to `.workbench/<name>/plan.md`. Use `--from` to transform an existing document into workbench format.
 
 | Flag | Description |
 |---|---|
 | `--from FILE` | Transform an existing document into workbench plan format |
-| `-n NAME` / `--name` | Plan file name (default: `plan`). Produces `.workbench/plans/<name>.md` |
+| `-n NAME` / `--name` | Plan file name (default: `plan`). Produces `.workbench/<name>/plan.md` |
 | `--agent CMD` | Agent CLI command (default: `claude`) |
 | `--no-tmux` | Run without tmux |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
@@ -492,6 +496,13 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--cleanup` | Remove worktrees after completion |
 | `--keep-branches` | Keep task branches after merging (default: auto-delete on success) |
 | `--push` | Push the session branch to origin after merging (sets upstream tracking) |
+| `--final-review` | Run a whole-branch review after merges complete; opens a PR on PASS |
+| `--pr-title TEXT` | Override the PR title (default: plan H1, then plan id) |
+| `--pr-body-file PATH` | Use this file's content as the PR body |
+| `--pr-base BRANCH` | Override the PR base branch (default: session's recorded base) |
+| `--skip-pr` | Skip PR creation even on PASS verdict |
+| `--summarizer-directive TEXT` | Override the requirements summarizer agent's instructions |
+| `--branch-reviewer-directive TEXT` | Override the branch reviewer agent's instructions |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
 | `--profile PATH` | Use a specific profile.yaml |
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
@@ -520,10 +531,11 @@ Plans may declare these keys in a YAML frontmatter block (`---` delimiters) at t
 | `cleanup` | `--cleanup` | bool |
 | `keep_branches` | `--keep-branches` | bool |
 | `push` | `--push` | bool |
+| `final_review` | `--final-review` | bool |
 
 ### `wb resume`
 
-Sugar over `wb run <plan> -b <session> --only-incomplete`. Looks up the session in `.workbench/status-*.yaml`, finds the original plan via the recorded `plan_source`, and re-runs every task that isn't `done + merged`. Frontmatter is read from the plan referenced by the session's `plan_source`; same precedence rules as `wb run`.
+Sugar over `wb run <plan> -b <session> --only-incomplete`. Looks up the session in `.workbench/<plan>/status.yaml` (legacy `.workbench/status-*.yaml` is still read), finds the original plan via the recorded `plan_source`, and re-runs every task that isn't `done + merged`. Frontmatter is read from the plan referenced by the session's `plan_source`; same precedence rules as `wb run`.
 
 ```bash
 wb resume workbench-1
@@ -565,7 +577,47 @@ For finer-grained control (waves, directive overrides, selective tasks), use `wb
 | `--no-tmux` | Run resolver agents as subprocesses instead of tmux |
 | `--keep-branches` | Keep task branches after merging |
 | `--push` | Push the session branch to origin after merging (sets upstream tracking) |
+| `--review` | After merging, run a whole-branch review (and open a PR on PASS) |
+| `--pr-title TEXT` | Override the PR title |
+| `--pr-body-file PATH` | Use this file's content as the PR body |
+| `--pr-base BRANCH` | Override the PR base branch |
+| `--summarizer-directive TEXT` | Override the requirements summarizer agent's instructions |
+| `--branch-reviewer-directive TEXT` | Override the branch reviewer agent's instructions |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
+
+### `wb final-review`
+
+Run a whole-branch review for a completed session. Two agents run in sequence: a **requirements summarizer** extracts a structured digest from the plan, then a **branch reviewer** evaluates the session-branch diff against that digest and writes a markdown report. On `VERDICT: PASS`, workbench opens a GitHub PR via `gh pr create`. On `VERDICT: FAIL`, no PR is created; the report lists specific findings with file/line evidence and concrete suggested fixes for a human to address.
+
+Artifacts land under `.workbench/<plan-id>/reviews/<session>/`:
+- `requirements.md` — the requirements digest
+- `report.md` — the review report
+
+Each run appends an entry to the session's `final_reviews` list in `.workbench/<plan-id>/status.yaml`, and `wb status` surfaces the latest verdict and PR URL (or report path on fail).
+
+```bash
+wb final-review workbench-1                       # default: open PR on PASS
+wb final-review workbench-1 --skip-pr             # never open a PR
+wb final-review workbench-1 --pr-title "My feat"  # override PR metadata
+```
+
+| Flag | Description |
+|---|---|
+| `--agent CMD` | Agent CLI command (default: `claude`) |
+| `--no-tmux` | Run agents as subprocesses instead of tmux |
+| `--pr-title TEXT` | Override the PR title (default: plan H1, else plan id) |
+| `--pr-body-file PATH` | Use this file's content as the PR body |
+| `--pr-base BRANCH` | Override the PR base branch (default: session's recorded base) |
+| `--skip-pr` | Skip PR creation even on PASS verdict |
+| `--summarizer-directive TEXT` | Override the requirements summarizer agent's instructions |
+| `--branch-reviewer-directive TEXT` | Override the branch reviewer agent's instructions |
+| `--profile PATH` | Use a specific profile.yaml |
+| `--profile-name NAME` | Use a named profile |
+| `--repo PATH` | Repository path (auto-detected if omitted) |
+
+The summarizer and branch_reviewer roles are configurable in `profile.yaml` like any other role (`agent`, `directive`).
+
+`gh` must be installed and authenticated for PR creation. When it isn't, the review still runs and writes its report; the PR step prints a copy-pasteable `gh pr create` command instead of failing.
 
 ### `wb stop`
 
