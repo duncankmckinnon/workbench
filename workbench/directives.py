@@ -300,6 +300,62 @@ class MergerDirective(StandaloneDirective):
 
 
 @dataclass(kw_only=True)
+class RequirementsSummarizerDirective(StandaloneDirective):
+    DEFAULT_TEXT: ClassVar[str] = _load_text("requirements_summarizer.md")
+    role: Role = Role.SUMMARIZER
+    plan_content: str
+    output_path: Path
+
+    def render(self) -> str:
+        parts = [
+            self.resolved_text(),
+            "## Plan\n\n" + self.plan_content,
+            (
+                f"## Output Path\n\n"
+                f"Write the requirements digest to: {self.output_path}\n\n"
+                "The file must contain exactly three sections: "
+                "`## Requirements`, `## Non-goals`, and `## Acceptance criteria`, "
+                "each containing bullet points.\n\n"
+                "Be exhaustive but verbatim from the plan — do not invent "
+                "requirements not stated."
+            ),
+        ]
+        return "\n\n".join(parts)
+
+
+@dataclass(kw_only=True)
+class BranchReviewerDirective(StandaloneDirective):
+    DEFAULT_TEXT: ClassVar[str] = _load_text("branch_reviewer.md")
+    role: Role = Role.BRANCH_REVIEWER
+    requirements_path: Path
+    base_branch: str
+    merged_tasks: list[str]
+    output_path: Path
+
+    def render(self) -> str:
+        task_list = "\n".join(f"  - {t}" for t in self.merged_tasks)
+        parts = [
+            self.resolved_text(),
+            f"## Requirements Digest\n\nRead the requirements digest at: {self.requirements_path}",
+            f"## Branch Diff\n\nRun `git diff {self.base_branch}...HEAD` and read referenced files as needed.",
+            f"## Merged Tasks\n\n{task_list}",
+            (
+                f"## Output Path\n\n"
+                f"Write your review report to: {self.output_path}\n\n"
+                "End the report with a line `VERDICT: PASS` or `VERDICT: FAIL`.\n\n"
+                "On FAIL, each finding must use the format:\n\n"
+                "```\n"
+                "### Finding N — <title>\n\n"
+                "**Requirement:** <which one>\n\n"
+                "**Evidence:** <file:line>\n\n"
+                "**Suggested fix:** <concrete change>\n"
+                "```"
+            ),
+        ]
+        return "\n\n".join(parts)
+
+
+@dataclass(kw_only=True)
 class PlannerDirective(StandaloneDirective):
     DEFAULT_TEXT: ClassVar[str] = _load_text("planner.md")
     role: Role = Role.IMPLEMENTOR

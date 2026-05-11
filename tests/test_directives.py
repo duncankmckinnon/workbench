@@ -9,6 +9,7 @@ import pytest
 
 from workbench.agents import Role
 from workbench.directives import (
+    BranchReviewerDirective,
     Directive,
     FixerDirective,
     ImplementorDirective,
@@ -16,6 +17,7 @@ from workbench.directives import (
     PipelineDirective,
     PlannerDirective,
     PromptContext,
+    RequirementsSummarizerDirective,
     ReviewerDirective,
     ReviewerFollowupDirective,
     TddImplementorDirective,
@@ -111,6 +113,14 @@ class TestDefaultTextPresence:
     def test_planner_default_text(self):
         assert PlannerDirective.DEFAULT_TEXT
         assert "planning agent" in PlannerDirective.DEFAULT_TEXT
+
+    def test_summarizer_default_text_loads(self):
+        assert RequirementsSummarizerDirective.DEFAULT_TEXT
+        assert "requirements summarizer" in RequirementsSummarizerDirective.DEFAULT_TEXT
+
+    def test_branch_reviewer_default_text_loads(self):
+        assert BranchReviewerDirective.DEFAULT_TEXT
+        assert "final review" in BranchReviewerDirective.DEFAULT_TEXT
 
 
 # ── resolved_text() precedence ────────────────────────────────────────
@@ -598,3 +608,142 @@ class TestSectionOrdering:
         diff_pos = prompt.index("## Changes since prior review")
         action_pos = prompt.index("Verify each item")
         assert directive_pos < task_pos < feedback_pos < diff_pos < action_pos
+
+
+# ── RequirementsSummarizerDirective render ────────────────────────────
+
+
+class TestRequirementsSummarizerDirectiveRender:
+    def test_summarizer_renders_with_plan_content(self):
+        d = RequirementsSummarizerDirective(
+            plan_content="# My Plan\n\n## Task: Build widget\nDo the thing.",
+            output_path=Path("/repo/.workbench/reviews/requirements.md"),
+        )
+        prompt = d.render()
+        assert "# My Plan" in prompt
+        assert "Build widget" in prompt
+
+    def test_summarizer_uses_directive_text_override(self):
+        d = RequirementsSummarizerDirective(
+            directive_text="Custom summarizer instructions.",
+            plan_content="plan body",
+            output_path=Path("/repo/requirements.md"),
+        )
+        prompt = d.render()
+        assert "Custom summarizer instructions." in prompt
+        assert RequirementsSummarizerDirective.DEFAULT_TEXT not in prompt
+
+    def test_summarizer_contains_output_path(self):
+        d = RequirementsSummarizerDirective(
+            plan_content="plan body",
+            output_path=Path("/repo/.workbench/reviews/requirements.md"),
+        )
+        prompt = d.render()
+        assert "/repo/.workbench/reviews/requirements.md" in prompt
+
+    def test_summarizer_contains_output_format_spec(self):
+        d = RequirementsSummarizerDirective(
+            plan_content="plan body",
+            output_path=Path("/repo/requirements.md"),
+        )
+        prompt = d.render()
+        assert "## Requirements" in prompt
+        assert "## Non-goals" in prompt
+        assert "## Acceptance criteria" in prompt
+
+    def test_summarizer_section_order(self):
+        d = RequirementsSummarizerDirective(
+            plan_content="plan body",
+            output_path=Path("/repo/requirements.md"),
+        )
+        prompt = d.render()
+        # The directive text comes first, then plan, then output
+        directive_pos = prompt.index("Your Process")
+        plan_pos = prompt.index("## Plan")
+        output_pos = prompt.index("## Output Path")
+        assert directive_pos < plan_pos < output_pos
+
+
+# ── BranchReviewerDirective render ────────────────────────────────────
+
+
+class TestBranchReviewerDirectiveRender:
+    def test_branch_reviewer_renders_with_requirements_path(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Build widget", "Add tests"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "/repo/requirements.md" in prompt
+
+    def test_branch_reviewer_lists_merged_tasks(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Build widget", "Add tests", "Update docs"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "Build widget" in prompt
+        assert "Add tests" in prompt
+        assert "Update docs" in prompt
+
+    def test_branch_reviewer_contains_base_branch(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="develop",
+            merged_tasks=["Task A"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "git diff develop...HEAD" in prompt
+
+    def test_branch_reviewer_contains_output_path(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Task A"],
+            output_path=Path("/repo/.workbench/reviews/report.md"),
+        )
+        prompt = d.render()
+        assert "/repo/.workbench/reviews/report.md" in prompt
+
+    def test_branch_reviewer_contains_verdict_contract(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Task A"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "VERDICT: PASS" in prompt
+        assert "VERDICT: FAIL" in prompt
+
+    def test_branch_reviewer_custom_directive_text(self):
+        d = BranchReviewerDirective(
+            directive_text="Custom reviewer instructions.",
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Task A"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "Custom reviewer instructions." in prompt
+        assert BranchReviewerDirective.DEFAULT_TEXT not in prompt
+
+    def test_branch_reviewer_section_order(self):
+        d = BranchReviewerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            merged_tasks=["Task A"],
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        directive_pos = prompt.index("final review")
+        reqs_pos = prompt.index("## Requirements Digest")
+        diff_pos = prompt.index("## Branch Diff")
+        tasks_pos = prompt.index("## Merged Tasks")
+        output_pos = prompt.index("## Output Path")
+        assert directive_pos < reqs_pos < diff_pos < tasks_pos < output_pos
