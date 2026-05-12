@@ -13,6 +13,8 @@ from workbench.worktree import (
     get_head_sha,
     get_main_branch,
     get_merged_branches,
+    is_workbench_worktree,
+    iter_worktree_dirs,
     merge_into_session,
     push_session_branch,
 )
@@ -56,7 +58,9 @@ def test_create_session_branch_increments(git_repo):
 
 def test_create_worktree(git_repo):
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "my-feature", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "my-feature", plan_slug="testplan", base_branch=session
+    )
     assert wt.path.exists()
     assert wt.branch == "wb/my-feature"
     assert wt.task_id == "task-1"
@@ -66,7 +70,9 @@ def test_create_worktree(git_repo):
 
 def test_worktree_cleanup(git_repo, monkeypatch, tmp_path):
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "cleanup-test", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "cleanup-test", plan_slug="testplan", base_branch=session
+    )
     assert wt.path.exists()
     branch = wt.branch
     # Run cleanup from a directory that is NOT the repo to prove cwd is handled
@@ -92,7 +98,9 @@ def test_worktree_cleanup(git_repo, monkeypatch, tmp_path):
 
 def test_get_diff(git_repo):
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "diff-test", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "diff-test", plan_slug="testplan", base_branch=session
+    )
     try:
         _commit_file(wt.path, "new.txt", "hello", "add new file")
         diff = get_diff(wt, session)
@@ -104,7 +112,9 @@ def test_get_diff(git_repo):
 
 def test_merge_into_session_clean(git_repo):
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "merge-clean", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "merge-clean", plan_slug="testplan", base_branch=session
+    )
     try:
         _commit_file(wt.path, "feature.txt", "feature content", "add feature")
         result = merge_into_session(git_repo, session, wt.branch)
@@ -118,8 +128,12 @@ def test_merge_into_session_conflict(git_repo):
     session = create_session_branch(git_repo)
 
     # Create two worktrees that edit the same file differently
-    wt1 = create_worktree(git_repo, "task-1", "conflict-a", base_branch=session)
-    wt2 = create_worktree(git_repo, "task-2", "conflict-b", base_branch=session)
+    wt1 = create_worktree(
+        git_repo, "task-1", "conflict-a", plan_slug="testplan", base_branch=session
+    )
+    wt2 = create_worktree(
+        git_repo, "task-2", "conflict-b", plan_slug="testplan", base_branch=session
+    )
     try:
         _commit_file(wt1.path, "shared.txt", "version A", "edit from A")
         _commit_file(wt2.path, "shared.txt", "version B", "edit from B")
@@ -141,8 +155,8 @@ def test_merge_into_session_conflict(git_repo):
 def test_complete_merge(git_repo):
     """After a conflict, manually re-merge, resolve, and commit in the merge worktree."""
     session = create_session_branch(git_repo)
-    wt1 = create_worktree(git_repo, "task-1", "cm-a", base_branch=session)
-    wt2 = create_worktree(git_repo, "task-2", "cm-b", base_branch=session)
+    wt1 = create_worktree(git_repo, "task-1", "cm-a", plan_slug="testplan", base_branch=session)
+    wt2 = create_worktree(git_repo, "task-2", "cm-b", plan_slug="testplan", base_branch=session)
     try:
         _commit_file(wt1.path, "shared.txt", "version A", "edit A")
         _commit_file(wt2.path, "shared.txt", "version B", "edit B")
@@ -190,8 +204,8 @@ def test_complete_merge(git_repo):
 def test_complete_merge_unresolved(git_repo):
     """Committing with unresolved conflict markers should fail."""
     session = create_session_branch(git_repo)
-    wt1 = create_worktree(git_repo, "task-1", "cu-a", base_branch=session)
-    wt2 = create_worktree(git_repo, "task-2", "cu-b", base_branch=session)
+    wt1 = create_worktree(git_repo, "task-1", "cu-a", plan_slug="testplan", base_branch=session)
+    wt2 = create_worktree(git_repo, "task-2", "cu-b", plan_slug="testplan", base_branch=session)
     try:
         _commit_file(wt1.path, "shared.txt", "version A", "edit A")
         _commit_file(wt2.path, "shared.txt", "version B", "edit B")
@@ -248,7 +262,9 @@ def test_get_merged_branches_empty(git_repo):
 def test_get_merged_branches_after_merge(git_repo):
     """After merging a task branch, it appears in get_merged_branches."""
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "merged-feat", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "merged-feat", plan_slug="testplan", base_branch=session
+    )
     try:
         _commit_file(wt.path, "feat.txt", "content", "add feature")
         result = merge_into_session(git_repo, session, wt.branch)
@@ -263,7 +279,9 @@ def test_get_merged_branches_after_merge(git_repo):
 def test_get_merged_branches_excludes_unmerged(git_repo):
     """A task branch that hasn't been merged should not appear."""
     session = create_session_branch(git_repo)
-    wt = create_worktree(git_repo, "task-1", "unmerged-feat", base_branch=session)
+    wt = create_worktree(
+        git_repo, "task-1", "unmerged-feat", plan_slug="testplan", base_branch=session
+    )
     try:
         _commit_file(wt.path, "feat.txt", "content", "add feature")
 
@@ -388,7 +406,9 @@ def test_worktree_branch_no_track(git_repo_with_remote):
     """Task worktree branch should not inherit upstream tracking from session branch."""
     repo = git_repo_with_remote
     session = create_session_branch(repo)
-    wt = create_worktree(repo, "task-1", "no-track-test", base_branch=session)
+    wt = create_worktree(
+        repo, "task-1", "no-track-test", plan_slug="testplan", base_branch=session
+    )
     try:
         result = subprocess.run(
             ["git", "config", f"branch.{wt.branch}.remote"],
@@ -418,3 +438,122 @@ def test_push_then_subsequent_push(git_repo_with_remote):
     assert success2 is True
 
     subprocess.run(["git", "checkout", "main"], cwd=repo, capture_output=True, check=True)
+
+
+# ---------------------------------------------------------------------------
+# Plan-folder layout
+# ---------------------------------------------------------------------------
+
+
+def test_create_worktree_in_plan_folder(git_repo):
+    """create_worktree should place the worktree under .workbench/<plan>/<task>/."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "task-1", plan_slug="myfeature", base_branch=session)
+    try:
+        assert wt.path == git_repo / ".workbench" / "myfeature" / "task-1"
+        assert wt.path.exists()
+        result = subprocess.run(
+            ["git", "worktree", "list"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        )
+        assert str(wt.path) in result.stdout
+    finally:
+        wt.cleanup()
+
+
+def test_create_worktree_creates_plan_dir_if_missing(git_repo):
+    """The plan folder is created automatically if it doesn't exist yet."""
+    plan_dir = git_repo / ".workbench" / "freshplan"
+    assert not plan_dir.exists()
+
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "task-1", plan_slug="freshplan", base_branch=session)
+    try:
+        assert plan_dir.is_dir()
+        assert wt.path.parent == plan_dir
+    finally:
+        wt.cleanup()
+
+
+def test_iter_worktree_dirs_finds_new_layout(git_repo):
+    """Worktrees under .workbench/<plan>/<task>/ are discovered."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "task-1", plan_slug="foo", base_branch=session)
+    try:
+        dirs = iter_worktree_dirs(git_repo)
+        assert wt.path.resolve() in dirs
+    finally:
+        wt.cleanup()
+
+
+def test_iter_worktree_dirs_finds_legacy_layout(git_repo):
+    """Worktrees at legacy .workbench/<task>/ are still discovered."""
+    session = create_session_branch(git_repo)
+    # Manually create a worktree at the legacy path to simulate prior layout
+    legacy_path = git_repo / ".workbench" / "task-1"
+    legacy_path.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "branch", "--no-track", "wb/legacy-feat", session],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "worktree", "add", str(legacy_path), "wb/legacy-feat"],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    try:
+        dirs = iter_worktree_dirs(git_repo)
+        assert legacy_path.resolve() in dirs
+    finally:
+        subprocess.run(
+            ["git", "worktree", "remove", str(legacy_path), "--force"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "branch", "-D", "wb/legacy-feat"],
+            cwd=git_repo,
+            capture_output=True,
+        )
+
+
+def test_iter_worktree_dirs_skips_reviews_dir(git_repo):
+    """Plain directories like reviews/ (no .git gitfile) are not returned."""
+    reviews_dir = git_repo / ".workbench" / "foo" / "reviews" / "workbench-1"
+    reviews_dir.mkdir(parents=True)
+    (reviews_dir / "summary.md").write_text("review content")
+
+    dirs = iter_worktree_dirs(git_repo)
+    assert reviews_dir.resolve() not in dirs
+
+
+def test_iter_worktree_dirs_dedupes(git_repo):
+    """The same worktree should only appear once."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(
+        git_repo, "task-1", "dedupe-feat", plan_slug="plan-a", base_branch=session
+    )
+    try:
+        dirs = iter_worktree_dirs(git_repo)
+        matching = [d for d in dirs if d == wt.path.resolve()]
+        assert len(matching) == 1
+    finally:
+        wt.cleanup()
+
+
+def test_is_workbench_worktree(git_repo):
+    """is_workbench_worktree returns True for worktrees, False for plain dirs."""
+    session = create_session_branch(git_repo)
+    wt = create_worktree(git_repo, "task-1", "iswb-feat", plan_slug="planx", base_branch=session)
+    try:
+        assert is_workbench_worktree(wt.path)
+        plain = git_repo / ".workbench" / "planx" / "reviews"
+        plain.mkdir(parents=True, exist_ok=True)
+        assert not is_workbench_worktree(plain)
+    finally:
+        wt.cleanup()

@@ -36,6 +36,34 @@ def _make_plan(title: str = "Test Plan", tasks: list[Task] | None = None) -> Pla
 
 
 @pytest.mark.asyncio
+async def test_orchestrator_passes_plan_slug_to_create_worktree(tmp_path):
+    """create_worktree should be called with plan_slug=plan.folder_id."""
+    plan = _make_plan(title="My Feature")
+    repo = tmp_path
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert mock_wt.called
+    kwargs = mock_wt.call_args.kwargs
+    assert kwargs.get("plan_slug") == plan.folder_id == "my-feature"
+
+
+@pytest.mark.asyncio
 async def test_run_plan_tdd_mode(tmp_path):
     """run_plan with tdd=True should pass tdd=True to run_pipeline."""
     plan = _make_plan()

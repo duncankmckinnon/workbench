@@ -293,7 +293,7 @@ async def run_plan(
             if state.status == TaskStatus.DONE:
                 continue
             # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
-            old_worktree_path = repo / ".workbench" / state.task.id
+            old_worktree_path = repo / ".workbench" / plan_slug / state.task.id
             if old_worktree_path.exists():
                 Worktree(
                     path=old_worktree_path,
@@ -304,7 +304,11 @@ async def run_plan(
                 delete_branch(repo, f"wb/{state.task.slug}")
             try:
                 wt = create_worktree(
-                    repo, state.task.id, state.task.slug, base_branch=session_branch
+                    repo,
+                    state.task.id,
+                    state.task.slug,
+                    plan_slug=plan_slug,
+                    base_branch=session_branch,
                 )
                 state.worktree = wt
             except Exception as e:
@@ -504,6 +508,7 @@ async def run_plan(
                             repo,
                             state.task.id,
                             state.task.slug,
+                            plan_slug=plan_slug,
                             base_branch=session_branch,
                         )
                         state.worktree = wt
