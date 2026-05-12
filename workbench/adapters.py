@@ -283,19 +283,43 @@ def _load_yaml_config(config_path: Path) -> dict[str, Any]:
         return yaml.safe_load(f) or {}
 
 
-def get_adapter(agent_cmd: str, config_path: Path | None = None) -> AgentAdapter:
-    """Return the appropriate adapter for the given agent command.
+def _coerce_config_paths(arg: Path | list[Path] | None) -> list[Path] | None:
+    """Accept legacy single-path arg or new list-of-paths."""
+    if arg is None:
+        return None
+    if isinstance(arg, Path):
+        return [arg]
+    return list(arg)
 
-    Resolution order:
-    1. If config_path is provided and contains agent_cmd, use ConfigAdapter
-    2. Built-in adapters: "claude", "codex", "gemini", "cursor", "copilot"
-    3. Fallback: GenericAdapter
+
+def get_adapter(
+    agent_cmd: str,
+    config_paths: Path | list[Path] | None = None,
+) -> AgentAdapter:
+    """Return the adapter for agent_cmd.
+
+    Resolution order for the agent definition:
+    1. Iterate config_paths (highest precedence first). For each path that
+       exists and parses, check if it defines agent_cmd. Return that
+       ConfigAdapter if so.
+    2. Built-in adapters (claude, codex, gemini, cursor, copilot).
+    3. GenericAdapter fallback.
+
+    Per-agent precedence: the highest-precedence file containing agent_cmd wins
+    entirely (no inter-file merging of a single agent's fields).
+
+    Accepts a single ``Path`` for backward compatibility; coerced to a one-item
+    list internally.
     """
-    if config_path is not None and config_path.exists():
-        config = _load_yaml_config(config_path)
-        agents = config.get("agents", {})
-        if agent_cmd in agents:
-            return AgentAdapter.from_config(agent_cmd, agents[agent_cmd])
+    paths = _coerce_config_paths(config_paths)
+    if paths:
+        for config_path in paths:
+            if not config_path.exists():
+                continue
+            config = _load_yaml_config(config_path)
+            agents = config.get("agents", {})
+            if agent_cmd in agents:
+                return AgentAdapter.from_config(agent_cmd, agents[agent_cmd])
 
     if agent_cmd in BUILTIN_ADAPTERS:
         return BUILTIN_ADAPTERS[agent_cmd]()

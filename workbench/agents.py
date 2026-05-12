@@ -76,9 +76,16 @@ async def run_agent(
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
     task_id: str | None = None,
+    agents_config_paths: list[Path] | None = None,
 ) -> AgentResult:
     """Spawn an agent in a worktree to run a single pipeline stage."""
-    adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
+    if adapter is None:
+        paths = (
+            agents_config_paths
+            if agents_config_paths is not None
+            else [repo / ".workbench" / "agents.yaml"]
+        )
+        adapter = get_adapter(agent_cmd, paths)
     prompt = directive.render(ctx)
     effective_task_id = task_id or ctx.task.id
 
@@ -404,6 +411,7 @@ async def run_merge_resolver(
     adapter: AgentAdapter | None = None,
     profile: Profile | None = None,
     directive_override: str | None = None,
+    agents_config_paths: list[Path] | None = None,
 ) -> AgentResult:
     """Run a merge conflict resolution agent in the merge worktree.
 
@@ -412,7 +420,13 @@ async def run_merge_resolver(
     """
     from .directives import MergerDirective
 
-    adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
+    if adapter is None:
+        paths = (
+            agents_config_paths
+            if agents_config_paths is not None
+            else [repo / ".workbench" / "agents.yaml"]
+        )
+        adapter = get_adapter(agent_cmd, paths)
 
     text = directive_override or (profile.merger.directive if profile else "")
     directive = MergerDirective(
@@ -479,6 +493,7 @@ async def run_planner(
     use_tmux: bool = True,
     adapter: AgentAdapter | None = None,
     profile: Profile | None = None,
+    agents_config_paths: list[Path] | None = None,
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -490,7 +505,13 @@ async def run_planner(
     """
     from .directives import PlannerDirective
 
-    adapter = adapter or get_adapter(agent_cmd, repo / ".workbench" / "agents.yaml")
+    if adapter is None:
+        paths = (
+            agents_config_paths
+            if agents_config_paths is not None
+            else [repo / ".workbench" / "agents.yaml"]
+        )
+        adapter = get_adapter(agent_cmd, paths)
 
     plan_dir = repo / ".workbench" / plan_name
     plan_dir.mkdir(parents=True, exist_ok=True)

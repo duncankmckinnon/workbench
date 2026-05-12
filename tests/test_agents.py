@@ -2,11 +2,20 @@
 
 import asyncio
 import json
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from workbench.agents import AgentResult, Role, TaskStatus, run_agent
+from workbench.adapters import ClaudeAdapter
+from workbench.agents import (
+    AgentResult,
+    Role,
+    TaskStatus,
+    run_agent,
+    run_merge_resolver,
+    run_planner,
+)
 from workbench.directives import FixerDirective, ImplementorDirective, PromptContext
 from workbench.plan_parser import Task
 from workbench.worktree import Worktree
@@ -145,3 +154,113 @@ class TestAgentResult:
         assert "Missing error handling" in result.feedback
         assert "Needs type hints" in result.feedback
         assert "VERDICT" not in result.feedback
+
+
+class TestAgentsConfigPathsForwarding:
+    def test_run_agent_accepts_agents_config_paths_kwarg(self, sample_ctx, tmp_path):
+        """run_agent forwards agents_config_paths to get_adapter."""
+        paths = [tmp_path / "plan.yaml", tmp_path / "project.yaml"]
+        directive = ImplementorDirective()
+        with (
+            patch(
+                "workbench.agents.get_adapter", return_value=ClaudeAdapter()
+            ) as mock_get_adapter,
+            patch(
+                "workbench.agents.run_in_tmux",
+                new_callable=AsyncMock,
+                return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+            ),
+        ):
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    agents_config_paths=paths,
+                )
+            )
+
+        mock_get_adapter.assert_called_once_with("claude", paths)
+
+    def test_run_merge_resolver_accepts_agents_config_paths_kwarg(self, tmp_path):
+        """run_merge_resolver forwards agents_config_paths to get_adapter."""
+        paths = [tmp_path / "plan.yaml", tmp_path / "project.yaml"]
+        with (
+            patch(
+                "workbench.agents.get_adapter", return_value=ClaudeAdapter()
+            ) as mock_get_adapter,
+            patch(
+                "workbench.agents.run_in_tmux",
+                new_callable=AsyncMock,
+                return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+            ),
+        ):
+            asyncio.run(
+                run_merge_resolver(
+                    task_branch="wb/task-1",
+                    session_branch="wb/session",
+                    merge_dir=tmp_path,
+                    conflicts=["src/foo.py"],
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    agents_config_paths=paths,
+                )
+            )
+
+        mock_get_adapter.assert_called_once_with("claude", paths)
+
+    def test_run_planner_accepts_agents_config_paths_kwarg(self, tmp_path):
+        """run_planner forwards agents_config_paths to get_adapter."""
+        paths = [tmp_path / "plan.yaml", tmp_path / "project.yaml"]
+        with (
+            patch(
+                "workbench.agents.get_adapter", return_value=ClaudeAdapter()
+            ) as mock_get_adapter,
+            patch(
+                "workbench.agents.run_in_tmux",
+                new_callable=AsyncMock,
+                return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+            ),
+        ):
+            asyncio.run(
+                run_planner(
+                    repo=tmp_path,
+                    user_prompt="build a thing",
+                    plan_name="myplan",
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    agents_config_paths=paths,
+                )
+            )
+
+        mock_get_adapter.assert_called_once_with("claude", paths)
+
+    def test_run_agent_default_uses_project_agents_yaml(self, sample_ctx, tmp_path):
+        """When agents_config_paths is None, defaults to project agents.yaml path."""
+        directive = ImplementorDirective()
+        with (
+            patch(
+                "workbench.agents.get_adapter", return_value=ClaudeAdapter()
+            ) as mock_get_adapter,
+            patch(
+                "workbench.agents.run_in_tmux",
+                new_callable=AsyncMock,
+                return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+            ),
+        ):
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                )
+            )
+
+        mock_get_adapter.assert_called_once_with(
+            "claude", [tmp_path / ".workbench" / "agents.yaml"]
+        )
