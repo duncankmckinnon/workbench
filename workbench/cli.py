@@ -24,8 +24,10 @@ from .directives import (
     TesterDirective,
 )
 from .final_review import run_final_review
+from .github_pr import create_pr
 from .orchestrator import merge_unmerged, run_plan
 from .plan_parser import parse_plan
+from .pr_writer import PrWriterError, derive_body_from_plan, derive_title_from_plan, run_pr_writer
 from .profile import ModeConfig, Profile, RoleConfig
 from .session_status import FinalReviewRecord, SessionStatus
 from .tmux import check_tmux_available
@@ -127,6 +129,7 @@ def _resolve_final_review_args(
     profile: Profile | None,
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
     pr_title: str | None,
     pr_body_file: Path | None,
     pr_base: str | None,
@@ -145,6 +148,7 @@ def _resolve_final_review_args(
         profile=profile,
         summarizer_directive=summarizer_directive,
         branch_reviewer_directive=branch_reviewer_directive,
+        pr_writer_directive=pr_writer_directive,
         pr_title=pr_title,
         pr_body_file=pr_body_file,
         pr_base=pr_base,
@@ -617,6 +621,12 @@ def main():
     type=str,
     help="Override the branch reviewer agent's instructions.",
 )
+@click.option(
+    "--pr-writer-directive",
+    default=None,
+    type=str,
+    help="Override the PR writer agent's instructions.",
+)
 def run(
     plan_path: Path,
     max_concurrent: int,
@@ -654,6 +664,7 @@ def run(
     skip_pr: bool,
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
 ):
     """Run a plan with parallel agents.
 
@@ -839,6 +850,7 @@ def run(
                     profile=profile_obj,
                     summarizer_directive=summarizer_directive,
                     branch_reviewer_directive=branch_reviewer_directive,
+                    pr_writer_directive=pr_writer_directive,
                     pr_title=pr_title,
                     pr_body_file=pr_body_file,
                     pr_base=pr_base,
@@ -964,6 +976,7 @@ def resume(
         skip_pr=False,
         summarizer_directive=None,
         branch_reviewer_directive=None,
+        pr_writer_directive=None,
     )
 
 
@@ -1531,6 +1544,12 @@ def stop(cleanup: bool, repo: Path | None):
     type=str,
     help="Override the branch reviewer agent's instructions.",
 )
+@click.option(
+    "--pr-writer-directive",
+    default=None,
+    type=str,
+    help="Override the PR writer agent's instructions.",
+)
 def merge(
     session_branch: str,
     plan_path: Path | None,
@@ -1546,6 +1565,7 @@ def merge(
     skip_pr: bool,
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
 ):
     """Merge completed-but-unmerged task branches into the session branch.
 
@@ -1627,6 +1647,7 @@ def merge(
                         profile=None,
                         summarizer_directive=summarizer_directive,
                         branch_reviewer_directive=branch_reviewer_directive,
+                        pr_writer_directive=pr_writer_directive,
                         pr_title=pr_title,
                         pr_body_file=pr_body_file,
                         pr_base=pr_base,
@@ -1672,6 +1693,12 @@ def merge(
     help="Override the branch reviewer agent's instructions.",
 )
 @click.option(
+    "--pr-writer-directive",
+    default=None,
+    type=str,
+    help="Override the PR writer agent's instructions.",
+)
+@click.option(
     "--profile",
     "profile_path",
     default=None,
@@ -1690,6 +1717,7 @@ def final_review_cmd(
     skip_pr: bool,
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
     profile_path: Path | None,
     profile_name: str | None,
 ):
@@ -1767,6 +1795,7 @@ def final_review_cmd(
         profile=profile_obj,
         summarizer_directive=summarizer_directive,
         branch_reviewer_directive=branch_reviewer_directive,
+        pr_writer_directive=pr_writer_directive,
         pr_title=pr_title,
         pr_body_file=pr_body_file,
         pr_base=pr_base,
@@ -1777,6 +1806,226 @@ def final_review_cmd(
 
 
 main.add_command(final_review_cmd, name="review")
+
+
+# ---------------------------------------------------------------------------
+# wb pull-request
+# ---------------------------------------------------------------------------
+
+
+def _resolve_plan_slug(plan: str) -> str:
+    """Normalize a plan argument to a plan slug.
+
+    Accepts a slug, a path to a plan file, or a path to a plan folder.
+    For a file: returns the parent directory name.
+    For a folder: returns the folder name.
+    For a non-path string: returns it unchanged.
+    """
+    p = Path(plan)
+    if p.exists():
+        if p.is_file():
+            return p.parent.name
+        return p.name
+    return plan
+
+
+def _load_session_for_plan(
+    repo: Path, plan_slug: str, session_branch: str | None
+) -> SessionStatus:
+    """Load the SessionStatus for the given plan_slug + optional session.
+
+    Raises click.ClickException for ambiguous / missing sessions.
+    """
+    status_path = SessionStatus.path_for(repo, plan_slug)
+    legacy_path = SessionStatus.legacy_path_for(repo, plan_slug)
+    raw_path = status_path if status_path.exists() else legacy_path
+    if not raw_path.exists():
+        raise click.ClickException(
+            f"No status file found for plan '{plan_slug}'. Run 'wb run' first."
+        )
+
+    data = yaml.safe_load(raw_path.read_text()) or {}
+    sessions = data.get("sessions") or {}
+    session_keys = list(sessions.keys())
+
+    if not session_keys:
+        raise click.ClickException(
+            f"No sessions found for plan '{plan_slug}'. Run 'wb run' first."
+        )
+
+    if session_branch is not None:
+        if session_branch not in session_keys:
+            raise click.ClickException(
+                f"Session '{session_branch}' not found in plan '{plan_slug}'. "
+                f"Available sessions: {', '.join(session_keys)}."
+            )
+        chosen = session_branch
+    elif len(session_keys) == 1:
+        chosen = session_keys[0]
+    else:
+        raise click.ClickException(
+            f"Plan '{plan_slug}' has multiple sessions: {', '.join(session_keys)}. "
+            f"Use -b <session> to choose."
+        )
+
+    status = SessionStatus.load(repo, plan_slug, chosen)
+    if status is None:
+        raise click.ClickException(f"Failed to load session '{chosen}' for plan '{plan_slug}'.")
+    return status
+
+
+def _collect_merged_titles(status: SessionStatus, plan_source: Path) -> list[str]:
+    """Return titles of merged tasks by intersecting status.tasks with plan.tasks."""
+    plan_parsed = parse_plan(plan_source.resolve())
+    merged_ids = {tid for tid, rec in status.tasks.items() if rec.merged}
+    return [t.title for t in plan_parsed.tasks if t.id in merged_ids]
+
+
+def _resolve_base_from_plan(plan_source: Path) -> str:
+    """Return the plan's frontmatter ``base`` or ``main``."""
+    plan_parsed = parse_plan(plan_source.resolve())
+    return plan_parsed.run_config.get("base", "main") or "main"
+
+
+@main.command("pull-request")
+@click.argument("plan", type=str)
+@click.option(
+    "-b",
+    "--session-branch",
+    default=None,
+    help="Session branch (required if the plan has multiple sessions).",
+)
+@click.option(
+    "--repo",
+    "repo",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Repo path (default: auto-detect).",
+)
+@click.option("--agent", default="claude", help="Agent CLI to dispatch.")
+@click.option("--no-tmux", "no_tmux", is_flag=True, help="Run without tmux.")
+@click.option("--pr-title", default=None, type=str, help="Override the agent-generated title.")
+@click.option(
+    "--pr-body-file",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Skip the PR writer and use this file's content as the body.",
+)
+@click.option(
+    "--pr-base",
+    default=None,
+    type=str,
+    help="Override the PR base branch (default: session's recorded base).",
+)
+@click.option(
+    "--pr-writer-directive",
+    default=None,
+    type=str,
+    help="Override the PR writer agent's instructions.",
+)
+@click.option(
+    "--profile",
+    "profile_path",
+    default=None,
+    type=click.Path(exists=True, path_type=Path),
+    help="Path to a profile.yaml.",
+)
+@click.option("--profile-name", default=None, help="Named profile to resolve.")
+def pull_request_cmd(
+    plan: str,
+    session_branch: str | None,
+    repo: Path | None,
+    agent: str,
+    no_tmux: bool,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    pr_writer_directive: str | None,
+    profile_path: Path | None,
+    profile_name: str | None,
+):
+    """Open a GitHub PR for a session, with an AI-written description.
+
+    \b
+    Looks up the session for the given plan and runs the PR writer agent
+    over the diff and plan context. Opens a PR via 'gh pr create'.
+
+    \b
+    Example:
+      wb pull-request myfeature
+      wb pull-request myfeature -b workbench-3
+      wb pull-request myfeature --pr-title "Custom title"
+    """
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. "
+            "Install with: brew install tmux (macOS) or apt install tmux (Linux). "
+            "Or use --no-tmux to run without it."
+        )
+
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+
+    plan_slug = _resolve_plan_slug(plan)
+    status = _load_session_for_plan(repo, plan_slug, session_branch)
+    session = status.session_branch
+
+    if not status.plan_source:
+        raise click.ClickException(
+            f"Session '{session}' has no plan_source recorded. "
+            f"Cannot determine the plan to use."
+        )
+
+    plan_source = Path(status.plan_source)
+    if not plan_source.exists():
+        raise click.ClickException(
+            f"Plan source not found: {plan_source}\n"
+            f"The plan file may have been moved or deleted."
+        )
+
+    merged_titles = _collect_merged_titles(status, plan_source)
+    base_branch = _resolve_base_from_plan(plan_source)
+
+    profile_obj = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
+    plan_text = plan_source.read_text(encoding="utf-8")
+
+    if pr_body_file is not None:
+        title = pr_title or derive_title_from_plan(plan_text, plan_slug)
+        body = pr_body_file.read_text(encoding="utf-8")
+    else:
+        try:
+            agent_title, agent_body = asyncio.run(
+                run_pr_writer(
+                    repo=repo,
+                    session_branch=session,
+                    plan_slug=plan_slug,
+                    base_branch=base_branch,
+                    plan_source=plan_source,
+                    merged_task_titles=merged_titles,
+                    agent_cmd=agent,
+                    use_tmux=not no_tmux,
+                    profile=profile_obj,
+                    directive_override=pr_writer_directive,
+                )
+            )
+            title = pr_title or agent_title
+            body = agent_body
+        except PrWriterError as e:
+            console.print(
+                f"[yellow]PR writer failed ({type(e).__name__}: {e}); "
+                f"falling back to plan-derived PR body[/yellow]"
+            )
+            title = pr_title or derive_title_from_plan(plan_text, plan_slug)
+            body = derive_body_from_plan(plan_text, merged_titles, report_path=None)
+
+    base = pr_base or base_branch
+    success, message = asyncio.run(create_pr(repo, session, base, title, body))
+
+    console.print(f"[bold]Title:[/bold] {title}")
+    if success:
+        console.print(f"[green]PR opened:[/green] {message}")
+    else:
+        console.print(f"[yellow]Could not open PR.[/yellow] Run manually:\n  {message}")
 
 
 @main.command()
