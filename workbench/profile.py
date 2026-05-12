@@ -71,8 +71,22 @@ class Profile:
     @classmethod
     def from_yaml(cls, path: Path) -> Profile:
         """Read a YAML file and merge onto defaults."""
+        return cls.from_layered_yaml([path])
+
+    @classmethod
+    def from_layered_yaml(cls, paths: list[Path]) -> Profile:
+        """Build a Profile by merging YAML files in order.
+
+        Paths are applied lowest-precedence to highest: earlier paths are
+        loaded first; later paths override. Mirrors the existing merge
+        semantics of ``_merge_from_yaml``; only the entry point changes.
+        Missing files are silently skipped. An empty list returns
+        ``Profile.default()``.
+        """
         profile = cls.default()
-        profile._merge_from_yaml(path)
+        for path in paths:
+            if path.exists():
+                profile._merge_from_yaml(path)
         return profile
 
     def _merge_from_yaml(self, path: Path) -> None:
