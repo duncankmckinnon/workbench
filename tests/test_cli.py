@@ -1491,20 +1491,19 @@ class TestProfileShow:
         assert "(default)" in result.output
 
     def test_profile_show_does_not_mark_set_directive_as_default(self, tmp_path):
-        """When a directive is overridden, '(default)' is not shown for that role."""
+        """When a directive is overridden, '(default)' is not shown for that role.
+
+        Derives the role list from ``_ALL_ROLE_NAMES`` so adding a new role to
+        the profile schema does not require updating this test.
+        """
+        from workbench.profile import _ALL_ROLE_NAMES
+
         profile_path = tmp_path / "custom.yaml"
         profile_path.write_text(
             yaml.dump(
                 {
                     "roles": {
-                        "implementor": {"directive": "Custom impl directive"},
-                        "tester": {"directive": "Custom test directive"},
-                        "reviewer": {"directive": "Custom review directive"},
-                        "fixer": {"directive": "Custom fix directive"},
-                        "merger": {"directive": "Custom merge directive"},
-                        "planner": {"directive": "Custom plan directive"},
-                        "summarizer": {"directive": "Custom summarizer directive"},
-                        "branch_reviewer": {"directive": "Custom branch reviewer directive"},
+                        role: {"directive": f"Custom {role} directive"} for role in _ALL_ROLE_NAMES
                     }
                 }
             )
@@ -1521,7 +1520,7 @@ class TestProfileShow:
 
         assert result.exit_code == 0
         assert "(default)" not in result.output
-        assert "Custom impl directive" in result.output
+        assert "Custom implementor directive" in result.output
 
     def test_profile_show_marks_unset_submode_directive_as_default(self, tmp_path):
         """Empty sub-mode directive lines also display '(default)'."""
