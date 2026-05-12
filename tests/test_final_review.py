@@ -425,6 +425,53 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
 
 
 @pytest.mark.asyncio
+async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
+    """Regression: requirements.md and report.md must live under .workbench/<plan>/reviews/<session>/."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    call_count = {"n": 0}
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("All good.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock),
+    ):
+        await run_final_review(**base_kwargs)
+
+    expected_requirements = (
+        tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "requirements.md"
+    )
+    expected_report = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "report.md"
+    assert expected_requirements.exists()
+    assert expected_report.exists()
+    assert not (tmp_repo / ".workbench" / "reviews").exists()
+    assert not (tmp_repo / ".workbench" / "reviews-workbench-1").exists()
+
+
+@pytest.mark.asyncio
 async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
     """Two concurrent invocations → the second raises RuntimeError."""
     # Pre-create the lock file
