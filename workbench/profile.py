@@ -20,6 +20,7 @@ _ALL_ROLE_NAMES = (
     "planner",
     "summarizer",
     "branch_reviewer",
+    "pr_writer",
 )
 
 
@@ -51,6 +52,7 @@ class Profile:
     planner: RoleConfig = field(default_factory=RoleConfig)
     summarizer: RoleConfig = field(default_factory=RoleConfig)
     branch_reviewer: RoleConfig = field(default_factory=RoleConfig)
+    pr_writer: RoleConfig = field(default_factory=RoleConfig)
 
     _ROLE_NAMES: tuple[str, ...] = _ALL_ROLE_NAMES
 
@@ -66,6 +68,7 @@ class Profile:
             planner=RoleConfig(agent="claude", directive=""),
             summarizer=RoleConfig(agent="claude", directive=""),
             branch_reviewer=RoleConfig(agent="claude", directive=""),
+            pr_writer=RoleConfig(agent="claude", directive=""),
         )
 
     @classmethod
