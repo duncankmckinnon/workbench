@@ -22,6 +22,7 @@ ALL_ROLE_NAMES = [
     "planner",
     "summarizer",
     "branch_reviewer",
+    "pr_writer",
 ]
 
 
@@ -77,6 +78,12 @@ class TestDefaultProfile:
         assert profile.branch_reviewer.agent == "claude"
         assert profile.branch_reviewer.directive == ""
 
+    def test_default_pr_writer(self):
+        """Profile.default().pr_writer is RoleConfig(agent='claude', directive='')."""
+        profile = Profile.default()
+        assert profile.pr_writer.agent == "claude"
+        assert profile.pr_writer.directive == ""
+
     def test_default_sub_modes_are_none(self):
         """Default profile has no sub-modes configured."""
         profile = Profile.default()
@@ -109,6 +116,7 @@ class TestFromYamlAgent:
             "planner",
             "summarizer",
             "branch_reviewer",
+            "pr_writer",
         ]:
             assert getattr(profile, role_name).agent == "claude"
 
@@ -258,6 +266,39 @@ class TestFromYamlNewRoles:
         assert profile.branch_reviewer.agent == "claude"
         assert profile.branch_reviewer.directive == ""
 
+    def test_pr_writer_parses(self, tmp_path):
+        """pr_writer role parses from YAML."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"pr_writer": {"agent": "codex", "directive": "Write PR"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.pr_writer.agent == "codex"
+        assert profile.pr_writer.directive == "Write PR"
+
+    def test_pr_writer_roundtrip(self, tmp_path):
+        """YAML with pr_writer configured round-trips identically."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"pr_writer": {"agent": "codex", "directive": "PR directive"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        out = tmp_path / "roundtrip.yaml"
+        profile.save(out)
+        reloaded = Profile.from_yaml(out)
+        assert reloaded.pr_writer.agent == "codex"
+        assert reloaded.pr_writer.directive == "PR directive"
+
+    def test_pr_writer_absent_uses_default(self, tmp_path):
+        """YAML without pr_writer still produces a valid profile (defaults applied)."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"tester": {"agent": "gemini"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.pr_writer.agent == "claude"
+        assert profile.pr_writer.directive == ""
+
 
 # ---------------------------------------------------------------------------
 # Profile.from_yaml() — TDD sub-mode
@@ -356,6 +397,8 @@ class TestSubModeValidation:
                 "followup",
                 "branch_reviewer does not support a 'followup' sub-mode",
             ),
+            ("pr_writer", "tdd", "pr_writer does not support a 'tdd' sub-mode"),
+            ("pr_writer", "followup", "pr_writer does not support a 'followup' sub-mode"),
         ],
     )
     def test_invalid_sub_mode_raises(self, tmp_path, role_name, sub_mode, expected_msg):

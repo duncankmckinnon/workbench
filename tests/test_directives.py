@@ -17,6 +17,7 @@ from workbench.directives import (
     PipelineDirective,
     PlannerDirective,
     PromptContext,
+    PrWriterDirective,
     RequirementsSummarizerDirective,
     ReviewerDirective,
     ReviewerFollowupDirective,
@@ -121,6 +122,12 @@ class TestDefaultTextPresence:
     def test_branch_reviewer_default_text_loads(self):
         assert BranchReviewerDirective.DEFAULT_TEXT
         assert "final review" in BranchReviewerDirective.DEFAULT_TEXT
+
+    def test_pr_writer_default_text_loads(self):
+        assert PrWriterDirective.DEFAULT_TEXT
+        assert "title" in PrWriterDirective.DEFAULT_TEXT.lower()
+        assert "body" in PrWriterDirective.DEFAULT_TEXT.lower()
+        assert "Summary" in PrWriterDirective.DEFAULT_TEXT
 
 
 # ── resolved_text() precedence ────────────────────────────────────────
@@ -747,3 +754,82 @@ class TestBranchReviewerDirectiveRender:
         tasks_pos = prompt.index("## Merged Tasks")
         output_pos = prompt.index("## Output Path")
         assert directive_pos < reqs_pos < diff_pos < tasks_pos < output_pos
+
+
+# ── PrWriterDirective render ──────────────────────────────────────────
+
+
+def _pr_writer(**overrides) -> PrWriterDirective:
+    defaults: dict = {
+        "plan_excerpt": "# Sample Plan\n\n## Context\n\nDeliver a widget.",
+        "diff_stat": " src/widget.py | 10 +-\n 1 file changed",
+        "commit_log": "abc1234 Add widget module\ndef5678 Wire widget into CLI",
+        "merged_tasks": ["Add widget module", "Wire widget into CLI"],
+        "output_path": Path("/repo/.workbench/plan/reviews/session/pr_body.md"),
+    }
+    defaults.update(overrides)
+    return PrWriterDirective(**defaults)
+
+
+class TestPrWriterDirectiveRender:
+    def test_pr_writer_role_is_pr_writer(self):
+        d = _pr_writer()
+        assert d.role == Role.PR_WRITER
+
+    def test_pr_writer_renders_plan_excerpt(self):
+        d = _pr_writer(plan_excerpt="# My Plan\n\n## Context\n\nThis is the why.")
+        prompt = d.render()
+        assert "## Plan excerpt" in prompt
+        assert "# My Plan" in prompt
+        assert "This is the why." in prompt
+
+    def test_pr_writer_renders_diff_stat_and_log(self):
+        d = _pr_writer(
+            diff_stat=" foo.py | 3 +-",
+            commit_log="abc1234 Do the thing",
+        )
+        prompt = d.render()
+        assert "## Diff stat" in prompt
+        assert "foo.py | 3 +-" in prompt
+        assert "## Commits" in prompt
+        assert "abc1234 Do the thing" in prompt
+
+    def test_pr_writer_lists_merged_tasks(self):
+        d = _pr_writer(merged_tasks=["Add widget", "Add tests", "Update docs"])
+        prompt = d.render()
+        assert "## Merged tasks" in prompt
+        assert "Add widget" in prompt
+        assert "Add tests" in prompt
+        assert "Update docs" in prompt
+
+    def test_pr_writer_contains_output_path(self):
+        d = _pr_writer(output_path=Path("/repo/.workbench/foo/reviews/sess/pr_body.md"))
+        prompt = d.render()
+        assert "/repo/.workbench/foo/reviews/sess/pr_body.md" in prompt
+
+    def test_pr_writer_contains_output_contract(self):
+        d = _pr_writer()
+        prompt = d.render()
+        assert "# <title>" in prompt
+
+    def test_pr_writer_uses_directive_text_override(self):
+        d = _pr_writer(directive_text="Custom PR writer instructions.")
+        prompt = d.render()
+        assert "Custom PR writer instructions." in prompt
+        assert PrWriterDirective.DEFAULT_TEXT not in prompt
+
+    def test_pr_writer_default_text_appears(self):
+        d = _pr_writer()
+        prompt = d.render()
+        assert PrWriterDirective.DEFAULT_TEXT in prompt
+
+    def test_pr_writer_section_order(self):
+        d = _pr_writer()
+        prompt = d.render()
+        directive_pos = prompt.index("senior engineer")
+        plan_pos = prompt.index("## Plan excerpt")
+        diff_pos = prompt.index("## Diff stat")
+        commits_pos = prompt.index("## Commits")
+        tasks_pos = prompt.index("## Merged tasks")
+        output_pos = prompt.index("## Output Path")
+        assert directive_pos < plan_pos < diff_pos < commits_pos < tasks_pos < output_pos

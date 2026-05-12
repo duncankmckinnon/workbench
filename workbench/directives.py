@@ -356,6 +356,37 @@ class BranchReviewerDirective(StandaloneDirective):
 
 
 @dataclass(kw_only=True)
+class PrWriterDirective(StandaloneDirective):
+    DEFAULT_TEXT: ClassVar[str] = _load_text("pr_writer.md")
+    role: Role = Role.PR_WRITER
+    plan_excerpt: str
+    diff_stat: str
+    commit_log: str
+    merged_tasks: list[str]
+    output_path: Path
+
+    def render(self, ctx: PromptContext | None = None) -> str:
+        task_list = (
+            "\n".join(f"  - {t}" for t in self.merged_tasks) if self.merged_tasks else "  (none)"
+        )
+        parts = [
+            self.resolved_text(),
+            f"## Plan excerpt\n\n{self.plan_excerpt}",
+            f"## Diff stat\n\n```\n{self.diff_stat}\n```",
+            f"## Commits\n\n```\n{self.commit_log}\n```",
+            f"## Merged tasks\n\n{task_list}",
+            (
+                f"## Output Path\n\n"
+                f"Write the PR title and body to: {self.output_path}\n\n"
+                "The file's first line MUST be `# <title>`. Everything after the "
+                "blank line that follows is the PR body. Do not write any other "
+                "files or print the contents to stdout."
+            ),
+        ]
+        return "\n\n".join(parts)
+
+
+@dataclass(kw_only=True)
 class PlannerDirective(StandaloneDirective):
     DEFAULT_TEXT: ClassVar[str] = _load_text("planner.md")
     role: Role = Role.IMPLEMENTOR
