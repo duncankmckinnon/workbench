@@ -25,10 +25,17 @@ from .directives import (
 )
 from .final_review import run_final_review
 from .orchestrator import merge_unmerged, run_plan
+from .path_resolver import (
+    plan_slug_from_path,
+    resolve_agents_config_paths,
+    resolve_plan_path,
+    resolve_profile_paths,
+)
 from .plan_parser import parse_plan
 from .profile import ModeConfig, Profile, RoleConfig
 from .session_status import FinalReviewRecord, SessionStatus
 from .tmux import check_tmux_available
+from .worktree import iter_worktree_dirs
 
 # Maps role name to the Directive class whose DEFAULT_TEXT seeds the role.
 _ROLE_DIRECTIVE_CLASSES = {
@@ -184,6 +191,61 @@ def _ensure_workbench_dir(repo: Path) -> Path:
     wb_dir = repo / ".workbench"
     wb_dir.mkdir(exist_ok=True)
     return wb_dir
+
+
+def _resolve_plan_arg(arg: str, repo: Path) -> tuple[Path, str]:
+    """Resolve a plan reference (name or path) and return (plan_path, plan_slug).
+
+    Raises ClickException if the plan cannot be located.
+    """
+    try:
+        plan_path = resolve_plan_path(arg, repo)
+    except FileNotFoundError as e:
+        raise click.ClickException(str(e))
+    if not plan_path.exists():
+        raise click.ClickException(f"Plan path does not exist: {plan_path}")
+    return plan_path.resolve(), plan_slug_from_path(plan_path)
+
+
+def _copy_plan_settings(repo: Path, plan_slug: str) -> None:
+    """Materialize the current effective profile.yaml and agents.yaml into the plan folder.
+
+    The source for profile is the home + project chain (no per-plan level —
+    that is what we are populating). The source for agents.yaml is the
+    project-level file.
+    """
+    from datetime import date as _date
+
+    plan_dir = repo / ".workbench" / plan_slug
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    today = _date.today().isoformat()
+    header = (
+        f"# Frozen by `wb plan --copy-settings` on {today}\n"
+        f"# Edit this file to customize profile/agents for this plan only.\n"
+    )
+
+    profile_paths = resolve_profile_paths(repo, plan_slug=None)
+    target_profile = plan_dir / "profile.yaml"
+    if profile_paths:
+        merged = Profile.from_layered_yaml(list(reversed(profile_paths)))
+        merged.save(target_profile)
+        target_profile.write_text(header + target_profile.read_text())
+        console.print(f"Wrote {target_profile}")
+    else:
+        console.print(
+            f"[dim]No profile.yaml found at project or home level; skipping {target_profile}.[/dim]"
+        )
+
+    agents_paths = resolve_agents_config_paths(repo, plan_slug=None)
+    target_agents = plan_dir / "agents.yaml"
+    if agents_paths:
+        source = agents_paths[0]
+        target_agents.write_text(header + source.read_text())
+        console.print(f"Wrote {target_agents}")
+    else:
+        console.print(
+            f"[dim]No agents.yaml found at project level; skipping {target_agents}.[/dim]"
+        )
 
 
 def _get_skills_dir() -> Path:
@@ -452,7 +514,7 @@ def main():
 
 
 @main.command()
-@click.argument("plan_path", type=click.Path(exists=True, path_type=Path))
+@click.argument("plan_path", type=str)
 @click.option("--max-concurrent", "-j", default=4, help="Max parallel agents.")
 @click.option("--skip-test", is_flag=True, help="Skip the testing phase.")
 @click.option("--skip-review", is_flag=True, help="Skip the review phase.")
@@ -618,7 +680,7 @@ def main():
     help="Override the branch reviewer agent's instructions.",
 )
 def run(
-    plan_path: Path,
+    plan_path: str,
     max_concurrent: int,
     skip_test: bool,
     skip_review: bool,
@@ -674,8 +736,10 @@ def run(
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
 
+    resolved_plan_path, plan_slug = _resolve_plan_arg(plan_path, repo)
+
     try:
-        plan = parse_plan(plan_path.resolve())
+        plan = parse_plan(resolved_plan_path)
     except ValueError as e:
         raise click.ClickException(str(e))
 
@@ -768,11 +832,13 @@ def run(
     if fixer_directive:
         directives[Role.FIXER] = fixer_directive
 
-    console.print(f"\n[bold]Parsed {len(plan.tasks)} task(s) from[/bold] {plan_path}\n")
+    console.print(f"\n[bold]Parsed {len(plan.tasks)} task(s) from[/bold] {resolved_plan_path}\n")
     for i, task in enumerate(plan.tasks, 1):
         files = f" ({', '.join(task.files)})" if task.files else ""
         deps = f" [after: {', '.join(task.depends_on)}]" if task.depends_on else ""
         console.print(f"  {i}. {task.title}{files}{deps}")
+
+    agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan_slug)
 
     console.print()
     asyncio.run(
@@ -802,20 +868,23 @@ def run(
             only_incomplete=only_incomplete,
             task_filter=set(task_ids) if task_ids else None,
             push=push,
+            agents_config_paths=agents_config_paths,
         )
     )
 
     # Final review after run completes
     if final_review:
-        plan_slug = plan.folder_id
-        status = SessionStatus.load(repo, plan_slug, session_branch) if session_branch else None
+        status_plan_slug = plan.folder_id
+        status = (
+            SessionStatus.load(repo, status_plan_slug, session_branch) if session_branch else None
+        )
         if status is None:
             # session_branch was auto-generated; scan for it
             for path in sorted((repo / ".workbench").glob("*/status.yaml")):
-                if path.parent.name == plan_slug:
+                if path.parent.name == status_plan_slug:
                     data = yaml.safe_load(path.read_text()) or {}
                     for sb in data.get("sessions") or {}:
-                        status = SessionStatus.load(repo, plan_slug, sb)
+                        status = SessionStatus.load(repo, status_plan_slug, sb)
                         session_branch = sb
                         break
                     break
@@ -824,15 +893,19 @@ def run(
             merged_tasks = {tid for tid, rec in status.tasks.items() if rec.merged}
             merged_titles = [t.title for t in plan.tasks if t.id in merged_tasks]
             if merged_titles:
-                profile_obj = Profile.resolve(
-                    repo, profile_path=profile_path, profile_name=profile_name
+                fr_profile_paths = resolve_profile_paths(
+                    repo,
+                    plan_slug=plan_slug,
+                    explicit_path=profile_path,
+                    name=profile_name,
                 )
+                profile_obj = Profile.from_layered_yaml(list(reversed(fr_profile_paths)))
                 review_args = _resolve_final_review_args(
                     repo=repo,
                     session_branch=session_branch or status.session_branch,
-                    plan_slug=plan_slug,
+                    plan_slug=status_plan_slug,
                     base_branch=base or "main",
-                    plan_source=plan_path.resolve(),
+                    plan_source=resolved_plan_path,
                     merged_task_titles=merged_titles,
                     agent=agent,
                     no_tmux=no_tmux,
@@ -844,6 +917,7 @@ def run(
                     pr_base=pr_base,
                     skip_pr=skip_pr,
                 )
+                review_args["agents_config_paths"] = agents_config_paths
                 record = asyncio.run(run_final_review(**review_args))
                 _print_final_review_result(record)
 
@@ -928,7 +1002,7 @@ def resume(
 
     ctx.invoke(
         run,
-        plan_path=plan_path,
+        plan_path=str(plan_path),
         max_concurrent=max_concurrent,
         skip_test=False,
         skip_review=False,
@@ -968,11 +1042,19 @@ def resume(
 
 
 @main.command()
-@click.argument("plan_path", type=click.Path(exists=True, path_type=Path))
-def preview(plan_path: Path):
+@click.argument("plan_path", type=str)
+@click.option(
+    "--repo",
+    type=click.Path(exists=True, path_type=Path),
+    default=None,
+    help="Repo path (default: auto-detect).",
+)
+def preview(plan_path: str, repo: Path | None):
     """Preview tasks parsed from a plan (dry run)."""
+    repo = repo or _find_repo_root()
+    resolved_plan_path, _plan_slug = _resolve_plan_arg(plan_path, repo)
     try:
-        plan = parse_plan(plan_path.resolve())
+        plan = parse_plan(resolved_plan_path)
     except ValueError as e:
         raise click.ClickException(str(e))
 
@@ -980,7 +1062,7 @@ def preview(plan_path: Path):
         raise click.ClickException("No tasks found in plan.")
 
     console.print(f"\n[bold]{plan.title}[/bold]")
-    console.print(f"Source: {plan_path}\n")
+    console.print(f"Source: {resolved_plan_path}\n")
 
     waves = plan.independent_groups
     for wave_idx, wave in enumerate(waves):
@@ -996,7 +1078,29 @@ def preview(plan_path: Path):
         console.print()
 
 
-@main.command()
+class _PlanGroup(click.Group):
+    """Click group for ``wb plan`` that falls through to ``generate`` for
+    unknown first positional args, so ``wb plan "prompt"`` keeps working.
+
+    Injects ``generate`` at the head of the arg list when the first
+    positional arg is not a registered subcommand (e.g. when the user is
+    passing a prompt or only options).
+    """
+
+    def parse_args(self, ctx, args):
+        first_positional = next((a for a in args if not a.startswith("-")), None)
+        if first_positional is None or first_positional not in self.commands:
+            args = ["generate"] + list(args)
+        return super().parse_args(ctx, args)
+
+
+@main.group(cls=_PlanGroup)
+def plan():
+    """Generate workbench plans or manage per-plan settings."""
+    pass
+
+
+@plan.command("generate")
 @click.argument("prompt", type=str, required=False, default="")
 @click.option(
     "--from",
@@ -1018,13 +1122,19 @@ def preview(plan_path: Path):
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
-def plan(
+@click.option(
+    "--copy-settings",
+    is_flag=True,
+    help="Copy the current effective profile.yaml and agents.yaml into the plan folder.",
+)
+def plan_generate(
     prompt: str,
     from_file: Path | None,
     name: str,
     agent: str,
     repo: Path | None,
     no_tmux: bool,
+    copy_settings: bool,
 ):
     """Generate a workbench plan from a description or existing document.
 
@@ -1038,6 +1148,7 @@ def plan(
       wb plan --from claude-plan.md
       wb plan "Focus on security" --from existing-spec.md
       wb plan "Refactor the database layer" --name db-refactor
+      wb plan "Add feature X" --name foo --copy-settings
     """
     if not prompt and not from_file:
         raise click.ClickException(
@@ -1057,6 +1168,9 @@ def plan(
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
 
+    if copy_settings:
+        _copy_plan_settings(repo, name)
+
     source_content = ""
     if from_file:
         source_content = from_file.read_text()
@@ -1073,6 +1187,7 @@ def plan(
 
     from .agents import run_planner
 
+    agents_paths = resolve_agents_config_paths(repo, plan_slug=name)
     result = asyncio.run(
         run_planner(
             repo=repo,
@@ -1081,6 +1196,7 @@ def plan(
             plan_name=name,
             agent_cmd=agent,
             use_tmux=not no_tmux,
+            agents_config_paths=agents_paths,
         )
     )
 
@@ -1108,6 +1224,18 @@ def plan(
         console.print(
             "[dim]The agent may have written it elsewhere. Check its output above.[/dim]"
         )
+
+
+@plan.command("copy-settings")
+@click.argument("name", type=str)
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def plan_copy_settings(name: str, repo: Path | None):
+    """Copy the current effective profile and agents config into an existing plan folder."""
+    repo = repo or _find_repo_root()
+    plan_dir = repo / ".workbench" / name
+    if not plan_dir.exists():
+        raise click.ClickException(f"Plan folder not found: {plan_dir}")
+    _copy_plan_settings(repo, name)
 
 
 @main.command()
@@ -1160,9 +1288,10 @@ def status(repo: Path | None):
 def _list_workbench_worktrees(repo: Path) -> list[tuple[str, str | None]]:
     """Return [(path, branch_or_none), ...] for every workbench worktree.
 
-    Parses ``git worktree list --porcelain``. A worktree is "workbench" if its
-    path contains ``.workbench`` (the convention for ``wb run``-created trees).
-    Branch is recovered from the porcelain ``branch refs/heads/<name>`` line.
+    Uses ``iter_worktree_dirs`` (filesystem scan that covers both new
+    ``.workbench/<plan>/<task>`` and legacy ``.workbench/<task>`` layouts)
+    as the source of truth. Branch names are looked up via ``git worktree
+    list --porcelain``.
     """
     result = subprocess.run(
         ["git", "worktree", "list", "--porcelain"],
@@ -1170,20 +1299,34 @@ def _list_workbench_worktrees(repo: Path) -> list[tuple[str, str | None]]:
         capture_output=True,
         text=True,
     )
-    worktrees: list[tuple[str, str | None]] = []
-    current_path: str | None = None
+    branch_map: dict[Path, str | None] = {}
+    current_path: Path | None = None
     current_branch: str | None = None
     for line in result.stdout.splitlines():
         if line.startswith("worktree "):
-            if current_path is not None and ".workbench" in current_path:
-                worktrees.append((current_path, current_branch))
-            current_path = line.split("worktree ", 1)[1]
+            if current_path is not None:
+                try:
+                    branch_map[current_path.resolve()] = current_branch
+                except OSError:
+                    branch_map[current_path] = current_branch
+            current_path = Path(line.split("worktree ", 1)[1])
             current_branch = None
         elif line.startswith("branch refs/heads/"):
             current_branch = line.split("branch refs/heads/", 1)[1]
-    if current_path is not None and ".workbench" in current_path:
-        worktrees.append((current_path, current_branch))
-    return worktrees
+    if current_path is not None:
+        try:
+            branch_map[current_path.resolve()] = current_branch
+        except OSError:
+            branch_map[current_path] = current_branch
+
+    out: list[tuple[str, str | None]] = []
+    for d in iter_worktree_dirs(repo):
+        try:
+            resolved = d.resolve()
+        except OSError:
+            resolved = d
+        out.append((str(d), branch_map.get(resolved)))
+    return out
 
 
 def _list_wb_branches(repo: Path) -> list[str]:
@@ -1434,22 +1577,14 @@ def stop(cleanup: bool, repo: Path | None):
         repo = repo or _find_repo_root()
         _ensure_workbench_dir(repo)
 
-        # Remove worktrees
-        result = subprocess.run(
-            ["git", "worktree", "list", "--porcelain"],
-            cwd=repo,
-            capture_output=True,
-            text=True,
-        )
-
         removed = 0
-        for line in result.stdout.splitlines():
-            if line.startswith("worktree ") and ".workbench" in line:
-                path = line.split("worktree ", 1)[1]
-                subprocess.run(
-                    ["git", "worktree", "remove", path, "--force"], cwd=repo, capture_output=True
-                )
-                removed += 1
+        for d in iter_worktree_dirs(repo):
+            subprocess.run(
+                ["git", "worktree", "remove", str(d), "--force"],
+                cwd=repo,
+                capture_output=True,
+            )
+            removed += 1
 
         # Clean up wb/ branches
         result = subprocess.run(
@@ -1581,6 +1716,7 @@ def merge(
             raise click.ClickException(str(e))
         plan_slug = plan.folder_id
 
+    merge_agents_paths = resolve_agents_config_paths(repo, plan_slug=plan_slug)
     status = asyncio.run(
         merge_unmerged(
             repo=repo,
@@ -1590,6 +1726,7 @@ def merge(
             use_tmux=not no_tmux,
             keep_branches=keep_branches,
             push=push,
+            agents_config_paths=merge_agents_paths,
         )
     )
 
@@ -1631,6 +1768,9 @@ def merge(
                         pr_body_file=pr_body_file,
                         pr_base=pr_base,
                         skip_pr=skip_pr,
+                    )
+                    review_args["agents_config_paths"] = resolve_agents_config_paths(
+                        repo, plan_slug=status.plan_slug
                     )
                     record = asyncio.run(run_final_review(**review_args))
                     _print_final_review_result(record)
@@ -1753,7 +1893,14 @@ def final_review_cmd(
     # Derive base_branch from plan frontmatter or default
     base_branch = plan.run_config.get("base", "main")
 
-    profile_obj = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
+    profile_paths_for_review = resolve_profile_paths(
+        repo,
+        plan_slug=found.plan_slug,
+        explicit_path=profile_path,
+        name=profile_name,
+    )
+    profile_obj = Profile.from_layered_yaml(list(reversed(profile_paths_for_review)))
+    agents_paths_for_review = resolve_agents_config_paths(repo, plan_slug=found.plan_slug)
 
     review_args = _resolve_final_review_args(
         repo=repo,
@@ -1772,6 +1919,7 @@ def final_review_cmd(
         pr_base=pr_base,
         skip_pr=skip_pr,
     )
+    review_args["agents_config_paths"] = agents_paths_for_review
     record = asyncio.run(run_final_review(**review_args))
     _print_final_review_result(record)
 

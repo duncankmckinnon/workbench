@@ -3547,3 +3547,286 @@ def test_cli_flag_overrides_frontmatter(git_repo, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert mock_final_review.called
+
+
+# ---------------------------------------------------------------------------
+# Plan-name resolution in wb run
+# ---------------------------------------------------------------------------
+
+
+def _capture_run_plan(git_repo, args):
+    """Invoke `wb run` with `run_plan` mocked, returning (result, captured kwargs)."""
+    import asyncio as _asyncio
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+
+        async def fake_run_plan(**kwargs):
+            return []
+
+        mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+        mock_asyncio.run = lambda coro: _asyncio.new_event_loop().run_until_complete(coro)
+
+        result = runner.invoke(main, ["run"] + args + ["--no-tmux"])
+
+    captured = dict(mock_run_plan.call_args.kwargs) if mock_run_plan.called else {}
+    return result, captured
+
+
+def test_run_resolves_plan_name(git_repo):
+    """`wb run myfeature` should resolve to .workbench/myfeature/plan.md."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    result, captured = _capture_run_plan(git_repo, ["myfeature"])
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("plan") is not None
+    assert captured["plan"].source == (plan_dir / "plan.md").resolve()
+
+
+def test_run_legacy_plan_path_still_works(git_repo):
+    """`wb run foo` should resolve to legacy .workbench/plans/foo.md."""
+    plans_dir = git_repo / ".workbench" / "plans"
+    plans_dir.mkdir(parents=True)
+    (plans_dir / "foo.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    result, captured = _capture_run_plan(git_repo, ["foo"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["plan"].source == (plans_dir / "foo.md").resolve()
+
+
+def test_run_full_path_passthrough(git_repo, tmp_path):
+    """A full path argument should bypass name resolution."""
+    plan = tmp_path / "somewhere.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    result, captured = _capture_run_plan(git_repo, [str(plan)])
+
+    assert result.exit_code == 0, result.output
+    assert captured["plan"].source == plan.resolve()
+
+
+def test_run_unknown_name_errors(git_repo):
+    """`wb run nonexistent` should fail with a clear message."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["run", "nonexistent", "--no-tmux"])
+
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output
+
+
+def test_run_loads_per_plan_agents_yaml(git_repo):
+    """When `.workbench/myfeature/agents.yaml` exists, it is passed in agents_config_paths."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+    (plan_dir / "agents.yaml").write_text("agents: {}\n")
+
+    result, captured = _capture_run_plan(git_repo, ["myfeature"])
+
+    assert result.exit_code == 0, result.output
+    paths = captured.get("agents_config_paths") or []
+    assert (plan_dir / "agents.yaml") in paths
+    assert paths[0] == plan_dir / "agents.yaml"
+
+
+def test_run_loads_per_plan_profile(git_repo):
+    """A per-plan profile.yaml appears first in resolve_profile_paths and overrides project."""
+    from workbench.path_resolver import resolve_profile_paths
+    from workbench.profile import Profile
+
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+    (plan_dir / "profile.yaml").write_text(
+        "roles:\n  implementor:\n    directive: per-plan-impl\n"
+    )
+
+    paths = resolve_profile_paths(git_repo, plan_slug="myfeature")
+    assert (plan_dir / "profile.yaml") in paths
+    assert paths[0] == plan_dir / "profile.yaml"
+
+    merged = Profile.from_layered_yaml(list(reversed(paths)))
+    assert merged.implementor.directive == "per-plan-impl"
+
+    result, captured = _capture_run_plan(git_repo, ["myfeature"])
+    assert result.exit_code == 0, result.output
+    assert captured["plan"].source == (plan_dir / "plan.md").resolve()
+
+
+# ---------------------------------------------------------------------------
+# wb plan --copy-settings and wb plan copy-settings
+# ---------------------------------------------------------------------------
+
+
+def test_plan_copy_settings_creates_profile_yaml(git_repo):
+    """`wb plan copy-settings myfeature` materializes profile.yaml into the plan folder."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    project_profile = git_repo / ".workbench" / "profile.yaml"
+    project_profile.write_text(
+        "roles:\n  implementor:\n    agent: gemini\n    directive: project-impl\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["plan", "copy-settings", "myfeature"])
+
+    assert result.exit_code == 0, result.output
+    target = plan_dir / "profile.yaml"
+    assert target.exists()
+    text = target.read_text()
+    assert text.startswith("# Frozen by `wb plan --copy-settings` on ")
+    data = yaml.safe_load(text)
+    assert data["roles"]["implementor"]["agent"] == "gemini"
+    assert data["roles"]["implementor"]["directive"] == "project-impl"
+
+
+def test_plan_copy_settings_creates_agents_yaml(git_repo):
+    """`wb plan copy-settings myfeature` materializes agents.yaml into the plan folder."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    project_agents = git_repo / ".workbench" / "agents.yaml"
+    project_agents.write_text(
+        "agents:\n  my-custom:\n    command: foo\n    args: ['{prompt}']\n"
+        "    output_format: text\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["plan", "copy-settings", "myfeature"])
+
+    assert result.exit_code == 0, result.output
+    target = plan_dir / "agents.yaml"
+    assert target.exists()
+    text = target.read_text()
+    assert text.startswith("# Frozen by `wb plan --copy-settings` on ")
+    assert "my-custom" in text
+
+
+def test_plan_copy_settings_skips_missing_sources(git_repo):
+    """When no source files exist, copy-settings prints messages and doesn't error."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    fake_home = git_repo / "fake-home"
+    fake_home.mkdir()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.path_resolver.Path.home", return_value=fake_home),
+    ):
+        result = runner.invoke(main, ["plan", "copy-settings", "myfeature"])
+
+    assert result.exit_code == 0, result.output
+    assert not (plan_dir / "profile.yaml").exists()
+    assert not (plan_dir / "agents.yaml").exists()
+
+
+def test_plan_copy_settings_errors_on_missing_plan_folder(git_repo):
+    """copy-settings should error if the plan folder doesn't exist."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["plan", "copy-settings", "nonexistent"])
+
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output or "not found" in result.output.lower()
+
+
+def test_plan_with_copy_settings_flag(git_repo):
+    """`wb plan "prompt" --name myfeature --copy-settings` copies settings AND runs planner."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    project_profile = git_repo / ".workbench" / "profile.yaml"
+    project_profile.parent.mkdir(parents=True, exist_ok=True)
+    project_profile.write_text("roles:\n  implementor:\n    agent: gemini\n")
+
+    fake_result = AgentResult(
+        task_id="planner",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="Plan written.",
+    )
+
+    async def fake_run_planner(**kwargs):
+        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Plan\n## Task: Hello\nDo something.\n")
+        return fake_result
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(
+            main,
+            ["plan", "Add feature X", "--name", "myfeature", "--copy-settings", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert (git_repo / ".workbench" / "myfeature" / "profile.yaml").exists()
+
+
+# ---------------------------------------------------------------------------
+# wb clean removes worktrees in both layouts
+# ---------------------------------------------------------------------------
+
+
+def _make_real_worktree(repo: Path, rel_path: str, branch: str) -> Path:
+    """Create a real git worktree at `repo/rel_path` on a fresh branch."""
+    worktree_dir = repo / rel_path
+    worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "branch", "--no-track", branch, "main"],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    subprocess.run(
+        ["git", "worktree", "add", str(worktree_dir), branch],
+        cwd=repo,
+        check=True,
+        capture_output=True,
+    )
+    return worktree_dir
+
+
+def test_clean_removes_new_layout_worktrees(git_repo):
+    """`wb clean --force` removes worktrees nested under .workbench/<plan>/."""
+    wt = _make_real_worktree(git_repo, ".workbench/myfeature/task-1", "wb/myfeature-task-1")
+    assert wt.exists()
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["clean", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert not wt.exists()
+
+
+def test_clean_removes_legacy_layout_worktrees(git_repo):
+    """`wb clean --force` removes legacy top-level worktrees under .workbench/."""
+    wt = _make_real_worktree(git_repo, ".workbench/task-1", "wb/task-1")
+    assert wt.exists()
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["clean", "--force"])
+
+    assert result.exit_code == 0, result.output
+    assert not wt.exists()

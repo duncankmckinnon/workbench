@@ -128,7 +128,7 @@ async def test_run_plan_tdd_false_by_default(tmp_path):
 
 @pytest.mark.asyncio
 async def test_run_plan_with_profile_path(tmp_path):
-    """run_plan with profile_path should call Profile.resolve and pass profile to run_pipeline."""
+    """run_plan with profile_path should layer the explicit profile and pass it to run_pipeline."""
     plan = _make_plan()
     repo = tmp_path
 
@@ -142,30 +142,26 @@ async def test_run_plan_with_profile_path(tmp_path):
         captured_kwargs.update(kwargs)
         return []
 
-    fake_profile = Profile.default()
-    fake_profile.reviewer.agent = "gemini"
-
     with (
         patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
         patch("workbench.orchestrator.create_worktree") as mock_wt,
         patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
-        patch("workbench.orchestrator.Profile.resolve", return_value=fake_profile) as mock_resolve,
     ):
         mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
-        results = await run_plan(
+        await run_plan(
             plan=plan,
             repo=repo,
             use_tmux=False,
             profile_path=profile_path,
         )
 
-    # Profile.resolve should have been called with the repo and profile_path
-    mock_resolve.assert_called_once_with(repo, profile_path=profile_path, profile_name=None)
-    # The resolved profile should be passed to run_pipeline
-    assert captured_kwargs.get("profile") is fake_profile
+    # The explicit profile should be layered into the resolved profile passed to run_pipeline
+    resolved_profile = captured_kwargs.get("profile")
+    assert resolved_profile is not None
+    assert resolved_profile.reviewer.agent == "gemini"
 
 
 @pytest.mark.asyncio

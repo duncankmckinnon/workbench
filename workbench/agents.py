@@ -142,6 +142,7 @@ async def run_pipeline(
     use_tmux: bool = True,
     tdd: bool = False,
     profile: Profile | None = None,
+    agents_config_paths: list[Path] | None = None,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -220,6 +221,7 @@ async def run_pipeline(
             repo,
             agent_cmd=_agent_for(Role.TESTER),
             use_tmux=use_tmux,
+            agents_config_paths=agents_config_paths,
         )
         results.append(test_write_result)
 
@@ -238,6 +240,7 @@ async def run_pipeline(
             repo,
             agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
+            agents_config_paths=agents_config_paths,
         )
         results.append(impl_result)
 
@@ -262,6 +265,7 @@ async def run_pipeline(
             repo,
             agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
+            agents_config_paths=agents_config_paths,
         )
         results.append(impl_result)
 
@@ -282,6 +286,7 @@ async def run_pipeline(
                 repo,
                 agent_cmd=_agent_for(Role.TESTER),
                 use_tmux=use_tmux,
+                agents_config_paths=agents_config_paths,
             )
             test_result.attempt = attempt
             results.append(test_result)
@@ -310,6 +315,7 @@ async def run_pipeline(
                     repo,
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
+                    agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
                 results.append(fix_result)
@@ -355,6 +361,7 @@ async def run_pipeline(
                 repo,
                 agent_cmd=_agent_for(Role.REVIEWER),
                 use_tmux=use_tmux,
+                agents_config_paths=agents_config_paths,
             )
             review_result.attempt = attempt
             results.append(review_result)
@@ -385,6 +392,7 @@ async def run_pipeline(
                     repo,
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
+                    agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
                 results.append(fix_result)
