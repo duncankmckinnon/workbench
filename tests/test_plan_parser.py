@@ -129,6 +129,15 @@ def test_folder_id_returns_parent_name(tmp_path):
     assert plan.folder_id == "my-project"
 
 
+def test_folder_id_legacy_layout_returns_file_stem(tmp_path):
+    plans_dir = tmp_path / "plans"
+    plans_dir.mkdir()
+    plan_file = plans_dir / "my-feature.md"
+    plan_file.write_text("# My Feature\n\n## Task: X\nDo X.\n")
+    plan = parse_plan(plan_file)
+    assert plan.folder_id == "my-feature"
+
+
 def test_task_slug(tmp_path):
     plan_file = tmp_path / "plan.md"
     plan_file.write_text("# Plan\n\n" "## Task: Add User Authentication\n" "Implement auth.\n")

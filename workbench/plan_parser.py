@@ -141,12 +141,17 @@ class Plan:
 
     @property
     def folder_id(self) -> str:
-        """The parent folder name of the plan source file.
+        """The canonical plan slug used for filesystem paths.
 
-        Used for filesystem paths (status files, review output) instead
+        New layout (``.workbench/<slug>/plan.md``): parent folder name.
+        Legacy layout (``.workbench/plans/<slug>.md``): file stem.
+
+        Used for status files, review output, and worktree paths instead
         of the content-derived ``slug``.
         """
-        return self.source.parent.name
+        from .path_resolver import plan_slug_from_path
+
+        return plan_slug_from_path(self.source)
 
     @property
     def independent_groups(self) -> list[list[Task]]:

@@ -17,8 +17,19 @@ class Worktree:
 
     @property
     def repo(self) -> Path:
-        """Derive the repo root from the worktree path (.workbench/<id> lives under repo)."""
-        return self.path.parent.parent
+        """Derive the repo root by walking up until we find ``.workbench``.
+
+        Handles both the new layout (``.workbench/<plan>/<task>``) and the
+        legacy layout (``.workbench/<task>``). Worktrees are always created
+        under ``.workbench``, so failing to find it indicates a malformed
+        ``Worktree`` and is a programming error.
+        """
+        cur = self.path
+        while cur != cur.parent:
+            if cur.name == ".workbench":
+                return cur.parent
+            cur = cur.parent
+        raise ValueError(f"Worktree path is not under .workbench: {self.path}")
 
     def cleanup(self):
         """Remove the worktree and delete the branch."""
@@ -151,19 +162,27 @@ def create_session_branch(
 
 
 def create_worktree(
-    repo: Path, task_id: str, task_slug: str, base_branch: str | None = None
+    repo: Path,
+    task_id: str,
+    task_slug: str,
+    plan_slug: str,
+    base_branch: str | None = None,
 ) -> Worktree:
-    """Create an isolated worktree for a task.
+    """Create an isolated worktree for a task under the plan folder.
+
+    Path: ``repo / ".workbench" / plan_slug / task_id``.
 
     Args:
         repo: Path to the git repo root.
         task_id: Unique task identifier.
         task_slug: Slug for the branch name.
+        plan_slug: Plan folder name — worktrees live under it.
         base_branch: Branch to create the worktree from. Defaults to main.
     """
     branch = f"wb/{task_slug}"
     base = base_branch or get_main_branch(repo)
-    worktree_dir = repo / ".workbench" / task_id
+    worktree_dir = repo / ".workbench" / plan_slug / task_id
+    worktree_dir.parent.mkdir(parents=True, exist_ok=True)
 
     # Create the branch from the base (--no-track prevents inheriting upstream)
     subprocess.run(
@@ -184,6 +203,54 @@ def create_worktree(
     )
 
     return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
+
+
+def is_workbench_worktree(path: Path) -> bool:
+    """Return True if ``path`` looks like a workbench task worktree.
+
+    A workbench worktree is a directory under some ``.workbench/`` whose
+    ``.git`` entry is a file (git worktrees use a gitfile, not a gitdir).
+    """
+    if not path.is_dir():
+        return False
+    git_marker = path / ".git"
+    if not git_marker.is_file():
+        return False
+    cur = path.parent
+    while cur != cur.parent:
+        if cur.name == ".workbench":
+            return True
+        cur = cur.parent
+    return False
+
+
+def iter_worktree_dirs(repo: Path) -> list[Path]:
+    """Return all task worktree directories under ``repo/.workbench``.
+
+    Scans both the new layout (``.workbench/<plan>/<task>``) and the
+    legacy layout (``.workbench/<task>``). Identified by the presence of a
+    ``.git`` gitfile, so non-worktree directories like ``reviews/`` are
+    skipped.
+    """
+    workbench_dir = repo / ".workbench"
+    if not workbench_dir.is_dir():
+        return []
+
+    seen: dict[Path, None] = {}
+    for child in workbench_dir.iterdir():
+        if not child.is_dir():
+            continue
+        if is_workbench_worktree(child):
+            seen.setdefault(child.resolve(), None)
+            # Legacy worktree — its contents are the working tree, don't recurse.
+            continue
+        for grandchild in child.iterdir():
+            if not grandchild.is_dir():
+                continue
+            if is_workbench_worktree(grandchild):
+                seen.setdefault(grandchild.resolve(), None)
+
+    return list(seen.keys())
 
 
 @dataclass

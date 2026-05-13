@@ -47,6 +47,7 @@ async def run_final_review(
     pr_body_file: Path | None = None,
     pr_base: str | None = None,
     skip_pr: bool = False,
+    agents_config_paths: list[Path] | None = None,
 ) -> FinalReviewRecord:
     """Run the two-agent final review sequence and return the persisted record.
 
@@ -90,6 +91,7 @@ async def run_final_review(
             pr_body_file=pr_body_file,
             pr_base=pr_base,
             skip_pr=skip_pr,
+            agents_config_paths=agents_config_paths,
         )
     finally:
         lock_path.unlink(missing_ok=True)
@@ -112,6 +114,7 @@ async def _run_review_sequence(
     pr_body_file: Path | None,
     pr_base: str | None,
     skip_pr: bool,
+    agents_config_paths: list[Path] | None,
 ) -> FinalReviewRecord:
     """Inner sequence, runs inside the lock."""
 
@@ -135,7 +138,12 @@ async def _run_review_sequence(
     reviewer_agent_cmd = _resolve_agent_cmd(agent_cmd, profile, "branch_reviewer")
 
     # 6. Build and run summarizer agent
-    summarizer_adapter = get_adapter(summarizer_agent_cmd, repo / ".workbench" / "agents.yaml")
+    adapter_paths = (
+        agents_config_paths
+        if agents_config_paths is not None
+        else [repo / ".workbench" / "agents.yaml"]
+    )
+    summarizer_adapter = get_adapter(summarizer_agent_cmd, adapter_paths)
     summarizer_dir = RequirementsSummarizerDirective(
         directive_text=summarizer_text,
         plan_content=plan_content,
@@ -193,7 +201,7 @@ async def _run_review_sequence(
         _create_review_worktree(repo, wt_path, session_branch)
 
         # 8. Build and run branch reviewer agent
-        reviewer_adapter = get_adapter(reviewer_agent_cmd, repo / ".workbench" / "agents.yaml")
+        reviewer_adapter = get_adapter(reviewer_agent_cmd, adapter_paths)
         reviewer_dir = BranchReviewerDirective(
             directive_text=reviewer_text,
             requirements_path=requirements_path,
@@ -293,6 +301,7 @@ async def _run_review_sequence(
                     use_tmux=use_tmux,
                     profile=profile,
                     directive_override=pr_writer_directive,
+                    agents_config_paths=agents_config_paths,
                 )
                 title = pr_title or agent_title
                 body = agent_body

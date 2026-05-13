@@ -43,6 +43,7 @@ async def run_pr_writer(
     use_tmux: bool = True,
     profile: Profile | None = None,
     directive_override: str | None = None,
+    agents_config_paths: list[Path] | None = None,
 ) -> tuple[str, str]:
     """Run the PR-writer agent and return (title, body).
 
@@ -84,7 +85,12 @@ async def run_pr_writer(
     )
     prompt = directive.render()
 
-    adapter = get_adapter(agent_cmd_resolved, repo / ".workbench" / "agents.yaml")
+    adapter_paths = (
+        agents_config_paths
+        if agents_config_paths is not None
+        else [repo / ".workbench" / "agents.yaml"]
+    )
+    adapter = get_adapter(agent_cmd_resolved, adapter_paths)
 
     # The agent must run inside a checkout of session_branch so its Read/Glob/Bash
     # tools see the actual code being described. Running from `repo` (typically

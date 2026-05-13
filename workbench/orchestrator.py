@@ -13,6 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .agents import AgentResult, Role, TaskStatus, run_merge_resolver, run_pipeline
+from .path_resolver import resolve_agents_config_paths, resolve_profile_paths
 from .plan_parser import Plan, Task
 from .profile import Profile
 from .session_status import SessionStatus
@@ -146,10 +147,19 @@ async def run_plan(
     only_incomplete: bool = False,
     task_filter: set[str] | None = None,
     push: bool = False,
+    agents_config_paths: list[Path] | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
-    profile = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
+    profile_paths = resolve_profile_paths(
+        repo,
+        plan_slug=plan.folder_id,
+        explicit_path=profile_path,
+        name=profile_name,
+    )
+    profile = Profile.from_layered_yaml(list(reversed(profile_paths)))
+    if agents_config_paths is None:
+        agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan.folder_id)
     waves = plan.independent_groups
     all_states: list[TaskState] = []
     state_map: dict[str, TaskState] = {}
@@ -294,7 +304,7 @@ async def run_plan(
             if state.status == TaskStatus.DONE:
                 continue
             # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
-            old_worktree_path = repo / ".workbench" / state.task.id
+            old_worktree_path = repo / ".workbench" / plan_slug / state.task.id
             if old_worktree_path.exists():
                 Worktree(
                     path=old_worktree_path,
@@ -305,7 +315,11 @@ async def run_plan(
                 delete_branch(repo, f"wb/{state.task.slug}")
             try:
                 wt = create_worktree(
-                    repo, state.task.id, state.task.slug, base_branch=session_branch
+                    repo,
+                    state.task.id,
+                    state.task.slug,
+                    plan_slug=plan_slug,
+                    base_branch=session_branch,
                 )
                 state.worktree = wt
             except Exception as e:
@@ -399,6 +413,7 @@ async def run_plan(
                     use_tmux=use_tmux,
                     tdd=tdd,
                     profile=profile,
+                    agents_config_paths=agents_config_paths,
                 )
 
                 state.results = results
@@ -480,6 +495,7 @@ async def run_plan(
                         conflicts=result.conflicts,
                         repo=repo,
                         agent_cmd=agent_cmd,
+                        agents_config_paths=agents_config_paths,
                     )
                     state.results.append(resolver_result)
 
@@ -557,6 +573,7 @@ async def run_plan(
                             repo,
                             state.task.id,
                             state.task.slug,
+                            plan_slug=plan_slug,
                             base_branch=session_branch,
                         )
                         state.worktree = wt
@@ -668,6 +685,7 @@ async def merge_unmerged(
     use_tmux: bool = True,
     keep_branches: bool = False,
     push: bool = False,
+    agents_config_paths: list[Path] | None = None,
 ) -> SessionStatus:
     """Merge all completed-but-unmerged task branches into the session branch.
 
@@ -688,6 +706,9 @@ async def merge_unmerged(
     if status is None:
         console.print("[red]No status found for this session. Run 'wb run' first.[/red]")
         return SessionStatus(plan_slug=plan_slug or "", session_branch=session_branch)
+
+    if agents_config_paths is None:
+        agents_config_paths = resolve_agents_config_paths(repo, plan_slug=status.plan_slug)
 
     # Find tasks that completed but haven't been merged
     unmerged = {
@@ -732,6 +753,7 @@ async def merge_unmerged(
                 repo=repo,
                 agent_cmd=agent_cmd,
                 use_tmux=use_tmux,
+                agents_config_paths=agents_config_paths,
             )
 
             if resolver_result.passed:

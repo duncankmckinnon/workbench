@@ -402,7 +402,7 @@ class TestGetAdapter:
         assert adapter.name == "some-random-tool"
 
     def test_config_path_not_exists_falls_through(self, tmp_path):
-        adapter = get_adapter("claude", config_path=tmp_path / "nonexistent.yaml")
+        adapter = get_adapter("claude", config_paths=tmp_path / "nonexistent.yaml")
         assert isinstance(adapter, ClaudeAdapter)
 
     def test_config_adapter_from_yaml(self, tmp_path):
@@ -418,7 +418,7 @@ class TestGetAdapter:
             "    json_result_key: result\n"
             "    json_cost_key: cost_usd\n"
         )
-        adapter = get_adapter("my-agent", config_path=config_file)
+        adapter = get_adapter("my-agent", config_paths=config_file)
         assert isinstance(adapter, ConfigAdapter)
         assert adapter.name == "my-agent"
         assert adapter.config.command == "my-agent-cli"
@@ -430,7 +430,7 @@ class TestGetAdapter:
     def test_config_agent_not_in_yaml_falls_through(self, tmp_path):
         config_file = tmp_path / "agents.yaml"
         config_file.write_text("agents:\n  other-agent:\n    command: other\n")
-        adapter = get_adapter("claude", config_path=config_file)
+        adapter = get_adapter("claude", config_paths=config_file)
         assert isinstance(adapter, ClaudeAdapter)
 
     def test_config_overrides_builtin(self, tmp_path):
@@ -439,7 +439,7 @@ class TestGetAdapter:
         config_file.write_text(
             "agents:\n" "  claude:\n" "    command: custom-claude\n" "    args: ['{prompt}']\n"
         )
-        adapter = get_adapter("claude", config_path=config_file)
+        adapter = get_adapter("claude", config_paths=config_file)
         assert isinstance(adapter, ConfigAdapter)
         assert adapter.config.command == "custom-claude"
 
@@ -447,9 +447,65 @@ class TestGetAdapter:
         """Minimal config entry should get sensible defaults."""
         config_file = tmp_path / "agents.yaml"
         config_file.write_text("agents:\n  minimal:\n    command: min-cli\n")
-        adapter = get_adapter("minimal", config_path=config_file)
+        adapter = get_adapter("minimal", config_paths=config_file)
         assert isinstance(adapter, ConfigAdapter)
         assert adapter.config.args == ["{prompt}"]
         assert adapter.config.output_format == OutputFormat.TEXT
         assert adapter.config.json_result_key == "result"
         assert adapter.config.json_cost_key == "cost_usd"
+
+
+class TestGetAdapterLayered:
+    def test_get_adapter_with_list_uses_first_match(self, tmp_path):
+        """Two config files both define 'custom_agent' → first one wins."""
+        first = tmp_path / "first.yaml"
+        first.write_text(
+            "agents:\n" "  custom_agent:\n" "    command: first-cli\n" "    args: ['{prompt}']\n"
+        )
+        second = tmp_path / "second.yaml"
+        second.write_text(
+            "agents:\n" "  custom_agent:\n" "    command: second-cli\n" "    args: ['{prompt}']\n"
+        )
+        adapter = get_adapter("custom_agent", config_paths=[first, second])
+        assert isinstance(adapter, ConfigAdapter)
+        assert adapter.config.command == "first-cli"
+
+    def test_get_adapter_with_list_falls_through_to_lower_priority(self, tmp_path):
+        """Per-plan defines 'agent_a', project defines 'agent_b' →
+        get_adapter('agent_b') resolves from project."""
+        per_plan = tmp_path / "plan.yaml"
+        per_plan.write_text("agents:\n  agent_a:\n    command: a-cli\n    args: ['{prompt}']\n")
+        project = tmp_path / "project.yaml"
+        project.write_text("agents:\n  agent_b:\n    command: b-cli\n    args: ['{prompt}']\n")
+        adapter = get_adapter("agent_b", config_paths=[per_plan, project])
+        assert isinstance(adapter, ConfigAdapter)
+        assert adapter.config.command == "b-cli"
+
+    def test_get_adapter_with_list_skips_missing_files(self, tmp_path):
+        """List includes a non-existent path → skipped without error."""
+        missing = tmp_path / "does-not-exist.yaml"
+        present = tmp_path / "present.yaml"
+        present.write_text("agents:\n  my_agent:\n    command: my-cli\n    args: ['{prompt}']\n")
+        adapter = get_adapter("my_agent", config_paths=[missing, present])
+        assert isinstance(adapter, ConfigAdapter)
+        assert adapter.config.command == "my-cli"
+
+    def test_get_adapter_with_empty_list_uses_builtins(self):
+        """Empty list and known builtin name → returns builtin adapter."""
+        adapter = get_adapter("claude", config_paths=[])
+        assert isinstance(adapter, ClaudeAdapter)
+
+    def test_get_adapter_back_compat_with_single_path(self, tmp_path):
+        """Single Path positional arg still works."""
+        config_file = tmp_path / "agents.yaml"
+        config_file.write_text(
+            "agents:\n  my_agent:\n    command: my-cli\n    args: ['{prompt}']\n"
+        )
+        adapter = get_adapter("my_agent", config_file)
+        assert isinstance(adapter, ConfigAdapter)
+        assert adapter.config.command == "my-cli"
+
+    def test_get_adapter_back_compat_with_none(self):
+        """No config arg returns builtin without errors."""
+        adapter = get_adapter("claude")
+        assert isinstance(adapter, ClaudeAdapter)
