@@ -39,6 +39,7 @@ class TaskState:
     results: list[AgentResult] = field(default_factory=list)
     started_at: float | None = None
     finished_at: float | None = None
+    pending_persists: list[asyncio.Task] = field(default_factory=list)
 
     @property
     def elapsed(self) -> str:
@@ -318,12 +319,49 @@ async def run_plan(
                     )
                 )
 
-        # Status callback so the pipeline can update our display state
+        # Status callback so the pipeline can update our display state and
+        # persist the current phase to status.yaml at every handoff. Persisting
+        # mid-pipeline lets external observers (and post-crash inspection)
+        # see which agent a task got stuck on instead of seeing it stuck at
+        # "pending".
+        _status_to_agent: dict[TaskStatus, str] = {
+            TaskStatus.IMPLEMENTING: Role.IMPLEMENTOR.value,
+            TaskStatus.TESTING: Role.TESTER.value,
+            TaskStatus.REVIEWING: Role.REVIEWER.value,
+            TaskStatus.FIXING: Role.FIXER.value,
+            TaskStatus.MERGING: Role.MERGER.value,
+        }
+
         def _make_callback(state: TaskState):
             def _on_status(task_id: str, status: TaskStatus):
                 state.status = status
+                # Only persist mid-pipeline phases. DONE/FAILED are written
+                # authoritatively by the final update_task below using the
+                # result list, so we leave those for the awaited write.
+                last_agent = _status_to_agent.get(status)
+                if last_agent is None:
+                    return
+                # Track the persist task so we can await it before the final
+                # write — asyncio.Lock is not FIFO, so without this the final
+                # "done" write could race ahead of an earlier mid-pipeline
+                # write and end up overwritten.
+                state.pending_persists.append(
+                    asyncio.create_task(_persist_status(state, status, last_agent))
+                )
 
             return _on_status
+
+        async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
+            try:
+                await session_status.update_task(
+                    repo=repo,
+                    task_id=state.task.id,
+                    status=status.value,
+                    branch=state.worktree.branch if state.worktree else None,
+                    last_agent=last_agent,
+                )
+            except Exception as e:
+                console.print(f"[dim red]status persist failed for {state.task.id}: {e}[/dim red]")
 
         # Run tasks concurrently with semaphore
         sem = asyncio.Semaphore(max_concurrent)
@@ -367,6 +405,12 @@ async def run_plan(
                     state.status = TaskStatus.FAILED
                 else:
                     state.status = TaskStatus.DONE
+
+                # Drain any in-flight mid-pipeline persists so the final
+                # update_task below is guaranteed to be the last write.
+                if state.pending_persists:
+                    await asyncio.gather(*state.pending_persists, return_exceptions=True)
+                    state.pending_persists.clear()
 
                 # Persist task outcome immediately (lock-protected for concurrency)
                 await session_status.update_task(
