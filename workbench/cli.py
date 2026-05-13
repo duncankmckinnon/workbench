@@ -207,12 +207,32 @@ def _resolve_plan_arg(arg: str, repo: Path) -> tuple[Path, str]:
     return plan_path.resolve(), plan_slug_from_path(plan_path)
 
 
+def _merge_profile_yaml_dicts(paths: list[Path]) -> dict:
+    """Merge raw YAML dicts from profile.yaml files in lowest-first order.
+
+    Only emits role keys that appear in at least one source file, so the
+    frozen output is a clean superset of the inputs rather than the full
+    default profile.
+    """
+    roles: dict[str, dict] = {}
+    for path in paths:
+        data = yaml.safe_load(path.read_text()) or {}
+        for role, role_data in (data.get("roles") or {}).items():
+            if not isinstance(role_data, dict):
+                continue
+            target = roles.setdefault(role, {})
+            for key, val in role_data.items():
+                target[key] = val
+    return {"roles": roles}
+
+
 def _copy_plan_settings(repo: Path, plan_slug: str) -> None:
     """Materialize the current effective profile.yaml and agents.yaml into the plan folder.
 
     The source for profile is the home + project chain (no per-plan level —
     that is what we are populating). The source for agents.yaml is the
-    project-level file.
+    project-level file. Only keys present in the source files are written;
+    the default profile is not expanded into the frozen file.
     """
     from datetime import date as _date
 
@@ -227,9 +247,9 @@ def _copy_plan_settings(repo: Path, plan_slug: str) -> None:
     profile_paths = resolve_profile_paths(repo, plan_slug=None)
     target_profile = plan_dir / "profile.yaml"
     if profile_paths:
-        merged = Profile.from_layered_yaml(list(reversed(profile_paths)))
-        merged.save(target_profile)
-        target_profile.write_text(header + target_profile.read_text())
+        merged = _merge_profile_yaml_dicts(list(reversed(profile_paths)))
+        body = yaml.safe_dump(merged, sort_keys=False, allow_unicode=True)
+        target_profile.write_text(header + body)
         console.print(f"Wrote {target_profile}")
     else:
         console.print(
@@ -1088,6 +1108,10 @@ class _PlanGroup(click.Group):
     """
 
     def parse_args(self, ctx, args):
+        # Let --help/-h bubble up to the group so users can discover
+        # subcommands (otherwise --help shows generate's help instead).
+        if any(a in ("--help", "-h") for a in args):
+            return super().parse_args(ctx, args)
         first_positional = next((a for a in args if not a.startswith("-")), None)
         if first_positional is None or first_positional not in self.commands:
             args = ["generate"] + list(args)
@@ -1175,7 +1199,7 @@ def plan_generate(
     if from_file:
         source_content = from_file.read_text()
 
-    output_path = repo / ".workbench" / "plans" / f"{name}.md"
+    output_path = repo / ".workbench" / name / "plan.md"
     if from_file and prompt:
         console.print(f"\n[bold]Transforming:[/bold] {from_file}")
         console.print(f"[bold]Guidance:[/bold]   {prompt}")
@@ -1716,7 +1740,9 @@ def merge(
             raise click.ClickException(str(e))
         plan_slug = plan.folder_id
 
-    merge_agents_paths = resolve_agents_config_paths(repo, plan_slug=plan_slug)
+    # Pass `None` so merge_unmerged resolves agents_config_paths once it has
+    # the canonical plan slug (when --plan is omitted, that slug is only
+    # known after the status file is loaded).
     status = asyncio.run(
         merge_unmerged(
             repo=repo,
@@ -1726,7 +1752,6 @@ def merge(
             use_tmux=not no_tmux,
             keep_branches=keep_branches,
             push=push,
-            agents_config_paths=merge_agents_paths,
         )
     )
 

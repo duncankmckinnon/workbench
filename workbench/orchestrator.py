@@ -654,6 +654,9 @@ async def merge_unmerged(
         console.print("[red]No status found for this session. Run 'wb run' first.[/red]")
         return SessionStatus(plan_slug=plan_slug or "", session_branch=session_branch)
 
+    if agents_config_paths is None:
+        agents_config_paths = resolve_agents_config_paths(repo, plan_slug=status.plan_slug)
+
     # Find tasks that completed but haven't been merged
     unmerged = {
         tid: rec

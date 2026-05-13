@@ -128,7 +128,8 @@ def test_plan_invokes_planner(git_repo):
     )
 
     async def fake_run_planner(**kwargs):
-        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        plan_name = kwargs["plan_name"]
+        output_path = git_repo / ".workbench" / plan_name / "plan.md"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("# Generated Plan\n## Task: Foo\nDo the thing.\n")
         return fake_result
@@ -143,7 +144,7 @@ def test_plan_invokes_planner(git_repo):
     assert result.exit_code == 0, result.output
     # Rich may wrap long paths across lines, so check without newlines
     flat = result.output.replace("\n", "")
-    assert "myplan.md" in flat
+    assert "myplan/plan.md" in flat
     assert "wb preview" in flat
     assert "wb run" in flat
     assert "Next steps" in flat
@@ -3602,15 +3603,36 @@ def test_run_legacy_plan_path_still_works(git_repo):
     assert captured["plan"].source == (plans_dir / "foo.md").resolve()
 
 
-def test_run_full_path_passthrough(git_repo, tmp_path):
-    """A full path argument should bypass name resolution."""
-    plan = tmp_path / "somewhere.md"
+def test_run_full_path_passthrough(git_repo, tmp_path_factory):
+    """A full path argument should bypass name resolution, including paths outside the repo."""
+    external = tmp_path_factory.mktemp("external")
+    plan = external / "somewhere.md"
     plan.write_text("# Plan\n## Task: hello\nDo something\n")
 
     result, captured = _capture_run_plan(git_repo, [str(plan)])
 
     assert result.exit_code == 0, result.output
     assert captured["plan"].source == plan.resolve()
+    # Ensure the path was treated as a path (not a name lookup); the plan
+    # really does live outside .workbench/<name>/plan.md.
+    assert ".workbench" not in str(captured["plan"].source)
+
+
+def test_run_prefers_new_layout_over_legacy(git_repo):
+    """When both .workbench/<name>/plan.md and .workbench/plans/<name>.md exist,
+    new layout wins."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: new\nNew layout.\n")
+
+    legacy_dir = git_repo / ".workbench" / "plans"
+    legacy_dir.mkdir(parents=True)
+    (legacy_dir / "myfeature.md").write_text("# Plan\n## Task: legacy\nLegacy layout.\n")
+
+    result, captured = _capture_run_plan(git_repo, ["myfeature"])
+
+    assert result.exit_code == 0, result.output
+    assert captured["plan"].source == (plan_dir / "plan.md").resolve()
 
 
 def test_run_unknown_name_errors(git_repo):
@@ -3621,6 +3643,20 @@ def test_run_unknown_name_errors(git_repo):
 
     assert result.exit_code != 0
     assert "nonexistent" in result.output
+
+
+def test_preview_resolves_plan_name(git_repo):
+    """`wb preview myfeature` should resolve to .workbench/myfeature/plan.md."""
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["preview", "myfeature"])
+
+    assert result.exit_code == 0, result.output
+    assert str(plan_dir / "plan.md") in result.output or "hello" in result.output
 
 
 def test_run_loads_per_plan_agents_yaml(git_repo):
@@ -3639,7 +3675,9 @@ def test_run_loads_per_plan_agents_yaml(git_repo):
 
 
 def test_run_loads_per_plan_profile(git_repo):
-    """A per-plan profile.yaml appears first in resolve_profile_paths and overrides project."""
+    """Plan-name resolution must yield a Plan whose folder_id matches the per-plan
+    folder, so run_plan layers the per-plan profile.yaml.
+    """
     from workbench.path_resolver import resolve_profile_paths
     from workbench.profile import Profile
 
@@ -3650,16 +3688,18 @@ def test_run_loads_per_plan_profile(git_repo):
         "roles:\n  implementor:\n    directive: per-plan-impl\n"
     )
 
+    # Sanity-check the resolution helper itself.
     paths = resolve_profile_paths(git_repo, plan_slug="myfeature")
-    assert (plan_dir / "profile.yaml") in paths
-    assert paths[0] == plan_dir / "profile.yaml"
-
+    assert paths and paths[0] == plan_dir / "profile.yaml"
     merged = Profile.from_layered_yaml(list(reversed(paths)))
     assert merged.implementor.directive == "per-plan-impl"
 
+    # The CLI-layer assertion: the parsed plan's folder_id is the plan slug,
+    # which is what run_plan uses to look up the per-plan profile.
     result, captured = _capture_run_plan(git_repo, ["myfeature"])
     assert result.exit_code == 0, result.output
     assert captured["plan"].source == (plan_dir / "plan.md").resolve()
+    assert captured["plan"].folder_id == "myfeature"
 
 
 # ---------------------------------------------------------------------------
@@ -3722,6 +3762,11 @@ def test_plan_copy_settings_skips_missing_sources(git_repo):
     plan_dir.mkdir(parents=True)
     (plan_dir / "plan.md").write_text("# Plan\n## Task: hello\nDo something\n")
 
+    # Guard against a stray project profile.yaml/agents.yaml leaking from
+    # other tests or future fixture changes.
+    assert not (git_repo / ".workbench" / "profile.yaml").exists()
+    assert not (git_repo / ".workbench" / "agents.yaml").exists()
+
     runner = CliRunner()
     fake_home = git_repo / "fake-home"
     fake_home.mkdir()
@@ -3734,6 +3779,7 @@ def test_plan_copy_settings_skips_missing_sources(git_repo):
     assert result.exit_code == 0, result.output
     assert not (plan_dir / "profile.yaml").exists()
     assert not (plan_dir / "agents.yaml").exists()
+    assert "skipping" in result.output
 
 
 def test_plan_copy_settings_errors_on_missing_plan_folder(git_repo):
@@ -3761,8 +3807,12 @@ def test_plan_with_copy_settings_flag(git_repo):
         output="Plan written.",
     )
 
+    call_log: list[dict] = []
+
     async def fake_run_planner(**kwargs):
-        output_path = git_repo / ".workbench" / "plans" / f"{kwargs['plan_name']}.md"
+        call_log.append(dict(kwargs))
+        plan_name = kwargs["plan_name"]
+        output_path = git_repo / ".workbench" / plan_name / "plan.md"
         output_path.parent.mkdir(parents=True, exist_ok=True)
         output_path.write_text("# Plan\n## Task: Hello\nDo something.\n")
         return fake_result
@@ -3771,7 +3821,7 @@ def test_plan_with_copy_settings_flag(git_repo):
     with (
         patch("workbench.cli._find_repo_root", return_value=git_repo),
         patch("workbench.cli.check_tmux_available", return_value=True),
-        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner) as mock_planner,
     ):
         result = runner.invoke(
             main,
@@ -3780,6 +3830,10 @@ def test_plan_with_copy_settings_flag(git_repo):
 
     assert result.exit_code == 0, result.output
     assert (git_repo / ".workbench" / "myfeature" / "profile.yaml").exists()
+    # The planner must actually have been invoked with the right plan name —
+    # otherwise this would pass even if the planner step were deleted.
+    assert mock_planner.call_count == 1
+    assert call_log and call_log[0]["plan_name"] == "myfeature"
 
 
 # ---------------------------------------------------------------------------
