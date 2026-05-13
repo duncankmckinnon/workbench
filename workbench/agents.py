@@ -27,6 +27,7 @@ class Role(StrEnum):
     MERGER = "merger"
     SUMMARIZER = "summarizer"
     BRANCH_REVIEWER = "branch_reviewer"
+    PR_WRITER = "pr_writer"
 
 
 class TaskStatus(StrEnum):

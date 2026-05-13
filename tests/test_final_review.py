@@ -10,6 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.final_review import run_final_review
+from workbench.pr_writer import PrWriterAgentError, PrWriterParseError
 from workbench.session_status import FinalReviewRecord, SessionStatus
 
 # ── Fixtures ─────────────────────────────────────────────────────────
@@ -422,6 +423,302 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
     assert status is not None
     assert len(status.final_reviews) == 1
     assert status.final_reviews[0].verdict == "error"
+
+
+def _make_pass_fake_exec(req_path: Path, report_path: Path):
+    """Return a fake_exec helper that writes requirements then a PASS report."""
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        elif call_count["n"] == 2:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("Great work.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    return fake_exec
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_invoked_on_pass(base_kwargs, tmp_repo):
+    """On PASS verdict with no pr_body_file, the writer's output drives the PR."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.03})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("Custom title", "Custom body"),
+        ) as mock_writer,
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/7"),
+        ) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "pass"
+    assert record.pr_url == "https://github.com/org/repo/pull/7"
+    mock_writer.assert_awaited_once()
+    mock_pr.assert_awaited_once()
+    _repo, _branch, _base, title_arg, body_arg = mock_pr.await_args.args
+    assert title_arg == "Custom title"
+    assert body_arg == "Custom body"
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_skipped_when_pr_body_file_provided(base_kwargs, tmp_repo, tmp_path):
+    """A user-supplied pr_body_file bypasses the writer entirely."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    body_file = tmp_path / "body.md"
+    body_file.write_text("User-supplied body content")
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+        ) as mock_writer,
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/8"),
+        ) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False, "pr_body_file": body_file}
+        await run_final_review(**kwargs)
+
+    mock_writer.assert_not_awaited()
+    mock_pr.assert_awaited_once()
+    _repo, _branch, _base, _title, body_arg = mock_pr.await_args.args
+    assert body_arg == "User-supplied body content"
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
+    """PrWriterAgentError → fallback body is plan-derived (contains Context text)."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            side_effect=PrWriterAgentError("agent crashed"),
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/9"),
+        ) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "pass"
+    mock_pr.assert_awaited_once()
+    _repo, _branch, _base, _title, body_arg = mock_pr.await_args.args
+    assert "Some context." in body_arg
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_parse_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
+    """PrWriterParseError → fallback body is plan-derived (contains Context text)."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            side_effect=PrWriterParseError("bad format"),
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/10"),
+        ) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "pass"
+    mock_pr.assert_awaited_once()
+    _repo, _branch, _base, _title, body_arg = mock_pr.await_args.args
+    assert "Some context." in body_arg
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_not_called_on_fail_verdict(base_kwargs, tmp_repo):
+    """A FAIL verdict skips both the PR writer and create_pr."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    call_count = {"n": 0}
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            report_path.parent.mkdir(parents=True, exist_ok=True)
+            report_path.write_text("Nope.\n\nVERDICT: FAIL\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review.run_pr_writer", new_callable=AsyncMock) as mock_writer,
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "fail"
+    mock_writer.assert_not_awaited()
+    mock_pr.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pr_writer_not_called_when_skip_pr_true(base_kwargs, tmp_repo):
+    """PASS + skip_pr=True still skips the PR writer."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review.run_pr_writer", new_callable=AsyncMock) as mock_writer,
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock) as mock_pr,
+    ):
+        # skip_pr=True (default in base_kwargs)
+        record = await run_final_review(**base_kwargs)
+
+    assert record.verdict == "pass"
+    mock_writer.assert_not_awaited()
+    mock_pr.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_pr_title_cli_override_wins_over_agent_title(base_kwargs, tmp_repo):
+    """An explicit pr_title overrides the agent-authored title."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("Agent title", "Agent body"),
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/11"),
+        ) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False, "pr_title": "CLI title"}
+        await run_final_review(**kwargs)
+
+    mock_pr.assert_awaited_once()
+    _repo, _branch, _base, title_arg, body_arg = mock_pr.await_args.args
+    assert title_arg == "CLI title"
+    assert body_arg == "Agent body"
 
 
 @pytest.mark.asyncio

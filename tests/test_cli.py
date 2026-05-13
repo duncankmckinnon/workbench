@@ -3645,6 +3645,163 @@ def test_run_unknown_name_errors(git_repo):
     assert "nonexistent" in result.output
 
 
+# ---------------------------------------------------------------------------
+# wb pull-request
+# ---------------------------------------------------------------------------
+
+
+def _write_status_file_multi(repo, plan_slug, sessions_data, plan_source=""):
+    """Write a status.yaml with multiple sessions for testing."""
+    wb = repo / ".workbench" / plan_slug
+    wb.mkdir(parents=True, exist_ok=True)
+    data = {"sessions": sessions_data}
+    if plan_source:
+        data["plan_source"] = plan_source
+    (wb / "status.yaml").write_text(yaml.dump(data))
+
+
+def test_pull_request_with_one_session_succeeds(git_repo, tmp_path):
+    """One session in status.yaml → command auto-discovers and opens PR."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        return "Agent title", "Body content from agent"
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/42"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer) as mock_writer,
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr) as mock_create,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["pull-request", "myfeature", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_writer.called
+    assert mock_create.called
+    assert "https://github.com/test/test/pull/42" in result.output
+
+
+def test_pull_request_with_multiple_sessions_requires_b(git_repo, tmp_path):
+    """Multiple sessions, no -b → error mentions both session names and -b."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file_multi(
+        git_repo,
+        "myfeature",
+        {
+            "workbench-1": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "branch": "wb/a",
+                        "merged": True,
+                        "last_agent": "reviewer",
+                    }
+                }
+            },
+            "workbench-2": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "branch": "wb/b",
+                        "merged": True,
+                        "last_agent": "reviewer",
+                    }
+                }
+            },
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["pull-request", "myfeature", "--no-tmux"])
+
+    assert result.exit_code != 0
+    assert "workbench-1" in result.output
+    assert "workbench-2" in result.output
+    assert "-b" in result.output
+
+
+def test_pull_request_with_explicit_b_picks_session(git_repo, tmp_path):
+    """Two sessions, -b workbench-2 → writer called with session_branch='workbench-2'."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file_multi(
+        git_repo,
+        "myfeature",
+        {
+            "workbench-1": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "branch": "wb/a",
+                        "merged": True,
+                        "last_agent": "reviewer",
+                    }
+                }
+            },
+            "workbench-2": {
+                "tasks": {
+                    "task-1": {
+                        "status": "done",
+                        "branch": "wb/b",
+                        "merged": True,
+                        "last_agent": "reviewer",
+                    }
+                }
+            },
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        return "Agent title", "Body content from agent"
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/2"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer) as mock_writer,
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main, ["pull-request", "myfeature", "-b", "workbench-2", "--no-tmux"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_writer.call_args.kwargs.get("session_branch") == "workbench-2"
+
+
+def test_pull_request_no_sessions_errors(git_repo, tmp_path):
+    """Missing status file → clear error."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["pull-request", "nonexistent", "--no-tmux"])
+
+    assert result.exit_code != 0
+    assert "nonexistent" in result.output
+
+
 def test_preview_resolves_plan_name(git_repo):
     """`wb preview myfeature` should resolve to .workbench/myfeature/plan.md."""
     plan_dir = git_repo / ".workbench" / "myfeature"
@@ -3884,3 +4041,381 @@ def test_clean_removes_legacy_layout_worktrees(git_repo):
 
     assert result.exit_code == 0, result.output
     assert not wt.exists()
+
+
+def test_pull_request_plan_as_path(git_repo, tmp_path):
+    """Passing path to plan.md should resolve to slug from parent directory."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        return "Agent title", "Body content"
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/1"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer) as mock_writer,
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["pull-request", str(plan), "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_writer.call_args.kwargs.get("plan_slug") == "myfeature"
+
+
+def test_pull_request_pr_body_file_skips_writer(git_repo, tmp_path):
+    """--pr-body-file → writer not invoked; create_pr called with that body."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    body_file = tmp_path / "body.md"
+    body_file.write_text("Custom body content from file")
+
+    runner = CliRunner()
+
+    async def fake_create_pr(repo, session, base, title, body):
+        return True, "https://github.com/test/test/pull/3"
+
+    with (
+        patch("workbench.cli.run_pr_writer") as mock_writer,
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr) as mock_create,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "pull-request",
+                "myfeature",
+                "--no-tmux",
+                "--pr-body-file",
+                str(body_file),
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert not mock_writer.called
+    assert mock_create.call_args.args[4] == "Custom body content from file"
+
+
+def test_pull_request_pr_title_override_wins(git_repo, tmp_path):
+    """--pr-title overrides writer-returned title."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        return "Agent title", "Body content"
+
+    async def fake_create_pr(repo, session, base, title, body):
+        return True, "https://github.com/test/test/pull/1"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer),
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr) as mock_create,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["pull-request", "myfeature", "--no-tmux", "--pr-title", "CLI title"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_create.call_args.args[3] == "CLI title"
+
+
+def test_pull_request_writer_error_falls_back(git_repo, tmp_path):
+    """Writer raises PrWriterAgentError → create_pr still called with fallback body."""
+    from workbench.pr_writer import PrWriterAgentError
+
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        raise PrWriterAgentError("agent crashed")
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/5"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer),
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr) as mock_create,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["pull-request", "myfeature", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert mock_create.called
+    assert "PR writer failed" in result.output or "fallback" in result.output.lower()
+
+
+def test_pull_request_pr_base_override(git_repo, tmp_path):
+    """--pr-base develop → create_pr called with base='develop'."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_pr_writer(**kwargs):
+        return "Agent title", "Body content"
+
+    async def fake_create_pr(repo, session, base, title, body):
+        return True, "https://github.com/test/test/pull/6"
+
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer),
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr) as mock_create,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main, ["pull-request", "myfeature", "--no-tmux", "--pr-base", "develop"]
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_create.call_args.args[2] == "develop"
+
+
+# ---------------------------------------------------------------------------
+# --pr-writer-directive threading
+# ---------------------------------------------------------------------------
+
+
+def test_run_final_review_passes_pr_writer_directive(git_repo, tmp_path):
+    """wb run --final-review --pr-writer-directive should propagate to run_final_review."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-11T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "run",
+                str(plan),
+                "--no-tmux",
+                "--final-review",
+                "-b",
+                "workbench-1",
+                "--pr-writer-directive",
+                "Custom",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("pr_writer_directive") == "Custom"
+
+
+def test_merge_review_passes_pr_writer_directive(git_repo, tmp_path):
+    """wb merge --review --pr-writer-directive should propagate to run_final_review."""
+    from workbench.session_status import FinalReviewRecord, SessionStatus
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    status = SessionStatus(
+        plan_slug="my-plan",
+        session_branch="workbench-1",
+        plan_source=str(plan),
+    )
+    status.record_task("task-1", "done", "wb/feat", merged=True, last_agent="reviewer")
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-11T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_merge(**kwargs):
+        return status
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.merge_unmerged", side_effect=fake_merge),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "merge",
+                "-b",
+                "workbench-1",
+                "--review",
+                "--no-tmux",
+                "--pr-writer-directive",
+                "MergeCustom",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("pr_writer_directive") == "MergeCustom"
+
+
+def test_final_review_command_passes_pr_writer_directive(git_repo, tmp_path):
+    """wb final-review <session> --pr-writer-directive should propagate."""
+    from workbench.session_status import FinalReviewRecord
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-11T00:00:00Z",
+        verdict="pass",
+        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
+        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    runner = CliRunner()
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "final-review",
+                "workbench-1",
+                "--no-tmux",
+                "--pr-writer-directive",
+                "FinalCustom",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("pr_writer_directive") == "FinalCustom"

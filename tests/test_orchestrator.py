@@ -1364,3 +1364,121 @@ class TestSessionBranchResolution:
         assert mock_create.call_args.kwargs["session_name"] is None
         # branch_exists not consulted when nothing was declared
         mock_exists.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Status persistence on handoff
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_status_persisted_on_each_handoff(tmp_path):
+    """Mid-pipeline status transitions should hit status.yaml, not just the final write.
+
+    Today the orchestrator only persists DONE/FAILED after the whole pipeline
+    completes; a crash mid-pipeline left the YAML stuck at 'pending'. With the
+    fix, every IMPLEMENTING/TESTING/REVIEWING/FIXING/MERGING transition writes
+    through, so external observers see the live phase.
+    """
+    plan = _make_plan()
+    repo = tmp_path
+
+    captured_calls: list[dict] = []
+
+    async def fake_update_task(self, repo, task_id, **kwargs):
+        captured_calls.append({"task_id": task_id, **kwargs})
+
+    async def fake_pipeline(**kwargs):
+        # Simulate a normal implement→test→review pipeline by firing
+        # the status callback for each phase.
+        cb = kwargs["on_status_change"]
+        cb(kwargs["task"].id, TaskStatus.IMPLEMENTING)
+        cb(kwargs["task"].id, TaskStatus.TESTING)
+        cb(kwargs["task"].id, TaskStatus.REVIEWING)
+        return [
+            AgentResult(
+                task_id=kwargs["task"].id,
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            )
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch.object(SessionStatus, "update_task", new=fake_update_task),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/task-1-test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    # Filter to our task's updates
+    task_updates = [c for c in captured_calls if c["task_id"] == "task-1"]
+    statuses = [c["status"] for c in task_updates]
+    last_agents = [c["last_agent"] for c in task_updates]
+
+    # Mid-pipeline transitions should each have been persisted
+    assert "implementing" in statuses
+    assert "testing" in statuses
+    assert "reviewing" in statuses
+    # last_agent should track the role behind each transition
+    assert "implementor" in last_agents
+    assert "tester" in last_agents
+    assert "reviewer" in last_agents
+    # Final write (done) follows after the pipeline completes
+    assert statuses[-1] == "done"
+
+
+@pytest.mark.asyncio
+async def test_status_persist_failure_does_not_crash_pipeline(tmp_path):
+    """A persist failure during a handoff is logged but doesn't kill the run."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    call_count = {"n": 0}
+
+    async def flaky_update_task(self, repo, task_id, **kwargs):
+        call_count["n"] += 1
+        # Fail mid-pipeline writes; the final 'done' write succeeds. This
+        # tests that mid-pipeline persist failures (which run as fire-and-forget
+        # asyncio.Tasks) are absorbed by the _persist_status helper without
+        # crashing the pipeline.
+        if kwargs.get("status") != "done":
+            raise RuntimeError("disk full")
+
+    async def fake_pipeline(**kwargs):
+        cb = kwargs["on_status_change"]
+        cb(kwargs["task"].id, TaskStatus.IMPLEMENTING)
+        cb(kwargs["task"].id, TaskStatus.TESTING)
+        return [
+            AgentResult(
+                task_id=kwargs["task"].id,
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            )
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch.object(SessionStatus, "update_task", new=flaky_update_task),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/task-1-test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        # Should not raise
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    # At least one persist was attempted
+    assert call_count["n"] > 0

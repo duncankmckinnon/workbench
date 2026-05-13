@@ -10,14 +10,24 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from rich.console import Console
+
 from workbench.adapters import get_adapter
 from workbench.directives import BranchReviewerDirective, RequirementsSummarizerDirective
 from workbench.github_pr import create_pr
+from workbench.pr_writer import (
+    PrWriterError,
+    derive_body_from_plan,
+    derive_title_from_plan,
+    run_pr_writer,
+)
 from workbench.session_status import FinalReviewRecord, SessionStatus
 from workbench.tmux import run_in_tmux
 
 if TYPE_CHECKING:
     from workbench.profile import Profile
+
+console = Console()
 
 
 async def run_final_review(
@@ -32,13 +42,21 @@ async def run_final_review(
     profile: Profile | None = None,
     summarizer_directive: str | None = None,
     branch_reviewer_directive: str | None = None,
+    pr_writer_directive: str | None = None,
     pr_title: str | None = None,
     pr_body_file: Path | None = None,
     pr_base: str | None = None,
     skip_pr: bool = False,
     agents_config_paths: list[Path] | None = None,
 ) -> FinalReviewRecord:
-    """Run the two-agent final review sequence and return the persisted record."""
+    """Run the two-agent final review sequence and return the persisted record.
+
+    On a PASS verdict (and when ``pr_body_file`` is not supplied), a dedicated
+    ``pr_writer`` agent authors the PR title and body from the actual diff. If
+    that agent fails, the orchestrator falls back to a plan-derived body so the
+    PR can still be opened. Pass ``pr_writer_directive`` to override the
+    writer's directive text (CLI override > profile > built-in default).
+    """
 
     # 1. Validate inputs
     if not plan_source.exists():
@@ -68,6 +86,7 @@ async def run_final_review(
             profile=profile,
             summarizer_directive=summarizer_directive,
             branch_reviewer_directive=branch_reviewer_directive,
+            pr_writer_directive=pr_writer_directive,
             pr_title=pr_title,
             pr_body_file=pr_body_file,
             pr_base=pr_base,
@@ -90,6 +109,7 @@ async def _run_review_sequence(
     profile: Profile | None,
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
     pr_title: str | None,
     pr_body_file: Path | None,
     pr_base: str | None,
@@ -263,8 +283,35 @@ async def _run_review_sequence(
     # 10. Open PR if verdict is pass and not skip_pr
     pr_url: str | None = None
     if verdict == "pass" and not skip_pr:
-        title = _derive_pr_title(pr_title, plan_content, plan_slug)
-        body = _derive_pr_body(pr_body_file, plan_content, merged_task_titles, report_path, repo)
+        rel_report = report_path.relative_to(repo)
+        # User-provided body file always wins — no agent call needed.
+        if pr_body_file is not None:
+            title = pr_title or derive_title_from_plan(plan_content, plan_slug)
+            body = pr_body_file.read_text(encoding="utf-8")
+        else:
+            try:
+                agent_title, agent_body = await run_pr_writer(
+                    repo=repo,
+                    session_branch=session_branch,
+                    plan_slug=plan_slug,
+                    base_branch=base_branch,
+                    plan_source=plan_source,
+                    merged_task_titles=merged_task_titles,
+                    agent_cmd=agent_cmd,
+                    use_tmux=use_tmux,
+                    profile=profile,
+                    directive_override=pr_writer_directive,
+                )
+                title = pr_title or agent_title
+                body = agent_body
+            except PrWriterError as e:
+                console.print(
+                    f"[yellow]PR writer failed ({type(e).__name__}: {e}); "
+                    f"falling back to plan-derived PR body[/yellow]"
+                )
+                title = pr_title or derive_title_from_plan(plan_content, plan_slug)
+                body = derive_body_from_plan(plan_content, merged_task_titles, rel_report)
+
         base = pr_base or base_branch
         success, result_msg = await create_pr(repo, session_branch, base, title, body)
         if success:
@@ -326,52 +373,6 @@ def _parse_verdict(content: str) -> str:
         if match:
             return match.group(1).lower()
     return "error"
-
-
-def _derive_pr_title(override: str | None, plan_content: str, plan_slug: str) -> str:
-    """Derive PR title from override, plan heading, or slug."""
-    if override:
-        return override
-    for line in plan_content.splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return plan_slug.replace("-", " ").title()
-
-
-def _derive_pr_body(
-    body_file: Path | None,
-    plan_content: str,
-    merged_task_titles: list[str],
-    report_path: Path,
-    repo: Path,
-) -> str:
-    """Derive PR body from file, plan context, or defaults."""
-    if body_file and body_file.exists():
-        return body_file.read_text(encoding="utf-8")
-
-    # Extract ## Context section if present
-    context_lines: list[str] = []
-    in_context = False
-    for line in plan_content.splitlines():
-        if line.strip() == "## Context":
-            in_context = True
-            continue
-        if in_context:
-            if line.startswith("## "):
-                break
-            context_lines.append(line)
-
-    parts: list[str] = []
-    if context_lines:
-        parts.append("## Context\n" + "\n".join(context_lines).strip())
-
-    tasks_section = "## Tasks\n\n" + "\n".join(f"- {t}" for t in merged_task_titles)
-    parts.append(tasks_section)
-
-    rel_report = report_path.relative_to(repo)
-    parts.append(f"\n\nReviewed by workbench. Report: `{rel_report}`")
-
-    return "\n\n".join(parts)
 
 
 def _build_record(
