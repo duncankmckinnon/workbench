@@ -19,6 +19,22 @@ from workbench.profile import Profile, RoleConfig
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 
+@pytest.fixture(autouse=True)
+def _stub_worktree_helpers():
+    """Stub the session-branch worktree creation/cleanup.
+
+    The real helpers shell out to `git worktree add <path> <branch>`, which
+    requires the branch to exist in the test repo. These tests don't initialize
+    a real git repo, so we make the helpers no-ops; tests that need to verify
+    cwd behavior can override locally.
+    """
+    with (
+        patch("workbench.pr_writer._create_pr_writer_worktree"),
+        patch("workbench.pr_writer._cleanup_pr_writer_worktree"),
+    ):
+        yield
+
+
 @pytest.fixture
 def tmp_repo(tmp_path):
     repo = tmp_path / "repo"
@@ -370,3 +386,49 @@ def test_derive_body_appends_report_footer():
     body = derive_body_from_plan("# Plan\n", ["T"], report_path=Path("reviews/report.md"))
     assert "Reviewed by workbench" in body
     assert "reviews/report.md" in body
+
+
+@pytest.mark.asyncio
+async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_repo):
+    """The agent subprocess must be invoked with cwd=<worktree>, not cwd=<repo>.
+
+    Without this, the agent's Read/Glob/Bash tools see whatever branch `repo`
+    is currently checked out at (typically main) instead of session_branch,
+    and silently describes stale code.
+    """
+    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    captured_cwds: list[str | None] = []
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        captured_cwds.append(cwd)
+        proc = MagicMock()
+        # First two calls are git diff/log — succeed silently.
+        if len(captured_cwds) <= 2:
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+            return proc
+        # Third call is the agent — write the file and succeed.
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("# A title\n\nbody body body\n", encoding="utf-8")
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"", b""))
+        return proc
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("ok", {"cost_usd": 0.0})
+
+    with (
+        patch("workbench.pr_writer.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
+        await run_pr_writer(**base_kwargs)
+
+    # The agent call is the 3rd subprocess (after git diff and git log).
+    assert len(captured_cwds) >= 3, "expected at least three subprocess invocations"
+    agent_cwd = captured_cwds[2]
+    expected_wt = tmp_repo / ".workbench" / "my-plan" / ".pr-writer-wt" / "workbench-1"
+    assert agent_cwd == str(expected_wt), (
+        f"Agent must run with cwd={expected_wt}, got cwd={agent_cwd}. "
+        "Running from repo root would expose the wrong branch's files."
+    )

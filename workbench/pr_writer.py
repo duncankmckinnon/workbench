@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import re
+import subprocess
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -84,30 +85,46 @@ async def run_pr_writer(
     prompt = directive.render()
 
     adapter = get_adapter(agent_cmd_resolved, repo / ".workbench" / "agents.yaml")
+
+    # The agent must run inside a checkout of session_branch so its Read/Glob/Bash
+    # tools see the actual code being described. Running from `repo` (typically
+    # on main) would show stale content. Create an ephemeral worktree and clean
+    # it up afterwards; the bare git store at `repo` already serviced the
+    # diff/log queries above.
+    wt_path = repo / ".workbench" / plan_slug / ".pr-writer-wt" / session_branch
+    wt_path.parent.mkdir(parents=True, exist_ok=True)
     try:
-        cmd = adapter.build_command(prompt, repo)
-        if use_tmux:
-            session_name = f"wb-pr-writer-{plan_slug}"
-            returncode, raw_output = await run_in_tmux(session_name, cmd, repo)
-        else:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                cwd=str(repo),
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-            stdout, stderr = await proc.communicate()
-            returncode = proc.returncode
-            raw_output = stdout.decode("utf-8", errors="replace")
-    except Exception as e:  # noqa: BLE001 — wrap adapter/subprocess errors
-        raise PrWriterAgentError(f"Agent invocation failed: {e}") from e
+        _create_pr_writer_worktree(repo, wt_path, session_branch)
+    except Exception as e:  # noqa: BLE001
+        raise PrWriterAgentError(f"Could not create PR-writer worktree: {e}") from e
 
-    if returncode != 0:
-        raise PrWriterAgentError(f"PR-writer agent exited {returncode}:\n{raw_output[:2000]}")
-    if not output_path.exists() or output_path.stat().st_size == 0:
-        raise PrWriterAgentError("Agent did not write pr_body.md")
+    try:
+        try:
+            cmd = adapter.build_command(prompt, wt_path)
+            if use_tmux:
+                session_name = f"wb-pr-writer-{plan_slug}"
+                returncode, raw_output = await run_in_tmux(session_name, cmd, wt_path)
+            else:
+                proc = await asyncio.create_subprocess_exec(
+                    *cmd,
+                    cwd=str(wt_path),
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
+                )
+                stdout, stderr = await proc.communicate()
+                returncode = proc.returncode
+                raw_output = stdout.decode("utf-8", errors="replace")
+        except Exception as e:  # noqa: BLE001 — wrap adapter/subprocess errors
+            raise PrWriterAgentError(f"Agent invocation failed: {e}") from e
 
-    return _parse_pr_body(output_path)
+        if returncode != 0:
+            raise PrWriterAgentError(f"PR-writer agent exited {returncode}:\n{raw_output[:2000]}")
+        if not output_path.exists() or output_path.stat().st_size == 0:
+            raise PrWriterAgentError("Agent did not write pr_body.md")
+
+        return _parse_pr_body(output_path)
+    finally:
+        _cleanup_pr_writer_worktree(repo, wt_path)
 
 
 # ---------------------------------------------------------------------------
@@ -267,3 +284,29 @@ def _parse_pr_body(output_path: Path) -> tuple[str, str]:
         raise PrWriterParseError("pr_body.md has empty or too-short body")
 
     return title, body
+
+
+def _create_pr_writer_worktree(repo: Path, wt_path: Path, session_branch: str) -> None:
+    """Create a git worktree at wt_path checked out to session_branch."""
+    if wt_path.exists():
+        subprocess.run(
+            ["git", "worktree", "remove", str(wt_path), "--force"],
+            cwd=repo,
+            capture_output=True,
+        )
+    subprocess.run(
+        ["git", "worktree", "add", str(wt_path), session_branch],
+        cwd=repo,
+        capture_output=True,
+        check=True,
+    )
+
+
+def _cleanup_pr_writer_worktree(repo: Path, wt_path: Path) -> None:
+    """Remove the PR-writer worktree (best-effort)."""
+    if wt_path.exists():
+        subprocess.run(
+            ["git", "worktree", "remove", str(wt_path), "--force"],
+            cwd=repo,
+            capture_output=True,
+        )

@@ -1834,7 +1834,9 @@ def _load_session_for_plan(
 ) -> SessionStatus:
     """Load the SessionStatus for the given plan_slug + optional session.
 
-    Raises click.ClickException for ambiguous / missing sessions.
+    Parses the status YAML once (avoiding a redundant second read inside
+    SessionStatus.load) and raises click.ClickException for ambiguous /
+    missing sessions.
     """
     status_path = SessionStatus.path_for(repo, plan_slug)
     legacy_path = SessionStatus.legacy_path_for(repo, plan_slug)
@@ -1868,23 +1870,34 @@ def _load_session_for_plan(
             f"Use -b <session> to choose."
         )
 
-    status = SessionStatus.load(repo, plan_slug, chosen)
-    if status is None:
-        raise click.ClickException(f"Failed to load session '{chosen}' for plan '{plan_slug}'.")
-    return status
+    # Build the SessionStatus from the already-parsed YAML rather than
+    # re-reading the file via SessionStatus.load().
+    session_data = sessions.get(chosen) or {}
+    from .session_status import FinalReviewRecord, TaskRecord
+
+    tasks = {tid: TaskRecord.from_dict(rec) for tid, rec in session_data.get("tasks", {}).items()}
+    final_reviews = [FinalReviewRecord.from_dict(r) for r in session_data.get("final_reviews", [])]
+    return SessionStatus(
+        plan_slug=plan_slug,
+        session_branch=chosen,
+        plan_source=data.get("plan_source", ""),
+        tasks=tasks,
+        final_reviews=final_reviews,
+    )
 
 
-def _collect_merged_titles(status: SessionStatus, plan_source: Path) -> list[str]:
-    """Return titles of merged tasks by intersecting status.tasks with plan.tasks."""
-    plan_parsed = parse_plan(plan_source.resolve())
+def _collect_merged_titles(status: SessionStatus, plan) -> list[str]:
+    """Return titles of merged tasks by intersecting status.tasks with plan.tasks.
+
+    Accepts a parsed Plan object (so callers can parse once).
+    """
     merged_ids = {tid for tid, rec in status.tasks.items() if rec.merged}
-    return [t.title for t in plan_parsed.tasks if t.id in merged_ids]
+    return [t.title for t in plan.tasks if t.id in merged_ids]
 
 
-def _resolve_base_from_plan(plan_source: Path) -> str:
+def _resolve_base_from_plan(plan) -> str:
     """Return the plan's frontmatter ``base`` or ``main``."""
-    plan_parsed = parse_plan(plan_source.resolve())
-    return plan_parsed.run_config.get("base", "main") or "main"
+    return plan.run_config.get("base", "main") or "main"
 
 
 @main.command("pull-request")
@@ -1983,8 +1996,19 @@ def pull_request_cmd(
             f"The plan file may have been moved or deleted."
         )
 
-    merged_titles = _collect_merged_titles(status, plan_source)
-    base_branch = _resolve_base_from_plan(plan_source)
+    # Parse the plan once; on malformed frontmatter fall back to safe defaults
+    # so the command can still produce a PR rather than stack-tracing.
+    try:
+        plan_parsed = parse_plan(plan_source.resolve())
+        merged_titles = _collect_merged_titles(status, plan_parsed)
+        base_branch = _resolve_base_from_plan(plan_parsed)
+    except Exception as e:  # noqa: BLE001 — parser surface is broad
+        console.print(
+            f"[yellow]Could not parse plan {plan_source} ({type(e).__name__}: {e}); "
+            f"falling back to base='main' and empty merged-task list[/yellow]"
+        )
+        merged_titles = []
+        base_branch = "main"
 
     profile_obj = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
     plan_text = plan_source.read_text(encoding="utf-8")
