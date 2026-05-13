@@ -20,14 +20,16 @@ class Worktree:
         """Derive the repo root by walking up until we find ``.workbench``.
 
         Handles both the new layout (``.workbench/<plan>/<task>``) and the
-        legacy layout (``.workbench/<task>``).
+        legacy layout (``.workbench/<task>``). Worktrees are always created
+        under ``.workbench``, so failing to find it indicates a malformed
+        ``Worktree`` and is a programming error.
         """
         cur = self.path
         while cur != cur.parent:
             if cur.name == ".workbench":
                 return cur.parent
             cur = cur.parent
-        return self.path.parent.parent
+        raise ValueError(f"Worktree path is not under .workbench: {self.path}")
 
     def cleanup(self):
         """Remove the worktree and delete the branch."""

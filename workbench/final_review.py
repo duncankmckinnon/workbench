@@ -301,6 +301,7 @@ async def _run_review_sequence(
                     use_tmux=use_tmux,
                     profile=profile,
                     directive_override=pr_writer_directive,
+                    agents_config_paths=agents_config_paths,
                 )
                 title = pr_title or agent_title
                 body = agent_body

@@ -14,8 +14,9 @@ def resolve_plan_path(arg: str, repo: Path) -> Path:
     """Resolve a plan reference to a plan.md path.
 
     Resolution rules:
-    1. If arg is a path (per is_plan_reference_path): resolve relative to cwd
-       or repo if relative. Return the resolved path.
+    1. If arg is a path (per is_plan_reference_path): return ``Path(arg)``
+       verbatim. Callers that need an absolute path should call ``.resolve()``
+       themselves (the cli wrapper does this).
     2. Otherwise: treat arg as a plan name. Try in order:
        a. repo / ".workbench" / arg / "plan.md"  (new layout)
        b. repo / ".workbench" / "plans" / f"{arg}.md"  (legacy layout)
@@ -43,9 +44,15 @@ def plan_slug_from_path(plan_path: Path) -> str:
     New layout: parent folder name (.workbench/<slug>/plan.md → <slug>)
     Legacy layout: file stem (.workbench/plans/<slug>.md → <slug>)
     Other paths: fall back to file stem.
+
+    A bare ``plan.md`` whose parent is the cwd resolves the path so the
+    slug becomes the cwd's directory name rather than an empty string.
     """
     if plan_path.name == "plan.md":
-        return plan_path.parent.name
+        parent_name = plan_path.parent.name
+        if not parent_name:
+            parent_name = plan_path.resolve().parent.name
+        return parent_name
     return plan_path.stem
 
 

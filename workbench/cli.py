@@ -2183,7 +2183,14 @@ def pull_request_cmd(
         merged_titles = []
         base_branch = "main"
 
-    profile_obj = Profile.resolve(repo, profile_path=profile_path, profile_name=profile_name)
+    profile_paths_for_pr = resolve_profile_paths(
+        repo,
+        plan_slug=plan_slug,
+        explicit_path=profile_path,
+        name=profile_name,
+    )
+    profile_obj = Profile.from_layered_yaml(list(reversed(profile_paths_for_pr)))
+    agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan_slug)
     plan_text = plan_source.read_text(encoding="utf-8")
 
     if pr_body_file is not None:
@@ -2203,6 +2210,7 @@ def pull_request_cmd(
                     use_tmux=not no_tmux,
                     profile=profile_obj,
                     directive_override=pr_writer_directive,
+                    agents_config_paths=agents_config_paths,
                 )
             )
             title = pr_title or agent_title

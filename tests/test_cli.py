@@ -4246,6 +4246,94 @@ def test_pull_request_pr_base_override(git_repo, tmp_path):
     assert mock_create.call_args.args[2] == "develop"
 
 
+def test_pull_request_threads_per_plan_agents_yaml(git_repo, tmp_path):
+    """A `.workbench/<plan>/agents.yaml` is forwarded to run_pr_writer."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / "agents.yaml").write_text("agents: {}\n")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    captured: dict = {}
+
+    async def fake_pr_writer(**kwargs):
+        captured.update(kwargs)
+        return "Agent title", "Body content from agent"
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/1"
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer),
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["pull-request", "myfeature", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    paths = captured.get("agents_config_paths") or []
+    assert (plan_dir / "agents.yaml") in paths
+    assert paths[0] == plan_dir / "agents.yaml"
+
+
+def test_pull_request_threads_per_plan_profile(git_repo, tmp_path):
+    """A `.workbench/<plan>/profile.yaml` directive reaches run_pr_writer."""
+    plan = _make_plan_in_dir(tmp_path, "myfeature")
+    plan_dir = git_repo / ".workbench" / "myfeature"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    (plan_dir / "profile.yaml").write_text("roles:\n  pr_writer:\n    directive: per-plan-pr\n")
+    _write_status_file(
+        git_repo,
+        "myfeature",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    captured: dict = {}
+
+    async def fake_pr_writer(**kwargs):
+        captured.update(kwargs)
+        return "Agent title", "Body content from agent"
+
+    async def fake_create_pr(*args, **kwargs):
+        return True, "https://github.com/test/test/pull/1"
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_pr_writer", side_effect=fake_pr_writer),
+        patch("workbench.cli.create_pr", side_effect=fake_create_pr),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(main, ["pull-request", "myfeature", "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    profile_obj = captured.get("profile")
+    assert profile_obj is not None
+    assert profile_obj.pr_writer.directive == "per-plan-pr"
+
+
 # ---------------------------------------------------------------------------
 # --pr-writer-directive threading
 # ---------------------------------------------------------------------------

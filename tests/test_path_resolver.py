@@ -77,6 +77,14 @@ def test_plan_slug_from_path_legacy_layout():
     assert plan_slug_from_path(Path(".workbench/plans/bar.md")) == "bar"
 
 
+def test_plan_slug_from_path_bare_plan_md_resolves_to_cwd(tmp_path, monkeypatch):
+    plan_dir = tmp_path / "loose-plan"
+    plan_dir.mkdir()
+    (plan_dir / "plan.md").write_text("# x")
+    monkeypatch.chdir(plan_dir)
+    assert plan_slug_from_path(Path("plan.md")) == "loose-plan"
+
+
 def test_resolve_profile_paths_explicit_wins(tmp_path):
     explicit = tmp_path / "custom_profile.yaml"
     explicit.write_text("dummy")
