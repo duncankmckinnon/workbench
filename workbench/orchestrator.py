@@ -332,6 +332,26 @@ async def run_plan(
             TaskStatus.MERGING: Role.MERGER.value,
         }
 
+        async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
+            try:
+                # Preserve the existing `merged` flag — update_task replaces the
+                # whole TaskRecord, so without this, a mid-pipeline write would
+                # transiently wipe `merged: True` for tasks already merged on a
+                # prior run (the wave's update_merged eventually restores it,
+                # but the window is visible to external observers).
+                existing = session_status.tasks.get(state.task.id)
+                merged = existing.merged if existing else False
+                await session_status.update_task(
+                    repo=repo,
+                    task_id=state.task.id,
+                    status=status.value,
+                    branch=state.worktree.branch if state.worktree else None,
+                    merged=merged,
+                    last_agent=last_agent,
+                )
+            except Exception as e:
+                console.print(f"[dim red]status persist failed for {state.task.id}: {e}[/dim red]")
+
         def _make_callback(state: TaskState):
             def _on_status(task_id: str, status: TaskStatus):
                 state.status = status
@@ -342,26 +362,15 @@ async def run_plan(
                 if last_agent is None:
                     return
                 # Track the persist task so we can await it before the final
-                # write — asyncio.Lock is not FIFO, so without this the final
-                # "done" write could race ahead of an earlier mid-pipeline
-                # write and end up overwritten.
+                # write — asyncio.create_task schedules but does not run until
+                # the event loop yields, so without explicitly awaiting these,
+                # the final "done" write could acquire the lock and complete
+                # before any of the mid-pipeline writes get scheduled to run.
                 state.pending_persists.append(
                     asyncio.create_task(_persist_status(state, status, last_agent))
                 )
 
             return _on_status
-
-        async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
-            try:
-                await session_status.update_task(
-                    repo=repo,
-                    task_id=state.task.id,
-                    status=status.value,
-                    branch=state.worktree.branch if state.worktree else None,
-                    last_agent=last_agent,
-                )
-            except Exception as e:
-                console.print(f"[dim red]status persist failed for {state.task.id}: {e}[/dim red]")
 
         # Run tasks concurrently with semaphore
         sem = asyncio.Semaphore(max_concurrent)
