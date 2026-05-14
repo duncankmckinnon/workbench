@@ -279,316 +279,67 @@ async def run_plan(
             console.print(f"[bold]{role.value}:[/bold] using {rc.agent}")
     console.print()
 
-    for wave_idx, wave in enumerate(waves):
-        wave_num = wave_idx + 1
+    shutdown = asyncio.Event()
 
-        # Skip waves before start_wave
-        if wave_num < start_wave:
-            console.print(
-                f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (already merged) ━━━[/dim]\n"
-            )
-            for task in wave:
-                state = TaskState(task=task)
-                state.status = TaskStatus.DONE
-                all_states.append(state)
-                state_map[task.id] = state
-            continue
-
-        # Stop after end_wave
-        if end_wave is not None and wave_num > end_wave:
-            console.print(
-                f"[dim]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) — skipped (beyond --wave {end_wave}) ━━━[/dim]\n"
-            )
-            break
-
-        console.print(
-            f"[bold cyan]━━━ Wave {wave_num}/{len(waves)} ({len(wave)} tasks) ━━━[/bold cyan]\n"
-        )
-
-        # Initialize state for this wave
-        # --task: filtered-out tasks are excluded entirely
-        # --only-incomplete: completed tasks are pre-marked DONE
-        wave_states: list[TaskState] = []
-        for task in wave:
-            if filtered_task_ids is not None and task.id not in filtered_task_ids:
-                continue
-            state = TaskState(task=task)
-            if task.id in skipped_task_ids:
-                state.status = TaskStatus.DONE
-            wave_states.append(state)
-            all_states.append(state)
-            state_map[task.id] = state
-
-        # Create worktrees for all tasks in wave, branching from session branch
-        # Skip tasks pre-marked DONE by --only-incomplete
-        for state in wave_states:
-            if state.status == TaskStatus.DONE:
-                continue
-            # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
-            old_worktree_path = repo / ".workbench" / plan_slug / state.task.id
-            if old_worktree_path.exists():
-                Worktree(
-                    path=old_worktree_path,
-                    branch=f"wb/{state.task.slug}",
-                    task_id=state.task.id,
-                ).cleanup()
-            else:
-                delete_branch(repo, f"wb/{state.task.slug}")
+    async def _refresh(live: Live) -> None:
+        while not shutdown.is_set():
+            live.update(_status_table(all_states))
             try:
-                wt = create_worktree(
-                    repo,
-                    state.task.id,
-                    state.task.slug,
-                    plan_slug=plan_slug,
-                    base_branch=session_branch,
-                )
-                state.worktree = wt
-            except Exception as e:
-                state.status = TaskStatus.FAILED
-                state.results.append(
-                    AgentResult(
-                        task_id=state.task.id,
-                        role=Role.IMPLEMENTOR,
-                        status=TaskStatus.FAILED,
-                        output=f"Worktree creation failed: {e}",
-                    )
-                )
+                await asyncio.wait_for(shutdown.wait(), timeout=1.0)
+            except asyncio.TimeoutError:
+                pass
+        live.update(_status_table(all_states))
 
-        # Status callback so the pipeline can update our display state and
-        # persist the current phase to status.yaml at every handoff. Persisting
-        # mid-pipeline lets external observers (and post-crash inspection)
-        # see which agent a task got stuck on instead of seeing it stuck at
-        # "pending".
-        _status_to_agent: dict[TaskStatus, str] = {
-            TaskStatus.IMPLEMENTING: Role.IMPLEMENTOR.value,
-            TaskStatus.TESTING: Role.TESTER.value,
-            TaskStatus.REVIEWING: Role.REVIEWER.value,
-            TaskStatus.FIXING: Role.FIXER.value,
-            TaskStatus.MERGING: Role.MERGER.value,
-        }
+    with Live(_status_table(all_states), console=console, refresh_per_second=1) as live:
+        refresh_task = asyncio.create_task(_refresh(live))
+        try:
+            for wave_idx, wave in enumerate(waves):
+                wave_num = wave_idx + 1
 
-        async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
-            try:
-                # Preserve the existing `merged` flag — update_task replaces the
-                # whole TaskRecord, so without this, a mid-pipeline write would
-                # transiently wipe `merged: True` for tasks already merged on a
-                # prior run (the wave's update_merged eventually restores it,
-                # but the window is visible to external observers).
-                existing = session_status.tasks.get(state.task.id)
-                merged = existing.merged if existing else False
-                await session_status.update_task(
-                    repo=repo,
-                    task_id=state.task.id,
-                    status=status.value,
-                    branch=state.worktree.branch if state.worktree else None,
-                    merged=merged,
-                    last_agent=last_agent,
-                )
-            except Exception as e:
-                console.print(f"[dim red]status persist failed for {state.task.id}: {e}[/dim red]")
+                # Skip waves before start_wave
+                if wave_num < start_wave:
+                    for task in wave:
+                        state = TaskState(task=task)
+                        state.wave_num = wave_num
+                        state.status = TaskStatus.DONE
+                        all_states.append(state)
+                        state_map[task.id] = state
+                    continue
 
-        def _make_callback(state: TaskState):
-            def _on_status(task_id: str, status: TaskStatus):
-                state.status = status
-                # Only persist mid-pipeline phases. DONE/FAILED are written
-                # authoritatively by the final update_task below using the
-                # result list, so we leave those for the awaited write.
-                last_agent = _status_to_agent.get(status)
-                if last_agent is None:
-                    return
-                # Track the persist task so we can await it before the final
-                # write — asyncio.create_task schedules but does not run until
-                # the event loop yields, so without explicitly awaiting these,
-                # the final "done" write could acquire the lock and complete
-                # before any of the mid-pipeline writes get scheduled to run.
-                state.pending_persists.append(
-                    asyncio.create_task(_persist_status(state, status, last_agent))
-                )
+                # Stop after end_wave
+                if end_wave is not None and wave_num > end_wave:
+                    break
 
-            return _on_status
+                # Initialize state for this wave
+                # --task: filtered-out tasks are excluded entirely
+                # --only-incomplete: completed tasks are pre-marked DONE
+                wave_states: list[TaskState] = []
+                for task in wave:
+                    if filtered_task_ids is not None and task.id not in filtered_task_ids:
+                        continue
+                    state = TaskState(task=task)
+                    state.wave_num = wave_num
+                    if task.id in skipped_task_ids:
+                        state.status = TaskStatus.DONE
+                    wave_states.append(state)
+                    all_states.append(state)
+                    state_map[task.id] = state
 
-        # Run tasks concurrently with semaphore
-        sem = asyncio.Semaphore(max_concurrent)
-
-        async def _run_task(state: TaskState):
-            if state.status in (TaskStatus.FAILED, TaskStatus.DONE):
-                return
-
-            async with sem:
-                state.started_at = time.time()
-                state.status = TaskStatus.IMPLEMENTING
-
-                results = await run_pipeline(
-                    task=state.task,
-                    worktree=state.worktree,
-                    repo=repo,
-                    skip_test=skip_test,
-                    skip_review=skip_review,
-                    max_retries=max_retries,
-                    agent_cmd=agent_cmd,
-                    on_status_change=_make_callback(state),
-                    session_branch=session_branch,
-                    plan_context=plan.context,
-                    plan_conventions=plan.conventions,
-                    directives=directives,
-                    use_tmux=use_tmux,
-                    tdd=tdd,
-                    profile=profile,
-                    agents_config_paths=agents_config_paths,
-                )
-
-                state.results = results
-                state.finished_at = time.time()
-
-                # Final status based on last result
-                if any(
-                    r.role in (Role.TESTER, Role.REVIEWER) and not r.passed and r == results[-1]
-                    for r in results
-                ):
-                    state.status = TaskStatus.FAILED
-                elif any(r.status == TaskStatus.FAILED for r in results):
-                    state.status = TaskStatus.FAILED
-                else:
-                    state.status = TaskStatus.DONE
-
-                # Drain any in-flight mid-pipeline persists so the final
-                # update_task below is guaranteed to be the last write.
-                if state.pending_persists:
-                    await asyncio.gather(*state.pending_persists, return_exceptions=True)
-                    state.pending_persists.clear()
-
-                # Persist task outcome immediately (lock-protected for concurrency)
-                await session_status.update_task(
-                    repo=repo,
-                    task_id=state.task.id,
-                    status=state.status.value,
-                    branch=state.worktree.branch if state.worktree else None,
-                    last_agent=results[-1].role.value if results else "",
-                )
-
-        # Run with live status display
-        tasks = [_run_task(s) for s in wave_states]
-
-        with Live(_status_table(all_states), console=console, refresh_per_second=1) as live:
-
-            async def _update_display():
-                while not all(
-                    s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in wave_states
-                ):
-                    live.update(_status_table(all_states))
-                    await asyncio.sleep(1)
-                live.update(_status_table(all_states))
-
-            await asyncio.gather(*tasks, _update_display())
-
-        # After the wave: merge all successful task branches into the session branch
-        # Exclude tasks that were pre-skipped by --only-incomplete (no worktree)
-        done_states = [
-            s for s in wave_states if s.status == TaskStatus.DONE and s.worktree is not None
-        ]
-        if done_states:
-            console.print(
-                f"\n[bold]Merging {len(done_states)} branch(es) into {session_branch}...[/bold]\n"
-            )
-
-            for state in done_states:
-                result = merge_into_session(repo, session_branch, state.worktree.branch)
-                if result.success:
-                    console.print(f"  [green]✓[/green] {state.worktree.branch} — {result.message}")
-                    await session_status.update_merged(repo, state.task.id)
-                    if not keep_branches:
-                        delete_branch(repo, state.worktree.branch)
-                elif result.conflicts and result.merge_dir:
-                    # Conflicts detected — dispatch merge resolver agent
-                    console.print(
-                        f"  [blue]⚡[/blue] {state.worktree.branch} — "
-                        f"{result.message} Resolving..."
-                    )
-                    for cf in result.conflicts:
-                        console.print(f"      [dim]{cf}[/dim]")
-
-                    state.status = TaskStatus.MERGING
-
-                    resolver_result = await run_merge_resolver(
-                        task_branch=state.worktree.branch,
-                        session_branch=session_branch,
-                        merge_dir=result.merge_dir,
-                        conflicts=result.conflicts,
-                        repo=repo,
-                        agent_cmd=agent_cmd,
-                        agents_config_paths=agents_config_paths,
-                    )
-                    state.results.append(resolver_result)
-
-                    if resolver_result.passed:
-                        # Resolver succeeded — complete the merge
-                        merge_finish = complete_merge(
-                            result.merge_dir,
-                            repo,
-                            session_branch,
-                            state.worktree.branch,
-                        )
-                        if merge_finish.success:
-                            console.print(
-                                f"  [green]✓[/green] {state.worktree.branch} — "
-                                f"{merge_finish.message}"
-                            )
-                            state.status = TaskStatus.DONE
-                            await session_status.update_merged(repo, state.task.id)
-                            if not keep_branches:
-                                delete_branch(repo, state.worktree.branch)
-                        else:
-                            console.print(
-                                f"  [red]✗[/red] {state.worktree.branch} — "
-                                f"{merge_finish.message}"
-                            )
-                            cleanup_merge_worktree(repo, result.merge_dir)
-                            state.status = TaskStatus.FAILED
+                # Create worktrees for all tasks in wave, branching from session branch
+                # Skip tasks pre-marked DONE by --only-incomplete
+                for state in wave_states:
+                    if state.status == TaskStatus.DONE:
+                        continue
+                    # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
+                    old_worktree_path = repo / ".workbench" / plan_slug / state.task.id
+                    if old_worktree_path.exists():
+                        Worktree(
+                            path=old_worktree_path,
+                            branch=f"wb/{state.task.slug}",
+                            task_id=state.task.id,
+                        ).cleanup()
                     else:
-                        # Resolver failed — abort and mark failed
-                        console.print(
-                            f"  [red]✗[/red] {state.worktree.branch} — " f"Merge resolver failed"
-                        )
-                        cleanup_merge_worktree(repo, result.merge_dir)
-                        state.status = TaskStatus.FAILED
-                else:
-                    console.print(f"  [red]✗[/red] {state.worktree.branch} — {result.message}")
-                    if result.conflicts:
-                        for cf in result.conflicts:
-                            console.print(f"      [dim]{cf}[/dim]")
-                    state.status = TaskStatus.FAILED
-
-            console.print()
-
-        # --retry-failed: re-run tasks that failed due to transient errors.
-        # A task is retryable if it crashed before exhausting its fix cycles
-        # (i.e. fix_count < max_retries). Tasks that went through all retries
-        # and still failed need human intervention, not another blind run.
-        if retry_failed:
-            retryable = [
-                s
-                for s in wave_states
-                if s.status == TaskStatus.FAILED
-                and s.worktree is not None
-                and s.fix_count < max_retries
-            ]
-
-            if retryable:
-                console.print(
-                    f"[bold yellow]Retrying {len(retryable)} failed task(s)...[/bold yellow]\n"
-                )
-
-                # Reset state for retry
-                for state in retryable:
-                    state.status = TaskStatus.PENDING
-                    state.results.clear()
-                    state.started_at = None
-                    state.finished_at = None
-
-                    # Clean up old worktree and branch, create fresh ones
-                    if state.worktree:
-                        state.worktree.cleanup()
-                        state.worktree = None
+                        delete_branch(repo, f"wb/{state.task.slug}")
                     try:
                         wt = create_worktree(
                             repo,
@@ -605,59 +356,285 @@ async def run_plan(
                                 task_id=state.task.id,
                                 role=Role.IMPLEMENTOR,
                                 status=TaskStatus.FAILED,
-                                output=f"Retry worktree creation failed: {e}",
+                                output=f"Worktree creation failed: {e}",
                             )
                         )
 
-                retry_tasks = [_run_task(s) for s in retryable]
+                # Status callback so the pipeline can update our display state and
+                # persist the current phase to status.yaml at every handoff. Persisting
+                # mid-pipeline lets external observers (and post-crash inspection)
+                # see which agent a task got stuck on instead of seeing it stuck at
+                # "pending".
+                _status_to_agent: dict[TaskStatus, str] = {
+                    TaskStatus.IMPLEMENTING: Role.IMPLEMENTOR.value,
+                    TaskStatus.TESTING: Role.TESTER.value,
+                    TaskStatus.REVIEWING: Role.REVIEWER.value,
+                    TaskStatus.FIXING: Role.FIXER.value,
+                    TaskStatus.MERGING: Role.MERGER.value,
+                }
 
-                with Live(
-                    _status_table(all_states), console=console, refresh_per_second=1
-                ) as live:
+                async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
+                    try:
+                        # Preserve the existing `merged` flag — update_task replaces the
+                        # whole TaskRecord, so without this, a mid-pipeline write would
+                        # transiently wipe `merged: True` for tasks already merged on a
+                        # prior run (the wave's update_merged eventually restores it,
+                        # but the window is visible to external observers).
+                        existing = session_status.tasks.get(state.task.id)
+                        merged = existing.merged if existing else False
+                        await session_status.update_task(
+                            repo=repo,
+                            task_id=state.task.id,
+                            status=status.value,
+                            branch=state.worktree.branch if state.worktree else None,
+                            merged=merged,
+                            last_agent=last_agent,
+                        )
+                    except Exception as e:
+                        console.print(
+                            f"[dim red]status persist failed for {state.task.id}: {e}[/dim red]"
+                        )
 
-                    async def _update_retry_display():
-                        while not all(
-                            s.status in (TaskStatus.DONE, TaskStatus.FAILED) for s in retryable
+                def _make_callback(state: TaskState):
+                    def _on_status(task_id: str, status: TaskStatus):
+                        state.status = status
+                        # Only persist mid-pipeline phases. DONE/FAILED are written
+                        # authoritatively by the final update_task below using the
+                        # result list, so we leave those for the awaited write.
+                        last_agent = _status_to_agent.get(status)
+                        if last_agent is None:
+                            return
+                        # Track the persist task so we can await it before the final
+                        # write — asyncio.create_task schedules but does not run until
+                        # the event loop yields, so without explicitly awaiting these,
+                        # the final "done" write could acquire the lock and complete
+                        # before any of the mid-pipeline writes get scheduled to run.
+                        state.pending_persists.append(
+                            asyncio.create_task(_persist_status(state, status, last_agent))
+                        )
+
+                    return _on_status
+
+                # Run tasks concurrently with semaphore
+                sem = asyncio.Semaphore(max_concurrent)
+
+                async def _run_task(state: TaskState):
+                    if state.status in (TaskStatus.FAILED, TaskStatus.DONE):
+                        return
+
+                    async with sem:
+                        state.started_at = time.time()
+                        state.status = TaskStatus.IMPLEMENTING
+
+                        results = await run_pipeline(
+                            task=state.task,
+                            worktree=state.worktree,
+                            repo=repo,
+                            skip_test=skip_test,
+                            skip_review=skip_review,
+                            max_retries=max_retries,
+                            agent_cmd=agent_cmd,
+                            on_status_change=_make_callback(state),
+                            session_branch=session_branch,
+                            plan_context=plan.context,
+                            plan_conventions=plan.conventions,
+                            directives=directives,
+                            use_tmux=use_tmux,
+                            tdd=tdd,
+                            profile=profile,
+                            agents_config_paths=agents_config_paths,
+                        )
+
+                        state.results = results
+                        state.finished_at = time.time()
+
+                        # Final status based on last result
+                        if any(
+                            r.role in (Role.TESTER, Role.REVIEWER)
+                            and not r.passed
+                            and r == results[-1]
+                            for r in results
                         ):
-                            live.update(_status_table(all_states))
-                            await asyncio.sleep(1)
-                        live.update(_status_table(all_states))
-
-                    await asyncio.gather(*retry_tasks, _update_retry_display())
-
-                # Merge any newly successful retried tasks
-                retry_done = [s for s in retryable if s.status == TaskStatus.DONE]
-                if retry_done:
-                    console.print(
-                        f"\n[bold]Merging {len(retry_done)} retried branch(es) "
-                        f"into {session_branch}...[/bold]\n"
-                    )
-                    for state in retry_done:
-                        result = merge_into_session(repo, session_branch, state.worktree.branch)
-                        if result.success:
-                            console.print(
-                                f"  [green]✓[/green] {state.worktree.branch} — "
-                                f"{result.message}"
-                            )
-                            await session_status.update_merged(repo, state.task.id)
-                            if not keep_branches:
-                                delete_branch(repo, state.worktree.branch)
-                        else:
-                            console.print(
-                                f"  [red]✗[/red] {state.worktree.branch} — " f"{result.message}"
-                            )
                             state.status = TaskStatus.FAILED
-                    console.print()
+                        elif any(r.status == TaskStatus.FAILED for r in results):
+                            state.status = TaskStatus.FAILED
+                        else:
+                            state.status = TaskStatus.DONE
 
-        # --fail-fast: stop processing further waves if any task failed
-        if fail_fast:
-            wave_failed = [s for s in wave_states if s.status == TaskStatus.FAILED]
-            if wave_failed:
-                console.print(
-                    f"[bold red]--fail-fast: {len(wave_failed)} task(s) failed in "
-                    f"wave {wave_num}, stopping.[/bold red]\n"
-                )
-                break
+                        # Drain any in-flight mid-pipeline persists so the final
+                        # update_task below is guaranteed to be the last write.
+                        if state.pending_persists:
+                            await asyncio.gather(*state.pending_persists, return_exceptions=True)
+                            state.pending_persists.clear()
+
+                        # Persist task outcome immediately (lock-protected for concurrency)
+                        await session_status.update_task(
+                            repo=repo,
+                            task_id=state.task.id,
+                            status=state.status.value,
+                            branch=state.worktree.branch if state.worktree else None,
+                            last_agent=results[-1].role.value if results else "",
+                        )
+
+                # Run wave tasks; the outer refresh coroutine drives display updates.
+                tasks = [_run_task(s) for s in wave_states]
+                await asyncio.gather(*tasks)
+
+                # After the wave: merge all successful task branches into the session
+                # branch. Exclude tasks pre-skipped by --only-incomplete (no worktree).
+                done_states = [
+                    s
+                    for s in wave_states
+                    if s.status == TaskStatus.DONE and s.worktree is not None
+                ]
+                for state in done_states:
+                    result = merge_into_session(repo, session_branch, state.worktree.branch)
+                    if result.success:
+                        state.merged = True
+                        await session_status.update_merged(repo, state.task.id)
+                        if not keep_branches:
+                            delete_branch(repo, state.worktree.branch)
+                    elif result.conflicts and result.merge_dir:
+                        # Conflicts detected — dispatch merge resolver agent
+                        console.print(
+                            f"  [blue]⚡[/blue] {state.worktree.branch} — "
+                            f"{result.message} Resolving..."
+                        )
+                        for cf in result.conflicts:
+                            console.print(f"      [dim]{cf}[/dim]")
+
+                        state.status = TaskStatus.MERGING
+
+                        resolver_result = await run_merge_resolver(
+                            task_branch=state.worktree.branch,
+                            session_branch=session_branch,
+                            merge_dir=result.merge_dir,
+                            conflicts=result.conflicts,
+                            repo=repo,
+                            agent_cmd=agent_cmd,
+                            agents_config_paths=agents_config_paths,
+                        )
+                        state.results.append(resolver_result)
+
+                        if resolver_result.passed:
+                            # Resolver succeeded — complete the merge
+                            merge_finish = complete_merge(
+                                result.merge_dir,
+                                repo,
+                                session_branch,
+                                state.worktree.branch,
+                            )
+                            if merge_finish.success:
+                                console.print(
+                                    f"  [green]✓[/green] {state.worktree.branch} — "
+                                    f"{merge_finish.message}"
+                                )
+                                state.status = TaskStatus.DONE
+                                state.merged = True
+                                await session_status.update_merged(repo, state.task.id)
+                                if not keep_branches:
+                                    delete_branch(repo, state.worktree.branch)
+                            else:
+                                console.print(
+                                    f"  [red]✗[/red] {state.worktree.branch} — "
+                                    f"{merge_finish.message}"
+                                )
+                                cleanup_merge_worktree(repo, result.merge_dir)
+                                state.status = TaskStatus.FAILED
+                                state.merge_error = True
+                        else:
+                            # Resolver failed — abort and mark failed
+                            console.print(
+                                f"  [red]✗[/red] {state.worktree.branch} — "
+                                f"Merge resolver failed"
+                            )
+                            cleanup_merge_worktree(repo, result.merge_dir)
+                            state.status = TaskStatus.FAILED
+                            state.merge_error = True
+                    else:
+                        state.status = TaskStatus.FAILED
+                        state.merge_error = True
+
+                # --retry-failed: re-run tasks that failed due to transient errors.
+                # A task is retryable if it crashed before exhausting its fix cycles
+                # (i.e. fix_count < max_retries). Tasks that went through all retries
+                # and still failed need human intervention, not another blind run.
+                if retry_failed:
+                    retryable = [
+                        s
+                        for s in wave_states
+                        if s.status == TaskStatus.FAILED
+                        and s.worktree is not None
+                        and s.fix_count < max_retries
+                    ]
+
+                    if retryable:
+                        console.print(
+                            f"[bold yellow]Retrying {len(retryable)} failed task(s)...[/bold yellow]"
+                        )
+
+                        # Reset state for retry
+                        for state in retryable:
+                            state.status = TaskStatus.PENDING
+                            state.results.clear()
+                            state.started_at = None
+                            state.finished_at = None
+                            state.merge_error = False
+
+                            # Clean up old worktree and branch, create fresh ones
+                            if state.worktree:
+                                state.worktree.cleanup()
+                                state.worktree = None
+                            try:
+                                wt = create_worktree(
+                                    repo,
+                                    state.task.id,
+                                    state.task.slug,
+                                    plan_slug=plan_slug,
+                                    base_branch=session_branch,
+                                )
+                                state.worktree = wt
+                            except Exception as e:
+                                state.status = TaskStatus.FAILED
+                                state.results.append(
+                                    AgentResult(
+                                        task_id=state.task.id,
+                                        role=Role.IMPLEMENTOR,
+                                        status=TaskStatus.FAILED,
+                                        output=f"Retry worktree creation failed: {e}",
+                                    )
+                                )
+
+                        retry_tasks = [_run_task(s) for s in retryable]
+                        await asyncio.gather(*retry_tasks)
+
+                        # Merge any newly successful retried tasks
+                        retry_done = [s for s in retryable if s.status == TaskStatus.DONE]
+                        for state in retry_done:
+                            result = merge_into_session(
+                                repo, session_branch, state.worktree.branch
+                            )
+                            if result.success:
+                                state.merged = True
+                                await session_status.update_merged(repo, state.task.id)
+                                if not keep_branches:
+                                    delete_branch(repo, state.worktree.branch)
+                            else:
+                                state.status = TaskStatus.FAILED
+                                state.merge_error = True
+
+                # --fail-fast: stop processing further waves if any task failed
+                if fail_fast:
+                    wave_failed = [s for s in wave_states if s.status == TaskStatus.FAILED]
+                    if wave_failed:
+                        console.print(
+                            f"[bold red]--fail-fast: {len(wave_failed)} task(s) failed in "
+                            f"wave {wave_num}, stopping.[/bold red]"
+                        )
+                        break
+        finally:
+            shutdown.set()
+            await refresh_task
 
     # Summary
     console.print("\n[bold]━━━ Summary ━━━[/bold]\n")

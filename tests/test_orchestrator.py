@@ -1580,6 +1580,66 @@ def test_status_table_renders_merge_error_row():
     assert _cell_text(table, 3, 0) == "-"
 
 
+@pytest.mark.asyncio
+async def test_merge_success_sets_state_merged(tmp_path):
+    """A successful merge should flip state.merged on the TaskState."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert len(results) == 1
+    assert results[0].status == TaskStatus.DONE
+    assert results[0].merged is True
+    assert results[0].merge_error is False
+    assert results[0].wave_num == 1
+
+
+@pytest.mark.asyncio
+async def test_merge_failure_sets_state_merge_error(tmp_path):
+    """A failed no-conflict merge should flip state.merge_error on the TaskState."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(
+            success=False, message="merge refused", conflicts=None, merge_dir=None
+        )
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert len(results) == 1
+    assert results[0].status == TaskStatus.FAILED
+    assert results[0].merged is False
+    assert results[0].merge_error is True
+
+
 def test_status_table_renders_pending_row():
     state = TaskState(
         task=SimpleNamespace(title="t3"),
