@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus
-from workbench.orchestrator import merge_unmerged, run_plan
+from workbench.orchestrator import TaskState, merge_unmerged, run_plan
 from workbench.plan_parser import Plan, Task
 from workbench.profile import Profile
 from workbench.session_status import SessionStatus
@@ -1482,3 +1482,45 @@ async def test_status_persist_failure_does_not_crash_pipeline(tmp_path):
 
     # At least one persist was attempted
     assert call_count["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TaskState.phase_summary in-progress entries and new fields
+# ---------------------------------------------------------------------------
+
+
+def _dummy_task(task_id: str = "t1") -> Task:
+    return Task(id=task_id, title="T", description="d", files=[], depends_on=[])
+
+
+def test_phase_summary_in_progress_implementing():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.IMPLEMENTING)
+    assert state.phase_summary == "impl…"
+
+
+def test_phase_summary_in_progress_appended_to_completed():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.TESTING)
+    state.results.append(
+        AgentResult(task_id="t1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="")
+    )
+    assert state.phase_summary == "impl:ok → test…"
+
+
+def test_phase_summary_terminal_status_no_suffix():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.DONE)
+    state.results.append(
+        AgentResult(task_id="t1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="")
+    )
+    assert state.phase_summary == "impl:ok"
+
+
+def test_phase_summary_pending_is_empty():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.PENDING)
+    assert state.phase_summary == ""
+
+
+def test_taskstate_new_fields_have_safe_defaults():
+    state = TaskState(task=_dummy_task())
+    assert state.wave_num == 0
+    assert state.merged is False
+    assert state.merge_error is False

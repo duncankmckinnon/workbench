@@ -41,6 +41,9 @@ class TaskState:
     started_at: float | None = None
     finished_at: float | None = None
     pending_persists: list[asyncio.Task] = field(default_factory=list)
+    wave_num: int = 0
+    merged: bool = False
+    merge_error: bool = False
 
     @property
     def elapsed(self) -> str:
@@ -59,9 +62,6 @@ class TaskState:
     @property
     def phase_summary(self) -> str:
         """Short summary of where we are in the pipeline."""
-        if not self.results:
-            return ""
-
         phases = []
         for r in self.results:
             if r.role == Role.IMPLEMENTOR:
@@ -82,6 +82,16 @@ class TaskState:
                     phases.append("review:crash")
                 else:
                     phases.append(f"review:fail")
+
+        in_progress = {
+            TaskStatus.IMPLEMENTING: "impl…",
+            TaskStatus.TESTING: "test…",
+            TaskStatus.REVIEWING: "review…",
+            TaskStatus.FIXING: "fix…",
+            TaskStatus.MERGING: "merge…",
+        }
+        if self.status in in_progress:
+            phases.append(in_progress[self.status])
 
         return " → ".join(phases)
 
