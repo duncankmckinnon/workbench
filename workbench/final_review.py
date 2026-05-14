@@ -23,6 +23,7 @@ from workbench.pr_writer import (
 )
 from workbench.session_status import FinalReviewRecord, SessionStatus
 from workbench.tmux import run_in_tmux
+from workbench.worktree import push_session_branch
 
 if TYPE_CHECKING:
     from workbench.profile import Profile
@@ -314,6 +315,12 @@ async def _run_review_sequence(
                 body = derive_body_from_plan(plan_content, merged_task_titles, rel_report)
 
         base = pr_base or base_branch
+        push_ok, push_msg = push_session_branch(repo, session_branch)
+        if not push_ok:
+            console.print(
+                f"[yellow]Could not push {session_branch} before opening PR: "
+                f"{push_msg}[/yellow]"
+            )
         success, result_msg = await create_pr(repo, session_branch, base, title, body)
         if success:
             pr_url = result_msg

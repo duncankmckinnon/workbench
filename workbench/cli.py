@@ -37,7 +37,7 @@ from .pr_writer import PrWriterError, derive_body_from_plan, derive_title_from_p
 from .profile import ModeConfig, Profile, RoleConfig
 from .session_status import FinalReviewRecord, SessionStatus
 from .tmux import check_tmux_available
-from .worktree import iter_worktree_dirs
+from .worktree import iter_worktree_dirs, push_session_branch
 
 # Maps role name to the Directive class whose DEFAULT_TEXT seeds the role.
 _ROLE_DIRECTIVE_CLASSES = {
@@ -2224,6 +2224,9 @@ def pull_request_cmd(
             body = derive_body_from_plan(plan_text, merged_titles, report_path=None)
 
     base = pr_base or base_branch
+    push_ok, push_msg = push_session_branch(repo, session)
+    if not push_ok:
+        console.print(f"[yellow]Could not push {session} before opening PR: {push_msg}[/yellow]")
     success, message = asyncio.run(create_pr(repo, session, base, title, body))
 
     console.print(f"[bold]Title:[/bold] {title}")
