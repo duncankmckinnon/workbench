@@ -1524,3 +1524,72 @@ def test_taskstate_new_fields_have_safe_defaults():
     assert state.wave_num == 0
     assert state.merged is False
     assert state.merge_error is False
+
+
+# ---------------------------------------------------------------------------
+# _status_table columns
+# ---------------------------------------------------------------------------
+
+
+from types import SimpleNamespace
+
+from workbench.orchestrator import _status_table
+
+
+def _cell_text(table, col_index: int, row_index: int) -> str:
+    cell = list(table.columns[col_index].cells)[row_index]
+    return cell.plain if hasattr(cell, "plain") else str(cell)
+
+
+def test_status_table_columns():
+    table = _status_table([])
+    assert [col.header for col in table.columns] == [
+        "Task",
+        "Wave",
+        "Status",
+        "Branch",
+        "Time",
+        "Pipeline",
+        "Merged",
+    ]
+
+
+def test_status_table_renders_merged_row(tmp_path):
+    state = TaskState(
+        task=SimpleNamespace(title="t1"),
+        wave_num=1,
+        merged=True,
+        worktree=SimpleNamespace(branch="wb/foo", path=tmp_path / "x", task_id="t1"),
+    )
+    table = _status_table([state])
+    # Branch column (index 3)
+    assert "wb/foo" in _cell_text(table, 3, 0)
+    # Merged column (index 6)
+    assert _cell_text(table, 6, 0) == "✓"
+
+
+def test_status_table_renders_merge_error_row():
+    state = TaskState(
+        task=SimpleNamespace(title="t2"),
+        wave_num=2,
+        merge_error=True,
+        worktree=None,
+    )
+    table = _status_table([state])
+    assert _cell_text(table, 6, 0) == "✗"
+    assert _cell_text(table, 3, 0) == "-"
+
+
+def test_status_table_renders_pending_row():
+    state = TaskState(
+        task=SimpleNamespace(title="t3"),
+        wave_num=0,
+        merged=False,
+        merge_error=False,
+        worktree=None,
+    )
+    table = _status_table([state])
+    # Wave (1), Branch (3), Merged (6)
+    assert _cell_text(table, 1, 0) == "-"
+    assert _cell_text(table, 3, 0) == "-"
+    assert _cell_text(table, 6, 0) == "-"
