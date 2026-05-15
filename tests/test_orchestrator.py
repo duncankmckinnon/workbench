@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus
-from workbench.orchestrator import merge_unmerged, run_plan
+from workbench.orchestrator import TaskState, merge_unmerged, run_plan
 from workbench.plan_parser import Plan, Task
 from workbench.profile import Profile
 from workbench.session_status import SessionStatus
@@ -1482,3 +1482,174 @@ async def test_status_persist_failure_does_not_crash_pipeline(tmp_path):
 
     # At least one persist was attempted
     assert call_count["n"] > 0
+
+
+# ---------------------------------------------------------------------------
+# TaskState.phase_summary in-progress entries and new fields
+# ---------------------------------------------------------------------------
+
+
+def _dummy_task(task_id: str = "t1") -> Task:
+    return Task(id=task_id, title="T", description="d", files=[], depends_on=[])
+
+
+def test_phase_summary_in_progress_implementing():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.IMPLEMENTING)
+    assert state.phase_summary == "impl…"
+
+
+def test_phase_summary_in_progress_appended_to_completed():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.TESTING)
+    state.results.append(
+        AgentResult(task_id="t1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="")
+    )
+    assert state.phase_summary == "impl:ok → test…"
+
+
+def test_phase_summary_terminal_status_no_suffix():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.DONE)
+    state.results.append(
+        AgentResult(task_id="t1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="")
+    )
+    assert state.phase_summary == "impl:ok"
+
+
+def test_phase_summary_pending_is_empty():
+    state = TaskState(task=_dummy_task(), status=TaskStatus.PENDING)
+    assert state.phase_summary == ""
+
+
+def test_taskstate_new_fields_have_safe_defaults():
+    state = TaskState(task=_dummy_task())
+    assert state.wave_num == 0
+    assert state.merged is False
+    assert state.merge_error is False
+
+
+# ---------------------------------------------------------------------------
+# _status_table columns
+# ---------------------------------------------------------------------------
+
+
+from types import SimpleNamespace
+
+from workbench.orchestrator import _status_table
+
+
+def _cell_text(table, col_index: int, row_index: int) -> str:
+    cell = list(table.columns[col_index].cells)[row_index]
+    return cell.plain if hasattr(cell, "plain") else str(cell)
+
+
+def test_status_table_columns():
+    table = _status_table([])
+    assert [col.header for col in table.columns] == [
+        "Task",
+        "Wave",
+        "Status",
+        "Branch",
+        "Time",
+        "Pipeline",
+        "Merged",
+    ]
+
+
+def test_status_table_renders_merged_row(tmp_path):
+    state = TaskState(
+        task=SimpleNamespace(title="t1"),
+        wave_num=1,
+        merged=True,
+        worktree=SimpleNamespace(branch="wb/foo", path=tmp_path / "x", task_id="t1"),
+    )
+    table = _status_table([state])
+    # Branch column (index 3)
+    assert "wb/foo" in _cell_text(table, 3, 0)
+    # Merged column (index 6)
+    assert _cell_text(table, 6, 0) == "✓"
+
+
+def test_status_table_renders_merge_error_row():
+    state = TaskState(
+        task=SimpleNamespace(title="t2"),
+        wave_num=2,
+        merge_error=True,
+        worktree=None,
+    )
+    table = _status_table([state])
+    assert _cell_text(table, 6, 0) == "✗"
+    assert _cell_text(table, 3, 0) == "-"
+
+
+@pytest.mark.asyncio
+async def test_merge_success_sets_state_merged(tmp_path):
+    """A successful merge should flip state.merged on the TaskState."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert len(results) == 1
+    assert results[0].status == TaskStatus.DONE
+    assert results[0].merged is True
+    assert results[0].merge_error is False
+    assert results[0].wave_num == 1
+
+
+@pytest.mark.asyncio
+async def test_merge_failure_sets_state_merge_error(tmp_path):
+    """A failed no-conflict merge should flip state.merge_error on the TaskState."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(
+            success=False, message="merge refused", conflicts=None, merge_dir=None
+        )
+
+        results = await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert len(results) == 1
+    assert results[0].status == TaskStatus.FAILED
+    assert results[0].merged is False
+    assert results[0].merge_error is True
+
+
+def test_status_table_renders_pending_row():
+    state = TaskState(
+        task=SimpleNamespace(title="t3"),
+        wave_num=0,
+        merged=False,
+        merge_error=False,
+        worktree=None,
+    )
+    table = _status_table([state])
+    # Wave (1), Branch (3), Merged (6)
+    assert _cell_text(table, 1, 0) == "-"
+    assert _cell_text(table, 3, 0) == "-"
+    assert _cell_text(table, 6, 0) == "-"
