@@ -2650,7 +2650,9 @@ BUILTIN_AGENTS = {
 }
 
 
-def _agents_yaml_path(repo: Path) -> Path:
+def _resolve_agents_yaml_path(repo: Path, plan_slug: str | None) -> Path:
+    if plan_slug:
+        return repo / ".workbench" / plan_slug / "agents.yaml"
     return repo / ".workbench" / "agents.yaml"
 
 
@@ -2666,19 +2668,36 @@ def _save_agents_yaml(path: Path, data: dict) -> None:
 
 
 @main.group()
-def agents():
+@click.option(
+    "--plan",
+    "plan_slug",
+    type=str,
+    default=None,
+    help="Target a plan's agents.yaml (.workbench/<plan>/agents.yaml).",
+)
+@click.pass_context
+def agents(ctx, plan_slug):
     """Manage agent adapters (.workbench/agents.yaml)."""
-    pass
+    ctx.ensure_object(dict)
+    ctx.obj["plan_slug"] = plan_slug
 
 
 @agents.command("init")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def agents_init(repo: Path | None):
+@click.pass_context
+def agents_init(ctx, repo: Path | None):
     """Create agents.yaml with the default built-in agent configs."""
     from .adapters import default_agents_config
 
     repo = repo or _find_repo_root()
-    config_path = _agents_yaml_path(repo)
+    plan_slug = ctx.obj.get("plan_slug")
+
+    if plan_slug:
+        plan_dir = repo / ".workbench" / plan_slug
+        if not plan_dir.exists():
+            raise click.ClickException(f"Plan directory does not exist: {plan_dir}")
+
+    config_path = _resolve_agents_yaml_path(repo, plan_slug)
 
     if config_path.exists():
         if not click.confirm(f"{config_path} already exists. Overwrite?"):
@@ -2691,10 +2710,12 @@ def agents_init(repo: Path | None):
 
 @agents.command("list")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def agents_list(repo: Path | None):
+@click.pass_context
+def agents_list(ctx, repo: Path | None):
     """List built-in and configured agents."""
     repo = repo or _find_repo_root()
-    config_path = _agents_yaml_path(repo)
+    plan_slug = ctx.obj.get("plan_slug")
+    config_path = _resolve_agents_yaml_path(repo, plan_slug)
     custom = _load_agents_yaml(config_path).get("agents", {})
 
     console.print("[bold]Built-in agents:[/bold]")
@@ -2702,7 +2723,11 @@ def agents_list(repo: Path | None):
         console.print(f"  {name:<12} {desc}")
 
     if custom:
-        console.print(f"\n[bold]Custom agents[/bold] ({config_path}):")
+        if plan_slug:
+            label = f"Plan agents ({plan_slug})"
+        else:
+            label = "Custom agents"
+        console.print(f"\n[bold]{label}[/bold] ({config_path}):")
         for name, entry in custom.items():
             cmd = entry.get("command", name)
             fmt = entry.get("output_format", "text")
@@ -2714,9 +2739,11 @@ def agents_list(repo: Path | None):
 @agents.command("show")
 @click.argument("name")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def agents_show(name: str, repo: Path | None):
+@click.pass_context
+def agents_show(ctx, name: str, repo: Path | None):
     """Show details for an agent adapter."""
     repo = repo or _find_repo_root()
+    plan_slug = ctx.obj.get("plan_slug")
 
     if name in BUILTIN_AGENTS:
         console.print(f"[bold]{name}[/bold] (built-in)")
@@ -2724,7 +2751,7 @@ def agents_show(name: str, repo: Path | None):
         console.print(f"  Type: built-in adapter")
         return
 
-    config_path = _agents_yaml_path(repo)
+    config_path = _resolve_agents_yaml_path(repo, plan_slug)
     custom = _load_agents_yaml(config_path).get("agents", {})
 
     if name not in custom:
@@ -2758,7 +2785,9 @@ def agents_show(name: str, repo: Path | None):
 @click.option("--json-result-key", default="result", help="JSON key for result (default: result).")
 @click.option("--json-cost-key", default="cost_usd", help="JSON key for cost (default: cost_usd).")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+@click.pass_context
 def agents_add(
+    ctx,
     name: str,
     cmd: str,
     args: str,
@@ -2769,7 +2798,8 @@ def agents_add(
 ):
     """Add or update a custom agent adapter."""
     repo = repo or _find_repo_root()
-    config_path = _agents_yaml_path(repo)
+    plan_slug = ctx.obj.get("plan_slug")
+    config_path = _resolve_agents_yaml_path(repo, plan_slug)
     data = _load_agents_yaml(config_path)
 
     if "agents" not in data:
@@ -2796,10 +2826,12 @@ def agents_add(
 @agents.command("remove")
 @click.argument("name")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
-def agents_remove(name: str, repo: Path | None):
+@click.pass_context
+def agents_remove(ctx, name: str, repo: Path | None):
     """Remove a custom agent adapter."""
     repo = repo or _find_repo_root()
-    config_path = _agents_yaml_path(repo)
+    plan_slug = ctx.obj.get("plan_slug")
+    config_path = _resolve_agents_yaml_path(repo, plan_slug)
     data = _load_agents_yaml(config_path)
 
     agents_cfg = data.get("agents", {})
