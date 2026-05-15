@@ -136,6 +136,7 @@ async def run_pipeline(
     max_retries: int = 2,
     agent_cmd: str = "claude",
     on_status_change: callable = None,
+    on_result: callable = None,
     session_branch: str | None = None,
     plan_context: str = "",
     plan_conventions: str = "",
@@ -184,6 +185,11 @@ async def run_pipeline(
         if on_status_change:
             on_status_change(task.id, status)
 
+    def _record(result: AgentResult):
+        results.append(result)
+        if on_result:
+            on_result(result)
+
     def _agent_for(role: Role) -> str:
         """Resolve effective agent_cmd for a role."""
         if profile and agent_cmd == "claude":
@@ -224,7 +230,7 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(test_write_result)
+        _record(test_write_result)
 
         if test_write_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
@@ -243,7 +249,7 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(impl_result)
+        _record(impl_result)
 
         if impl_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
@@ -268,7 +274,7 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(impl_result)
+        _record(impl_result)
 
         if impl_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
@@ -290,7 +296,7 @@ async def run_pipeline(
                 agents_config_paths=agents_config_paths,
             )
             test_result.attempt = attempt
-            results.append(test_result)
+            _record(test_result)
 
             if test_result.status == TaskStatus.FAILED:
                 # Agent itself crashed — don't retry
@@ -319,7 +325,7 @@ async def run_pipeline(
                     agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
-                results.append(fix_result)
+                _record(fix_result)
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)
@@ -365,7 +371,7 @@ async def run_pipeline(
                 agents_config_paths=agents_config_paths,
             )
             review_result.attempt = attempt
-            results.append(review_result)
+            _record(review_result)
 
             if review_result.status == TaskStatus.FAILED:
                 _notify(TaskStatus.FAILED)
@@ -396,7 +402,7 @@ async def run_pipeline(
                     agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
-                results.append(fix_result)
+                _record(fix_result)
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)

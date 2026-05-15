@@ -28,6 +28,7 @@ class TaskRecord:
     branch: str | None = None
     merged: bool = False
     last_agent: str = ""
+    completed_stages: list[str] = field(default_factory=list)
 
     def to_dict(self) -> dict:
         return {
@@ -35,6 +36,7 @@ class TaskRecord:
             "branch": self.branch,
             "merged": self.merged,
             "last_agent": self.last_agent,
+            "completed_stages": list(self.completed_stages),
         }
 
     @classmethod
@@ -44,6 +46,7 @@ class TaskRecord:
             branch=data.get("branch"),
             merged=data.get("merged", False),
             last_agent=data.get("last_agent", ""),
+            completed_stages=list(data.get("completed_stages", [])),
         )
 
 
@@ -158,10 +161,11 @@ class SessionStatus:
         branch: str | None = None,
         merged: bool = False,
         last_agent: str = "",
+        completed_stages: list[str] | None = None,
     ) -> None:
         """Atomically record a task and save to disk under a lock."""
         async with self._lock:
-            self.record_task(task_id, status, branch, merged, last_agent)
+            self.record_task(task_id, status, branch, merged, last_agent, completed_stages)
             self.save(repo)
 
     async def update_merged(self, repo: Path, task_id: str) -> None:
@@ -280,12 +284,17 @@ class SessionStatus:
         branch: str | None = None,
         merged: bool = False,
         last_agent: str = "",
+        completed_stages: list[str] | None = None,
     ) -> None:
+        if completed_stages is None:
+            existing = self.tasks.get(task_id)
+            completed_stages = list(existing.completed_stages) if existing else []
         self.tasks[task_id] = TaskRecord(
             status=status,
             branch=branch,
             merged=merged,
             last_agent=last_agent,
+            completed_stages=list(completed_stages),
         )
 
     def mark_merged(self, task_id: str) -> None:

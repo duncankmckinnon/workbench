@@ -373,6 +373,26 @@ async def run_plan(
                     TaskStatus.MERGING: Role.MERGER.value,
                 }
 
+                def _completed_stages(results: list[AgentResult]) -> list[str]:
+                    """Pipeline stages that have completed successfully, post fixer invalidation.
+
+                    A fixer edits code on top of impl, invalidating any earlier test/review
+                    pass — those passes must be re-run before they're trusted again.
+                    """
+                    trusted: set[str] = set()
+                    for r in results:
+                        if r.role == Role.IMPLEMENTOR and r.status != TaskStatus.FAILED:
+                            trusted.add(Role.IMPLEMENTOR.value)
+                        elif r.role == Role.TESTER and r.passed:
+                            trusted.add(Role.TESTER.value)
+                        elif r.role == Role.REVIEWER and r.passed:
+                            trusted.add(Role.REVIEWER.value)
+                        elif r.role == Role.FIXER:
+                            trusted.discard(Role.TESTER.value)
+                            trusted.discard(Role.REVIEWER.value)
+                    order = [Role.IMPLEMENTOR.value, Role.TESTER.value, Role.REVIEWER.value]
+                    return [v for v in order if v in trusted]
+
                 async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
                     try:
                         # Preserve the existing `merged` flag — update_task replaces the
@@ -389,6 +409,7 @@ async def run_plan(
                             branch=state.worktree.branch if state.worktree else None,
                             merged=merged,
                             last_agent=last_agent,
+                            completed_stages=_completed_stages(state.results),
                         )
                     except Exception as e:
                         console.print(
@@ -426,6 +447,15 @@ async def run_plan(
                         state.started_at = time.time()
                         state.status = TaskStatus.IMPLEMENTING
 
+                        def _on_result(r: AgentResult, _state=state):
+                            _state.results.append(r)
+                            last_agent = r.role.value
+                            _state.pending_persists.append(
+                                asyncio.create_task(
+                                    _persist_status(_state, _state.status, last_agent)
+                                )
+                            )
+
                         results = await run_pipeline(
                             task=state.task,
                             worktree=state.worktree,
@@ -435,6 +465,7 @@ async def run_plan(
                             max_retries=max_retries,
                             agent_cmd=agent_cmd,
                             on_status_change=_make_callback(state),
+                            on_result=_on_result,
                             session_branch=session_branch,
                             plan_context=plan.context,
                             plan_conventions=plan.conventions,
@@ -474,6 +505,7 @@ async def run_plan(
                             status=state.status.value,
                             branch=state.worktree.branch if state.worktree else None,
                             last_agent=results[-1].role.value if results else "",
+                            completed_stages=_completed_stages(results),
                         )
 
                 # Run wave tasks; the outer refresh coroutine drives display updates.
