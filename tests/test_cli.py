@@ -2870,6 +2870,132 @@ def test_agents_remove_not_found(git_repo):
 
 
 # ---------------------------------------------------------------------------
+# wb agents --plan
+# ---------------------------------------------------------------------------
+
+
+def test_agents_init_plan_creates_plan_level_yaml(git_repo):
+    """wb agents --plan init creates agents.yaml inside the plan dir."""
+    plan_dir = git_repo / ".workbench" / "my-plan"
+    plan_dir.mkdir(parents=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "--plan", "my-plan", "init"])
+
+    assert result.exit_code == 0
+    config_path = plan_dir / "agents.yaml"
+    assert config_path.exists()
+    config = yaml.safe_load(config_path.read_text())
+    assert "claude" in config["agents"]
+
+
+def test_agents_init_plan_errors_if_plan_dir_missing(git_repo):
+    """wb agents --plan init should error when plan dir does not exist."""
+    (git_repo / ".workbench").mkdir(exist_ok=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "--plan", "nonexistent", "init"])
+
+    assert result.exit_code != 0
+    assert "does not exist" in result.output
+
+
+def test_agents_list_plan_shows_plan_agents(git_repo):
+    """wb agents --plan list shows agents from the plan-level file."""
+    plan_dir = git_repo / ".workbench" / "my-plan"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "agents.yaml").write_text(
+        "agents:\n  plan-agent:\n    command: plan-cli\n    output_format: text\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "--plan", "my-plan", "list"])
+
+    assert result.exit_code == 0
+    assert "plan-agent" in result.output
+    assert "plan-cli" in result.output
+    assert "my-plan" in result.output
+
+
+def test_agents_add_plan_writes_to_plan_level_yaml(git_repo):
+    """wb agents --plan add writes to the plan-level agents.yaml."""
+    plan_dir = git_repo / ".workbench" / "my-plan"
+    plan_dir.mkdir(parents=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(
+            main,
+            ["agents", "--plan", "my-plan", "add", "new-agent", "--command", "new-cli"],
+        )
+
+    assert result.exit_code == 0
+    config = yaml.safe_load((plan_dir / "agents.yaml").read_text())
+    assert "new-agent" in config["agents"]
+    assert config["agents"]["new-agent"]["command"] == "new-cli"
+    # Project-level file should NOT be created
+    assert not (git_repo / ".workbench" / "agents.yaml").exists()
+
+
+def test_agents_remove_plan_removes_from_plan_level_yaml(git_repo):
+    """wb agents --plan remove removes from the plan-level agents.yaml."""
+    plan_dir = git_repo / ".workbench" / "my-plan"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "agents.yaml").write_text(
+        "agents:\n  plan-agent:\n    command: plan-cli\n  keep:\n    command: keep-cli\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "--plan", "my-plan", "remove", "plan-agent"])
+
+    assert result.exit_code == 0
+    config = yaml.safe_load((plan_dir / "agents.yaml").read_text())
+    assert "plan-agent" not in config["agents"]
+    assert "keep" in config["agents"]
+
+
+def test_agents_show_plan_shows_plan_level_agent(git_repo):
+    """wb agents --plan show reads from the plan-level agents.yaml."""
+    plan_dir = git_repo / ".workbench" / "my-plan"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "agents.yaml").write_text(
+        "agents:\n  plan-agent:\n    command: plan-cli\n    args: ['{prompt}']\n    output_format: text\n"
+    )
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "--plan", "my-plan", "show", "plan-agent"])
+
+    assert result.exit_code == 0
+    assert "plan-cli" in result.output
+
+
+def test_agents_plan_does_not_affect_project_level(git_repo):
+    """Writing to plan-level agents.yaml leaves the project-level file untouched."""
+    wb_dir = git_repo / ".workbench"
+    wb_dir.mkdir(exist_ok=True)
+    (wb_dir / "agents.yaml").write_text("agents:\n  project-agent:\n    command: proj-cli\n")
+
+    plan_dir = wb_dir / "my-plan"
+    plan_dir.mkdir()
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        runner.invoke(
+            main,
+            ["agents", "--plan", "my-plan", "add", "new-agent", "--command", "new-cli"],
+        )
+
+    # Project-level file must be unchanged
+    config = yaml.safe_load((wb_dir / "agents.yaml").read_text())
+    assert list(config["agents"].keys()) == ["project-agent"]
+
+
+# ---------------------------------------------------------------------------
 # Frontmatter run_config → CLI merge
 # ---------------------------------------------------------------------------
 
