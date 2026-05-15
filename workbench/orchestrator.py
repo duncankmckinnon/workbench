@@ -59,9 +59,6 @@ class TaskState:
     @property
     def phase_summary(self) -> str:
         """Short summary of where we are in the pipeline."""
-        if not self.results:
-            return ""
-
         phases = []
         for r in self.results:
             if r.role == Role.IMPLEMENTOR:
@@ -87,12 +84,12 @@ class TaskState:
 
 
 def _status_table(states: list[TaskState]) -> Table:
-    table = Table(title="Workbench", show_lines=True)
-    table.add_column("Task", style="bold", min_width=30)
+    table = Table(title="Workbench", show_lines=True, expand=True)
+    table.add_column("Task", style="bold", min_width=20)
     table.add_column("Status", min_width=14)
     table.add_column("Fixes", min_width=5, justify="center")
     table.add_column("Time", min_width=8)
-    table.add_column("Pipeline", min_width=40)
+    table.add_column("Pipeline", ratio=1)
 
     status_styles = {
         TaskStatus.PENDING: "dim",
@@ -108,7 +105,7 @@ def _status_table(states: list[TaskState]) -> Table:
     for s in states:
         style = status_styles.get(s.status, "")
         fixes = str(s.fix_count) if s.fix_count > 0 else "-"
-        pipeline = s.phase_summary or (f"branch: {s.worktree.branch}" if s.worktree else "")
+        pipeline = s.phase_summary
 
         table.add_row(
             s.task.title,
