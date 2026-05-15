@@ -692,3 +692,86 @@ class TestFinalReviewRecord:
         loaded = SessionStatus.load(tmp_path, PLAN_SLUG, SESSION)
         assert loaded is not None
         assert len(loaded.final_reviews) == n
+
+
+class TestCompletedStages:
+    def test_task_record_completed_stages_default_empty(self):
+        rec1 = TaskRecord(status="pending")
+        rec2 = TaskRecord(status="pending")
+        assert rec1.completed_stages == []
+        rec1.completed_stages.append("implementor")
+        assert rec2.completed_stages == []
+
+    def test_task_record_roundtrip_with_stages(self):
+        rec = TaskRecord(
+            status="failed",
+            branch="wb/t1",
+            completed_stages=["implementor", "tester"],
+        )
+        restored = TaskRecord.from_dict(rec.to_dict())
+        assert restored.completed_stages == ["implementor", "tester"]
+        assert restored.completed_stages is not rec.completed_stages
+
+    def test_task_record_from_dict_missing_stages(self):
+        rec = TaskRecord.from_dict({"status": "done"})
+        assert rec.completed_stages == []
+
+    def test_record_task_preserves_completed_stages_when_omitted(self):
+        ss = SessionStatus(plan_slug="p", session_branch="s", plan_source="")
+        ss.record_task("t1", status="implementing", completed_stages=["implementor"])
+        ss.record_task("t1", status="testing")
+        assert ss.tasks["t1"].completed_stages == ["implementor"]
+
+    def test_record_task_overwrites_completed_stages_when_passed(self):
+        ss = SessionStatus(plan_slug="p", session_branch="s", plan_source="")
+        ss.record_task("t1", status="implementing", completed_stages=["implementor"])
+        ss.record_task("t1", status="testing", completed_stages=["implementor", "tester"])
+        assert ss.tasks["t1"].completed_stages == ["implementor", "tester"]
+
+    def test_record_task_explicit_empty_list_resets(self):
+        ss = SessionStatus(plan_slug="p", session_branch="s", plan_source="")
+        ss.record_task("t1", status="implementing", completed_stages=["implementor"])
+        ss.record_task("t1", status="implementing", completed_stages=[])
+        assert ss.tasks["t1"].completed_stages == []
+
+    async def test_update_task_persists_completed_stages_to_yaml(self, tmp_path):
+        ss = SessionStatus(plan_slug="p", session_branch="s", plan_source="")
+        await ss.update_task(
+            repo=tmp_path,
+            task_id="t1",
+            status="done",
+            branch="wb/t1",
+            last_agent="reviewer",
+            completed_stages=["implementor", "tester", "reviewer"],
+        )
+
+        path = tmp_path / ".workbench" / "p" / "status.yaml"
+        data = yaml.safe_load(path.read_text())
+        task_data = data["sessions"]["s"]["tasks"]["t1"]
+        assert task_data["completed_stages"] == ["implementor", "tester", "reviewer"]
+
+    def test_load_status_yaml_without_completed_stages_field(self, tmp_path):
+        plan_dir = tmp_path / ".workbench" / "p"
+        plan_dir.mkdir(parents=True)
+        (plan_dir / "status.yaml").write_text(
+            yaml.dump(
+                {
+                    "sessions": {
+                        "s": {
+                            "tasks": {
+                                "t1": {
+                                    "status": "done",
+                                    "branch": "wb/t1",
+                                    "merged": True,
+                                    "last_agent": "reviewer",
+                                }
+                            }
+                        }
+                    }
+                }
+            )
+        )
+
+        loaded = SessionStatus.load(tmp_path, "p", "s")
+        assert loaded is not None
+        assert loaded.tasks["t1"].completed_stages == []
