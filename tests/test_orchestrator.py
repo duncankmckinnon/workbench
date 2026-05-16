@@ -2111,6 +2111,344 @@ async def test_completed_stages_preserved_through_status_callback(tmp_path):
     assert "reviewer" in stages
 
 
+# ---------------------------------------------------------------------------
+# In-session retry resume path
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_in_session_retry_resumes_via_attach(tmp_path):
+    """When the resumed pipeline fails again, in-session retry attaches again."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    prior = SessionStatus(plan_slug="test-plan", session_branch="workbench-1")
+    prior.record_task(
+        "task-1",
+        status="failed",
+        branch="wb/test-task",
+        completed_stages=["implementor", "tester"],
+    )
+    prior.save(repo)
+
+    call_count = {"pipeline": 0}
+
+    async def fake_pipeline(**kwargs):
+        call_count["pipeline"] += 1
+        if call_count["pipeline"] == 1:
+            # Resumed run still fails at reviewer — eligible for in-session retry.
+            return [
+                AgentResult(
+                    task_id="task-1",
+                    role=Role.REVIEWER,
+                    status=TaskStatus.DONE,
+                    output="VERDICT: FAIL",
+                )
+            ]
+        # Second invocation: reviewer finally passes.
+        return [
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            )
+        ]
+
+    fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree", return_value=fake_wt) as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            retry_failed=True,
+        )
+
+    # Wave-setup attach + in-session retry attach = 2.
+    assert mock_attach.call_count == 2
+    mock_create.assert_not_called()
+    assert call_count["pipeline"] == 2
+
+
+@pytest.mark.asyncio
+async def test_in_session_retry_falls_back_to_create_when_attach_raises(tmp_path):
+    """If the second attach raises RuntimeError, fall back to create_worktree."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    prior = SessionStatus(plan_slug="test-plan", session_branch="workbench-1")
+    prior.record_task(
+        "task-1",
+        status="failed",
+        branch="wb/test-task",
+        completed_stages=["implementor", "tester"],
+    )
+    prior.save(repo)
+
+    fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+
+    # First attach succeeds (wave-setup), second raises (in-session retry).
+    attach_results = [fake_wt, RuntimeError("worktree gone")]
+
+    def _attach(*_args, **_kwargs):
+        result = attach_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    async def fake_pipeline(**kwargs):
+        return [
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: FAIL",
+            )
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree", side_effect=_attach) as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_create.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt2", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            retry_failed=True,
+        )
+
+    assert mock_attach.call_count == 2
+    # Fallback after the second attach raised.
+    assert mock_create.called
+
+
+@pytest.mark.asyncio
+async def test_in_session_retry_marks_failed_when_create_worktree_fails(tmp_path):
+    """If the in-session retry fallback's create_worktree raises, task is marked FAILED."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    prior = SessionStatus(plan_slug="test-plan", session_branch="workbench-1")
+    prior.record_task(
+        "task-1",
+        status="failed",
+        branch="wb/test-task",
+        completed_stages=["implementor", "tester"],
+    )
+    prior.save(repo)
+
+    fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+
+    attach_results = [fake_wt, RuntimeError("worktree gone")]
+
+    def _attach(*_args, **_kwargs):
+        result = attach_results.pop(0)
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    create_calls = {"n": 0}
+
+    def _create(*args, **kwargs):
+        create_calls["n"] += 1
+        if create_calls["n"] == 1:
+            raise OSError("disk full")
+        return fake_wt
+
+    async def fake_pipeline(**kwargs):
+        return [
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: FAIL",
+            )
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree", side_effect=_attach),
+        patch("workbench.orchestrator.create_worktree", side_effect=_create),
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        results = await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            retry_failed=True,
+        )
+
+    failed = [s for s in results if s.task.id == "task-1"][0]
+    assert failed.status == TaskStatus.FAILED
+    # The fallback's exception output is appended as an implementor result.
+    assert any(
+        r.role == Role.IMPLEMENTOR and "Retry worktree creation failed" in r.output
+        for r in failed.results
+    )
+
+
+# ---------------------------------------------------------------------------
+# Streaming via on_result during run_plan
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_on_result_streams_state_results_during_pipeline(tmp_path):
+    """The orchestrator's _on_result callback should populate state.results live."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    snapshots: list[list[str]] = []
+
+    async def fake_pipeline(**kwargs):
+        on_result = kwargs.get("on_result")
+        assert on_result is not None, "orchestrator must pass on_result to run_pipeline"
+
+        results = [
+            AgentResult(
+                task_id="task-1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="impl"
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            ),
+        ]
+        for r in results:
+            on_result(r)
+            await asyncio.sleep(0)
+            # Snapshot what status.yaml has right now.
+            status = SessionStatus.load(repo, "test-plan", "workbench-1")
+            stages = status.tasks["task-1"].completed_stages if status else []
+            snapshots.append(list(stages))
+        return results
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+        )
+
+    # status.yaml should reflect the pipeline's progress incrementally.
+    assert snapshots[0] == ["implementor"]
+    assert snapshots[1] == ["implementor", "tester"]
+    assert snapshots[2] == ["implementor", "tester", "reviewer"]
+
+
+@pytest.mark.asyncio
+async def test_on_result_persists_completed_stages_mid_pipeline(tmp_path):
+    """Each AgentResult streamed through on_result should write completed_stages to disk."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    async def fake_pipeline(**kwargs):
+        on_result = kwargs["on_result"]
+        on_result(
+            AgentResult(
+                task_id="task-1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="impl"
+            )
+        )
+        await asyncio.sleep(0)
+        on_result(
+            AgentResult(
+                task_id="task-1",
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            )
+        )
+        await asyncio.sleep(0)
+        # Fixer invalidates tester — the next persist should drop tester.
+        on_result(
+            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed")
+        )
+        await asyncio.sleep(0)
+        return [
+            AgentResult(
+                task_id="task-1", role=Role.IMPLEMENTOR, status=TaskStatus.DONE, output="impl"
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+            ),
+            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed"),
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False, session_branch="workbench-1")
+
+    # After the fixer ran, tester must be dropped — only implementor remains trusted.
+    status = SessionStatus.load(repo, "test-plan", "workbench-1")
+    assert status.tasks["task-1"].completed_stages == ["implementor"]
+
+
 def test_status_table_renders_pending_row():
     state = TaskState(
         task=SimpleNamespace(title="t3"),
