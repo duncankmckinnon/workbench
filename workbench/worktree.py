@@ -205,6 +205,31 @@ def create_worktree(
     return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
 
 
+def attach_worktree(
+    repo: Path,
+    task_id: str,
+    task_slug: str,
+    plan_slug: str | None,
+    branch: str,
+) -> Worktree:
+    """Re-attach a Worktree handle to an on-disk worktree + branch.
+
+    Used on resume: the worktree directory and branch still exist from the
+    prior run; we need a Worktree dataclass to pass to the orchestrator
+    without re-creating either. Raises RuntimeError if path or branch is
+    missing — the caller should fall back to create_worktree.
+    """
+    if plan_slug:
+        worktree_dir = repo / ".workbench" / plan_slug / task_id
+    else:
+        worktree_dir = repo / ".workbench" / task_slug
+
+    if not worktree_dir.is_dir() or not branch_exists(repo, branch):
+        raise RuntimeError(f"Cannot attach worktree for {task_id}: path or branch missing")
+
+    return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
+
+
 def is_workbench_worktree(path: Path) -> bool:
     """Return True if ``path`` looks like a workbench task worktree.
 

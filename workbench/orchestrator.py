@@ -19,6 +19,7 @@ from .profile import Profile
 from .session_status import SessionStatus
 from .worktree import (
     Worktree,
+    attach_worktree,
     branch_exists,
     cleanup_merge_worktree,
     complete_merge,
@@ -44,6 +45,8 @@ class TaskState:
     wave_num: int = 0
     merged: bool = False
     merge_error: bool = False
+    resume_stages: list[str] = field(default_factory=list)
+    prior_results: list[AgentResult] = field(default_factory=list)
 
     @property
     def elapsed(self) -> str:
@@ -330,6 +333,43 @@ async def run_plan(
                 for state in wave_states:
                     if state.status == TaskStatus.DONE:
                         continue
+
+                    # Resume path: when retry_failed is set and the prior status
+                    # records a failed task with completed stages on an existing
+                    # branch, reuse the on-disk worktree instead of wiping it.
+                    prior_record = prior.tasks.get(state.task.id) if prior else None
+                    resume_stages = list(prior_record.completed_stages) if prior_record else []
+                    can_resume = (
+                        retry_failed
+                        and bool(resume_stages)
+                        and prior_record is not None
+                        and prior_record.status == "failed"
+                        and prior_record.branch is not None
+                        and branch_exists(repo, prior_record.branch)
+                        and not tdd
+                    )
+                    if can_resume:
+                        try:
+                            wt = attach_worktree(
+                                repo,
+                                state.task.id,
+                                state.task.slug,
+                                plan_slug=plan_slug,
+                                branch=prior_record.branch,
+                            )
+                            state.worktree = wt
+                            state.resume_stages = resume_stages
+                            state.prior_results = []
+                            console.print(
+                                f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                f"from after {resume_stages[-1]} "
+                                f"(skipping {len(resume_stages)} stage(s))"
+                            )
+                            continue
+                        except RuntimeError:
+                            # Worktree dir was wiped between runs (e.g. `wb clean`).
+                            pass
+
                     # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
                     old_worktree_path = repo / ".workbench" / plan_slug / state.task.id
                     if old_worktree_path.exists():
@@ -373,13 +413,20 @@ async def run_plan(
                     TaskStatus.MERGING: Role.MERGER.value,
                 }
 
-                def _completed_stages(results: list[AgentResult]) -> list[str]:
+                def _completed_stages(
+                    results: list[AgentResult],
+                    resume_stages: list[str] | None = None,
+                ) -> list[str]:
                     """Pipeline stages that have completed successfully, post fixer invalidation.
 
                     A fixer edits code on top of impl, invalidating any earlier test/review
                     pass — those passes must be re-run before they're trusted again.
+
+                    ``resume_stages`` seeds the trusted set for resumed tasks where
+                    impl/test ran in a prior process; a fixer in the current results
+                    still invalidates them.
                     """
-                    trusted: set[str] = set()
+                    trusted: set[str] = set(resume_stages or [])
                     for r in results:
                         if r.role == Role.IMPLEMENTOR and r.status != TaskStatus.FAILED:
                             trusted.add(Role.IMPLEMENTOR.value)
@@ -392,6 +439,18 @@ async def run_plan(
                             trusted.discard(Role.REVIEWER.value)
                     order = [Role.IMPLEMENTOR.value, Role.TESTER.value, Role.REVIEWER.value]
                     return [v for v in order if v in trusted]
+
+                def _persist_stages(state: TaskState) -> list[str] | None:
+                    """Build the completed_stages list for a persist call.
+
+                    Returns None when there's no new information yet (no results, no
+                    resumed stages) so update_task preserves any prior value rather
+                    than zeroing it. This guards mid-pipeline writes where a status
+                    transition fires before the first AgentResult arrives.
+                    """
+                    if not state.results and not state.resume_stages:
+                        return None
+                    return _completed_stages(state.results, state.resume_stages)
 
                 async def _persist_status(state: TaskState, status: TaskStatus, last_agent: str):
                     try:
@@ -409,7 +468,7 @@ async def run_plan(
                             branch=state.worktree.branch if state.worktree else None,
                             merged=merged,
                             last_agent=last_agent,
-                            completed_stages=_completed_stages(state.results),
+                            completed_stages=_persist_stages(state),
                         )
                     except Exception as e:
                         console.print(
@@ -466,6 +525,8 @@ async def run_plan(
                             agent_cmd=agent_cmd,
                             on_status_change=_make_callback(state),
                             on_result=_on_result,
+                            resume_completed_stages=state.resume_stages or None,
+                            prior_results=state.prior_results or None,
                             session_branch=session_branch,
                             plan_context=plan.context,
                             plan_conventions=plan.conventions,
@@ -505,7 +566,7 @@ async def run_plan(
                             status=state.status.value,
                             branch=state.worktree.branch if state.worktree else None,
                             last_agent=results[-1].role.value if results else "",
-                            completed_stages=_completed_stages(results),
+                            completed_stages=_completed_stages(results, state.resume_stages),
                         )
 
                 # Run wave tasks; the outer refresh coroutine drives display updates.
@@ -613,10 +674,45 @@ async def run_plan(
                             state.finished_at = None
                             state.merge_error = False
 
-                            # Clean up old worktree and branch, create fresh ones
+                            prior_record = prior.tasks.get(state.task.id) if prior else None
+                            resume_stages = (
+                                list(prior_record.completed_stages) if prior_record else []
+                            )
+                            can_resume = (
+                                bool(resume_stages)
+                                and prior_record is not None
+                                and prior_record.branch is not None
+                                and branch_exists(repo, prior_record.branch)
+                                and not tdd
+                            )
+
+                            if can_resume:
+                                try:
+                                    wt = attach_worktree(
+                                        repo,
+                                        state.task.id,
+                                        state.task.slug,
+                                        plan_slug=plan_slug,
+                                        branch=prior_record.branch,
+                                    )
+                                    state.worktree = wt
+                                    state.resume_stages = resume_stages
+                                    state.prior_results = []
+                                    console.print(
+                                        f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                        f"from after {resume_stages[-1]} "
+                                        f"(skipping {len(resume_stages)} stage(s))"
+                                    )
+                                    continue
+                                except RuntimeError:
+                                    pass
+
+                            # Fall back: wipe and recreate
                             if state.worktree:
                                 state.worktree.cleanup()
                                 state.worktree = None
+                            state.resume_stages = []
+                            state.prior_results = []
                             try:
                                 wt = create_worktree(
                                     repo,
