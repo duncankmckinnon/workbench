@@ -568,7 +568,14 @@ class TestPipelineResume:
             seen_directive_types.append(type(directive))
             return _result(directive.role, passed=True)
 
-        prior_impl = _result(Role.IMPLEMENTOR, passed=True)
+        # Distinguish the prior result from a freshly-produced one. AgentResult
+        # is a value-equality dataclass, so `in` would match any equal result.
+        prior_impl = AgentResult(
+            task_id="task-1",
+            role=Role.IMPLEMENTOR,
+            status=TaskStatus.DONE,
+            output="PRIOR_SENTINEL",
+        )
 
         with (
             patch("workbench.agents.run_agent", side_effect=mock_run_agent),
@@ -588,9 +595,9 @@ class TestPipelineResume:
             )
 
         assert TddTesterDirective in seen_directive_types
-        assert prior_impl not in results
+        assert not any(r is prior_impl for r in results)
+        assert not any(r.output == "PRIOR_SENTINEL" for r in results)
         assert len(results) > 0
-        assert results[0] is not prior_impl
 
     def test_resume_skip_test_and_completed_test_both_skip(
         self, pipeline_task, pipeline_worktree, tmp_path
