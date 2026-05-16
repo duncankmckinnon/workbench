@@ -6,6 +6,7 @@ import pytest
 
 from workbench.worktree import (
     Worktree,
+    attach_worktree,
     create_session_branch,
     create_worktree,
     get_diff,
@@ -544,6 +545,90 @@ def test_iter_worktree_dirs_dedupes(git_repo):
         assert len(matching) == 1
     finally:
         wt.cleanup()
+
+
+# ---------------------------------------------------------------------------
+# attach_worktree
+# ---------------------------------------------------------------------------
+
+
+def test_attach_worktree_returns_handle_when_dir_and_branch_exist(git_repo):
+    """attach_worktree should return a Worktree mirroring create_worktree's output."""
+    session = create_session_branch(git_repo)
+    original = create_worktree(
+        git_repo, "task-1", "attach-feat", plan_slug="myplan", base_branch=session
+    )
+    try:
+        attached = attach_worktree(
+            git_repo,
+            task_id="task-1",
+            task_slug="attach-feat",
+            plan_slug="myplan",
+            branch=original.branch,
+        )
+        assert attached.path == original.path
+        assert attached.branch == original.branch
+        assert attached.task_id == original.task_id
+    finally:
+        original.cleanup()
+
+
+def test_attach_worktree_raises_when_dir_missing(git_repo):
+    """Branch exists but the worktree directory does not — raises RuntimeError."""
+    session = create_session_branch(git_repo)
+    # Create a branch only — no worktree directory.
+    import subprocess
+
+    subprocess.run(
+        ["git", "branch", "--no-track", "wb/orphan", session],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+
+    with pytest.raises(RuntimeError, match="path or branch missing"):
+        attach_worktree(
+            git_repo,
+            task_id="task-1",
+            task_slug="orphan",
+            plan_slug="myplan",
+            branch="wb/orphan",
+        )
+
+
+def test_attach_worktree_raises_when_branch_missing(git_repo):
+    """Directory exists but the branch was deleted — raises RuntimeError."""
+    plan_dir = git_repo / ".workbench" / "myplan" / "task-1"
+    plan_dir.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="path or branch missing"):
+        attach_worktree(
+            git_repo,
+            task_id="task-1",
+            task_slug="lonely",
+            plan_slug="myplan",
+            branch="wb/lonely",
+        )
+
+
+def test_attach_worktree_uses_plan_scoped_path(git_repo):
+    """With plan_slug, the resolved path matches create_worktree's layout."""
+    session = create_session_branch(git_repo)
+    original = create_worktree(
+        git_repo, "task-1", "task-1", plan_slug="myfeature", base_branch=session
+    )
+    try:
+        attached = attach_worktree(
+            git_repo,
+            task_id="task-1",
+            task_slug="task-1",
+            plan_slug="myfeature",
+            branch=original.branch,
+        )
+        assert attached.path == git_repo / ".workbench" / "myfeature" / "task-1"
+        assert attached.path == original.path
+    finally:
+        original.cleanup()
 
 
 def test_is_workbench_worktree(git_repo):

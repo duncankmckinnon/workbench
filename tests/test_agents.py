@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -14,6 +15,7 @@ from workbench.agents import (
     TaskStatus,
     run_agent,
     run_merge_resolver,
+    run_pipeline,
     run_planner,
 )
 from workbench.directives import FixerDirective, ImplementorDirective, PromptContext
@@ -264,3 +266,398 @@ class TestAgentsConfigPathsForwarding:
         mock_get_adapter.assert_called_once_with(
             "claude", [tmp_path / ".workbench" / "agents.yaml"]
         )
+
+
+# ---------------------------------------------------------------------------
+# Pipeline streaming (on_result callback) and resume behavior
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def pipeline_task():
+    return Task(id="task-1", title="Add feature", description="Do X", files=["src/x.py"])
+
+
+@pytest.fixture
+def pipeline_worktree(tmp_path):
+    return Worktree(path=tmp_path, branch="wb/task-1", task_id="task-1")
+
+
+def _result(role: Role, passed: bool = True, status: TaskStatus = TaskStatus.DONE) -> AgentResult:
+    output = "ok\nVERDICT: PASS" if passed else "issues\nVERDICT: FAIL"
+    return AgentResult(task_id="task-1", role=role, status=status, output=output)
+
+
+def _done(role: Role) -> AgentResult:
+    return AgentResult(task_id="task-1", role=role, status=TaskStatus.DONE, output="done")
+
+
+class TestOnResultStreaming:
+    def test_on_result_fires_for_each_completed_agent(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _result(directive.role, passed=True)
+
+        collected: list[AgentResult] = []
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=collected.append,
+                )
+            )
+
+        assert len(collected) == 3
+        assert [r.role for r in collected] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]
+
+    def test_on_result_fires_during_pipeline_not_at_end(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            if directive.role == Role.TESTER:
+                await asyncio.sleep(0.02)
+            return _result(directive.role, passed=True)
+
+        timestamps: list[tuple[Role, float]] = []
+
+        def on_result(r: AgentResult) -> None:
+            timestamps.append((r.role, time.monotonic()))
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=on_result,
+                )
+            )
+
+        by_role = {role: t for role, t in timestamps}
+        assert by_role[Role.IMPLEMENTOR] < by_role[Role.TESTER]
+        assert by_role[Role.TESTER] < by_role[Role.REVIEWER]
+
+    def test_on_result_includes_fixer_results(self, pipeline_task, pipeline_worktree, tmp_path):
+        tester_calls = {"n": 0}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            if role == Role.TESTER:
+                tester_calls["n"] += 1
+                return _result(role, passed=tester_calls["n"] >= 2)
+            if role == Role.FIXER:
+                return _done(role)
+            return _result(role, passed=True)
+
+        collected: list[AgentResult] = []
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=collected.append,
+                    max_retries=1,
+                )
+            )
+
+        assert [r.role for r in collected] == [
+            Role.IMPLEMENTOR,
+            Role.TESTER,
+            Role.FIXER,
+            Role.TESTER,
+            Role.REVIEWER,
+        ]
+
+    def test_on_result_not_called_for_skipped_stages(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _result(directive.role, passed=True)
+
+        collected: list[AgentResult] = []
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=collected.append,
+                    skip_test=True,
+                    skip_review=True,
+                )
+            )
+
+        assert [r.role for r in collected] == [Role.IMPLEMENTOR]
+
+    def test_pipeline_works_without_on_result_callback(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _result(directive.role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=None,
+                )
+            )
+
+        assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]
+
+
+class TestPipelineResume:
+    def test_resume_skips_implementor(self, pipeline_task, pipeline_worktree, tmp_path):
+        calls: dict[Role, int] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            calls[directive.role] = calls.get(directive.role, 0) + 1
+            return _result(directive.role, passed=True)
+
+        prior_impl = _result(Role.IMPLEMENTOR, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    resume_completed_stages=["implementor"],
+                    prior_results=[prior_impl],
+                )
+            )
+
+        assert Role.IMPLEMENTOR not in calls
+        assert calls.get(Role.TESTER) == 1
+        assert calls.get(Role.REVIEWER) == 1
+        assert results[0] is prior_impl
+        assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]
+
+    def test_resume_skips_implementor_and_tester(self, pipeline_task, pipeline_worktree, tmp_path):
+        calls: dict[Role, int] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            calls[directive.role] = calls.get(directive.role, 0) + 1
+            return _result(directive.role, passed=True)
+
+        prior_impl = _result(Role.IMPLEMENTOR, passed=True)
+        prior_test = _result(Role.TESTER, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    resume_completed_stages=["implementor", "tester"],
+                    prior_results=[prior_impl, prior_test],
+                )
+            )
+
+        assert Role.IMPLEMENTOR not in calls
+        assert Role.TESTER not in calls
+        assert calls.get(Role.REVIEWER) == 1
+        assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]
+
+    def test_resume_empty_runs_full_pipeline(self, pipeline_task, pipeline_worktree, tmp_path):
+        calls: dict[Role, int] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            calls[directive.role] = calls.get(directive.role, 0) + 1
+            return _result(directive.role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    resume_completed_stages=[],
+                    prior_results=[],
+                )
+            )
+
+        assert calls.get(Role.IMPLEMENTOR) == 1
+        assert calls.get(Role.TESTER) == 1
+        assert calls.get(Role.REVIEWER) == 1
+        assert len(results) == 3
+
+    def test_resume_none_runs_full_pipeline(self, pipeline_task, pipeline_worktree, tmp_path):
+        calls: dict[Role, int] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            calls[directive.role] = calls.get(directive.role, 0) + 1
+            return _result(directive.role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    resume_completed_stages=None,
+                    prior_results=None,
+                )
+            )
+
+        assert calls.get(Role.IMPLEMENTOR) == 1
+        assert calls.get(Role.TESTER) == 1
+        assert calls.get(Role.REVIEWER) == 1
+        assert len(results) == 3
+
+    def test_resume_tdd_dropped(self, pipeline_task, pipeline_worktree, tmp_path):
+        from workbench.directives import TddTesterDirective
+
+        seen_directive_types: list[type] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            seen_directive_types.append(type(directive))
+            return _result(directive.role, passed=True)
+
+        # Distinguish the prior result from a freshly-produced one. AgentResult
+        # is a value-equality dataclass, so `in` would match any equal result.
+        prior_impl = AgentResult(
+            task_id="task-1",
+            role=Role.IMPLEMENTOR,
+            status=TaskStatus.DONE,
+            output="PRIOR_SENTINEL",
+        )
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    tdd=True,
+                    resume_completed_stages=["implementor"],
+                    prior_results=[prior_impl],
+                )
+            )
+
+        assert TddTesterDirective in seen_directive_types
+        assert not any(r is prior_impl for r in results)
+        assert not any(r.output == "PRIOR_SENTINEL" for r in results)
+        assert len(results) > 0
+
+    def test_resume_skip_test_and_completed_test_both_skip(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        calls: dict[Role, int] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            calls[directive.role] = calls.get(directive.role, 0) + 1
+            return _result(directive.role, passed=True)
+
+        prior_impl = _result(Role.IMPLEMENTOR, passed=True)
+        prior_test = _result(Role.TESTER, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    skip_test=True,
+                    resume_completed_stages=["implementor", "tester"],
+                    prior_results=[prior_impl, prior_test],
+                )
+            )
+
+        assert Role.TESTER not in calls
+        assert Role.IMPLEMENTOR not in calls
+        assert calls.get(Role.REVIEWER) == 1
+
+    def test_resume_streams_only_new_results_to_on_result(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _result(directive.role, passed=True)
+
+        prior_impl = _result(Role.IMPLEMENTOR, passed=True)
+        prior_test = _result(Role.TESTER, passed=True)
+        collected: list[AgentResult] = []
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    on_result=collected.append,
+                    resume_completed_stages=["implementor", "tester"],
+                    prior_results=[prior_impl, prior_test],
+                )
+            )
+
+        assert [r.role for r in collected] == [Role.REVIEWER]
+        assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]

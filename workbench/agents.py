@@ -136,6 +136,9 @@ async def run_pipeline(
     max_retries: int = 2,
     agent_cmd: str = "claude",
     on_status_change: callable = None,
+    on_result: callable = None,
+    resume_completed_stages: list[str] | None = None,
+    prior_results: list[AgentResult] | None = None,
     session_branch: str | None = None,
     plan_context: str = "",
     plan_conventions: str = "",
@@ -170,7 +173,13 @@ async def run_pipeline(
         TesterDirective,
     )
 
-    results: list[AgentResult] = []
+    # Prior results are seeded into the returned list but not replayed through
+    # `on_result`; the caller already has them on disk.
+    results: list[AgentResult] = list(prior_results or [])
+    completed: set[str] = set(resume_completed_stages or [])
+    if tdd:
+        completed = set()
+        results = []
     base = session_branch or get_main_branch(repo)
     ctx = PromptContext(
         task=task,
@@ -183,6 +192,11 @@ async def run_pipeline(
     def _notify(status: TaskStatus):
         if on_status_change:
             on_status_change(task.id, status)
+
+    def _record(result: AgentResult):
+        results.append(result)
+        if on_result:
+            on_result(result)
 
     def _agent_for(role: Role) -> str:
         """Resolve effective agent_cmd for a role."""
@@ -224,7 +238,7 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(test_write_result)
+        _record(test_write_result)
 
         if test_write_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
@@ -243,7 +257,7 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(impl_result)
+        _record(impl_result)
 
         if impl_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
@@ -255,7 +269,7 @@ async def run_pipeline(
         # fail here previously skipped test/review and was silently marked DONE.
 
     # 1. Implement (skipped in TDD mode — already done above)
-    if not tdd:
+    if not tdd and Role.IMPLEMENTOR.value not in completed:
         _notify(TaskStatus.IMPLEMENTING)
         impl_directive = ImplementorDirective(
             directive_text=_text_for(Role.IMPLEMENTOR),
@@ -268,14 +282,14 @@ async def run_pipeline(
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
         )
-        results.append(impl_result)
+        _record(impl_result)
 
         if impl_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
             return results
 
     # 2. Test (with retry loop)
-    if not skip_test:
+    if not skip_test and Role.TESTER.value not in completed:
         for attempt in range(1, max_retries + 2):  # +2: 1 initial + max_retries fixes
             _notify(TaskStatus.TESTING)
             test_directive = TesterDirective(
@@ -290,7 +304,7 @@ async def run_pipeline(
                 agents_config_paths=agents_config_paths,
             )
             test_result.attempt = attempt
-            results.append(test_result)
+            _record(test_result)
 
             if test_result.status == TaskStatus.FAILED:
                 # Agent itself crashed — don't retry
@@ -319,7 +333,7 @@ async def run_pipeline(
                     agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
-                results.append(fix_result)
+                _record(fix_result)
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)
@@ -336,7 +350,7 @@ async def run_pipeline(
     # immediately prior review's SHA, receive that prior review's feedback,
     # and are directed to verify each item was addressed rather than raise
     # new issues. prior_review_sha always tracks the immediately prior review.
-    if not skip_review:
+    if not skip_review and Role.REVIEWER.value not in completed:
         prior_review_sha: str | None = None
         prior_review_feedback: str | None = None
         for attempt in range(1, max_retries + 2):
@@ -365,7 +379,7 @@ async def run_pipeline(
                 agents_config_paths=agents_config_paths,
             )
             review_result.attempt = attempt
-            results.append(review_result)
+            _record(review_result)
 
             if review_result.status == TaskStatus.FAILED:
                 _notify(TaskStatus.FAILED)
@@ -396,7 +410,7 @@ async def run_pipeline(
                     agents_config_paths=agents_config_paths,
                 )
                 fix_result.attempt = attempt
-                results.append(fix_result)
+                _record(fix_result)
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)
