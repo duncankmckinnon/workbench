@@ -393,8 +393,8 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
 
 
 @pytest.mark.asyncio
-async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_repo):
-    """Worktree creation failure persists an error record instead of crashing."""
+async def test_worktree_creation_failure_persists_record_and_raises(base_kwargs, tmp_repo):
+    """Worktree creation failure persists an error record AND propagates the exception."""
     reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
     req_path = reviews_dir / "requirements.md"
 
@@ -403,7 +403,6 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.02})
 
     async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
-        # Summarizer succeeds and writes requirements
         req_path.parent.mkdir(parents=True, exist_ok=True)
         req_path.write_text(
             "## Requirements\n- Stuff\n## Non-goals\n- None\n## Acceptance criteria\n- Works"
@@ -424,11 +423,9 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
         patch("workbench.final_review._create_review_worktree", side_effect=fail_worktree),
         patch("workbench.final_review._cleanup_review_worktree"),
     ):
-        record = await run_final_review(**base_kwargs)
+        with pytest.raises(RuntimeError, match="already checked out"):
+            await run_final_review(**base_kwargs)
 
-    assert record.verdict == "error"
-    assert record.pr_url is None
-    # Verify the error was persisted
     status = SessionStatus.load(tmp_repo, "my-plan", "workbench-1")
     assert status is not None
     assert len(status.final_reviews) == 1
@@ -1093,7 +1090,8 @@ async def test_run_final_review_marks_failed_state_on_agent_failure(base_kwargs,
         patch("workbench.final_review._cleanup_review_worktree"),
         patch("workbench.final_review._post_task_table", side_effect=spy),
     ):
-        await run_final_review(**base_kwargs)
+        with pytest.raises(RuntimeError, match="worktree explosion"):
+            await run_final_review(**base_kwargs)
 
     states = captured["last"]
     assert states[1].status == PostTaskAgentStatus.FAILED

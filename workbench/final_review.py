@@ -219,9 +219,10 @@ async def _run_review_sequence(
             )
         finally:
             shutdown.set()
+            refresh_task.cancel()
             try:
                 await refresh_task
-            except Exception:
+            except asyncio.CancelledError:
                 pass
             live.update(_post_task_table(states))
 
@@ -394,7 +395,7 @@ async def _execute_sequence(
                 cost=combined_cost,
             )
             await _persist_record(repo, plan_slug, session_branch, record)
-            return record
+            raise
         finally:
             _cleanup_review_worktree(repo, wt_path)
     finally:
@@ -468,15 +469,13 @@ async def _execute_sequence(
 
             base = pr_base or base_branch
             push_ok, push_msg = push_session_branch(repo, session_branch)
-            if not push_ok:
-                states[2].note = f"push failed: {push_msg}"[:120]
+            push_warn = "" if push_ok else f"push failed: {push_msg}; "
             success, result_msg = await create_pr(repo, session_branch, base, title, body)
             if success:
                 pr_url = result_msg
-                if not states[2].note:
-                    states[2].note = result_msg
+                states[2].note = f"{push_warn}{result_msg}"[:120]
             else:
-                states[2].note = f"create_pr failed: {result_msg}"[:120]
+                states[2].note = f"{push_warn}create_pr failed: {result_msg}"[:120]
             states[2].status = PostTaskAgentStatus.DONE
         except Exception as e:
             states[2].status = PostTaskAgentStatus.FAILED
