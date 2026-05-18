@@ -417,20 +417,30 @@ async def _persist_record(
 
 
 def _create_review_worktree(repo: Path, wt_path: Path, session_branch: str) -> None:
-    """Create a git worktree for the session branch at wt_path."""
-    # Remove stale worktree if path exists
+    """Create a detached git worktree at wt_path pointing at session_branch's tip.
+
+    Uses --detach because the branch reviewer only reads the tree to write its
+    report. A non-detached `git worktree add <path> <branch>` fails with exit
+    128 when the branch is already checked out elsewhere (the main repo
+    typically sits on the session branch right after a run).
+    """
     if wt_path.exists():
         subprocess.run(
             ["git", "worktree", "remove", str(wt_path), "--force"],
             cwd=repo,
             capture_output=True,
         )
-    subprocess.run(
-        ["git", "worktree", "add", str(wt_path), session_branch],
+    result = subprocess.run(
+        ["git", "worktree", "add", "--detach", str(wt_path), session_branch],
         cwd=repo,
         capture_output=True,
-        check=True,
+        text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git worktree add (exit {result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip() or 'no output'}"
+        )
 
 
 def _cleanup_review_worktree(repo: Path, wt_path: Path) -> None:

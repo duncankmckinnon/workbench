@@ -406,7 +406,9 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
         return proc
 
     def fail_worktree(*args, **kwargs):
-        raise subprocess.CalledProcessError(128, "git worktree add")
+        raise RuntimeError(
+            "git worktree add (exit 128): fatal: 'feature-x' is already checked out"
+        )
 
     with (
         patch("workbench.final_review.get_adapter", return_value=adapter),
@@ -778,3 +780,103 @@ async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
 
     with pytest.raises(RuntimeError, match="Another final-review is running"):
         await run_final_review(**base_kwargs)
+
+
+# ── _create_review_worktree unit tests ───────────────────────────────
+
+
+def test_create_review_worktree_uses_detach():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=False):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    add_call = mock_run.call_args_list[-1]
+    cmd = add_call.args[0]
+    assert cmd[:3] == ["git", "worktree", "add"]
+    assert "--detach" in cmd
+    detach_idx = cmd.index("--detach")
+    add_idx = cmd.index("add")
+    path_idx = cmd.index("/wt")
+    assert add_idx < detach_idx < path_idx
+
+
+def test_create_review_worktree_removes_stale_path_first():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=True):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    assert len(mock_run.call_args_list) == 2
+    first_cmd = mock_run.call_args_list[0].args[0]
+    second_cmd = mock_run.call_args_list[1].args[0]
+    assert first_cmd[:3] == ["git", "worktree", "remove"]
+    assert second_cmd[:3] == ["git", "worktree", "add"]
+
+
+def test_create_review_worktree_raises_runtime_error_with_stderr_on_failure():
+    from workbench.final_review import _create_review_worktree
+
+    def fake_run(cmd, **kwargs):
+        if "add" in cmd:
+            return MagicMock(
+                returncode=128,
+                stderr="fatal: 'feature-x' is already checked out at '/some/path'",
+                stdout="",
+            )
+        return MagicMock(returncode=0, stderr="", stdout="")
+
+    with patch("workbench.final_review.subprocess.run", side_effect=fake_run):
+        with patch.object(Path, "exists", return_value=False):
+            with pytest.raises(RuntimeError) as exc_info:
+                _create_review_worktree(
+                    repo=Path("/repo"),
+                    wt_path=Path("/wt"),
+                    session_branch="feature-x",
+                )
+
+    msg = str(exc_info.value)
+    assert "exit 128" in msg
+    assert "already checked out" in msg
+
+
+def test_create_review_worktree_falls_back_to_stdout_when_stderr_empty():
+    from workbench.final_review import _create_review_worktree
+
+    def fake_run(cmd, **kwargs):
+        if "add" in cmd:
+            return MagicMock(returncode=128, stderr="", stdout="some stdout info")
+        return MagicMock(returncode=0, stderr="", stdout="")
+
+    with patch("workbench.final_review.subprocess.run", side_effect=fake_run):
+        with patch.object(Path, "exists", return_value=False):
+            with pytest.raises(RuntimeError) as exc_info:
+                _create_review_worktree(
+                    repo=Path("/repo"),
+                    wt_path=Path("/wt"),
+                    session_branch="feature-x",
+                )
+
+    assert "some stdout info" in str(exc_info.value)
+
+
+def test_create_review_worktree_no_remove_when_path_absent():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=False):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    assert mock_run.call_count == 1
+    assert mock_run.call_args_list[0].args[0][:3] == ["git", "worktree", "add"]
