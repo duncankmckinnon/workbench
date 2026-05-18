@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import re
+import shutil
 import subprocess
 import time
 from dataclasses import dataclass
@@ -247,11 +248,62 @@ async def _execute_sequence(
     skip_pr: bool,
     agents_config_paths: list[Path] | None,
 ) -> FinalReviewRecord:
-    reviews_dir = repo / ".workbench" / plan_slug / "reviews" / session_branch
-    reviews_dir.mkdir(parents=True, exist_ok=True)
-    requirements_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = repo / ".workbench" / plan_slug / "wrap-up" / session_branch
+    wrap_up_dir.mkdir(parents=True, exist_ok=True)
+    requirements_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
+    try:
+        return await _execute_sequence_inner(
+            states=states,
+            repo=repo,
+            session_branch=session_branch,
+            plan_slug=plan_slug,
+            base_branch=base_branch,
+            plan_source=plan_source,
+            merged_task_titles=merged_task_titles,
+            agent_cmd=agent_cmd,
+            use_tmux=use_tmux,
+            profile=profile,
+            summarizer_directive=summarizer_directive,
+            branch_reviewer_directive=branch_reviewer_directive,
+            pr_writer_directive=pr_writer_directive,
+            pr_title=pr_title,
+            pr_body_file=pr_body_file,
+            pr_base=pr_base,
+            skip_pr=skip_pr,
+            agents_config_paths=agents_config_paths,
+            wrap_up_dir=wrap_up_dir,
+            requirements_path=requirements_path,
+            review_path=review_path,
+        )
+    finally:
+        _cleanup_wrap_up_worktrees(repo, wrap_up_dir)
+
+
+async def _execute_sequence_inner(
+    states: list[PostTaskAgentState],
+    repo: Path,
+    session_branch: str,
+    plan_slug: str,
+    base_branch: str,
+    plan_source: Path,
+    merged_task_titles: list[str],
+    agent_cmd: str,
+    use_tmux: bool,
+    profile: Profile | None,
+    summarizer_directive: str | None,
+    branch_reviewer_directive: str | None,
+    pr_writer_directive: str | None,
+    pr_title: str | None,
+    pr_body_file: Path | None,
+    pr_base: str | None,
+    skip_pr: bool,
+    agents_config_paths: list[Path] | None,
+    wrap_up_dir: Path,
+    requirements_path: Path,
+    review_path: Path,
+) -> FinalReviewRecord:
     plan_content = plan_source.read_text(encoding="utf-8")
 
     summarizer_text = _resolve_directive_text(
@@ -312,13 +364,13 @@ async def _execute_sequence(
             states[1].note = "summarizer failed"
             states[2].status = PostTaskAgentStatus.SKIPPED
             states[2].note = "summarizer failed"
-            report_path.write_text(
+            review_path.write_text(
                 f"Summarizer failed (exit={returncode}).\n\n{raw_output[:2000]}",
                 encoding="utf-8",
             )
             record = _build_record(
                 verdict="error",
-                report_path=report_path,
+                review_path=review_path,
                 requirements_path=requirements_path,
                 repo=repo,
                 summarizer_agent=summarizer_agent_cmd,
@@ -333,8 +385,7 @@ async def _execute_sequence(
     finally:
         states[0].finished_at = time.time()
 
-    wt_path = repo / ".workbench" / plan_slug / ".review-wt" / session_branch
-    wt_path.parent.mkdir(parents=True, exist_ok=True)
+    wt_path = wrap_up_dir / ".review-wt"
     reviewer_returncode = 1
     reviewer_output = ""
     reviewer_cost: dict = {}
@@ -350,7 +401,7 @@ async def _execute_sequence(
                 requirements_path=requirements_path,
                 base_branch=base_branch,
                 merged_tasks=merged_task_titles,
-                output_path=report_path,
+                output_path=review_path,
             )
             reviewer_prompt = reviewer_dir.render()
 
@@ -379,7 +430,7 @@ async def _execute_sequence(
 
         except Exception as e:
             reviewer_output = f"Worktree/reviewer setup error: {e}"
-            report_path.write_text(reviewer_output, encoding="utf-8")
+            review_path.write_text(reviewer_output, encoding="utf-8")
             states[1].status = PostTaskAgentStatus.FAILED
             states[1].note = str(e)[:120]
             states[2].status = PostTaskAgentStatus.SKIPPED
@@ -387,7 +438,7 @@ async def _execute_sequence(
             combined_cost = {"cost_usd": summarizer_cost.get("cost_usd", 0.0)}
             record = _build_record(
                 verdict="error",
-                report_path=report_path,
+                review_path=review_path,
                 requirements_path=requirements_path,
                 repo=repo,
                 summarizer_agent=summarizer_agent_cmd,
@@ -404,9 +455,9 @@ async def _execute_sequence(
     total_cost = summarizer_cost.get("cost_usd", 0.0) + reviewer_cost.get("cost_usd", 0.0)
     combined_cost = {"cost_usd": total_cost}
 
-    if reviewer_returncode != 0 or not report_path.exists():
-        if not report_path.exists():
-            report_path.write_text(
+    if reviewer_returncode != 0 or not review_path.exists():
+        if not review_path.exists():
+            review_path.write_text(
                 f"Branch reviewer failed (exit={reviewer_returncode}).\n\n"
                 f"{reviewer_output[:2000]}",
                 encoding="utf-8",
@@ -417,7 +468,7 @@ async def _execute_sequence(
         states[2].note = "reviewer failed"
         record = _build_record(
             verdict="error",
-            report_path=report_path,
+            review_path=review_path,
             requirements_path=requirements_path,
             repo=repo,
             summarizer_agent=summarizer_agent_cmd,
@@ -427,10 +478,10 @@ async def _execute_sequence(
         await _persist_record(repo, plan_slug, session_branch, record)
         return record
 
-    states[1].output_path = report_path
+    states[1].output_path = review_path
     states[1].status = PostTaskAgentStatus.DONE
 
-    verdict = _parse_verdict(report_path.read_text(encoding="utf-8"))
+    verdict = _parse_verdict(review_path.read_text(encoding="utf-8"))
 
     pr_url: str | None = None
     if verdict != "pass" or skip_pr:
@@ -440,7 +491,7 @@ async def _execute_sequence(
         states[2].status = PostTaskAgentStatus.RUNNING
         states[2].started_at = time.time()
         try:
-            rel_report = report_path.relative_to(repo)
+            rel_report = review_path.relative_to(repo)
             if pr_body_file is not None:
                 title = pr_title or derive_title_from_plan(plan_content, plan_slug)
                 body = pr_body_file.read_text(encoding="utf-8")
@@ -459,6 +510,7 @@ async def _execute_sequence(
                         profile=profile,
                         directive_override=pr_writer_directive,
                         agents_config_paths=agents_config_paths,
+                        wrap_up_dir=wrap_up_dir,
                     )
                     title = pr_title or agent_title
                     body = agent_body
@@ -486,7 +538,7 @@ async def _execute_sequence(
 
     record = _build_record(
         verdict=verdict,
-        report_path=report_path,
+        review_path=review_path,
         requirements_path=requirements_path,
         repo=repo,
         summarizer_agent=summarizer_agent_cmd,
@@ -542,7 +594,7 @@ def _parse_verdict(content: str) -> str:
 
 def _build_record(
     verdict: str,
-    report_path: Path,
+    review_path: Path,
     requirements_path: Path,
     repo: Path,
     summarizer_agent: str,
@@ -554,7 +606,7 @@ def _build_record(
     return FinalReviewRecord(
         timestamp=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         verdict=verdict,
-        report_path=str(report_path.relative_to(repo)),
+        review_path=str(review_path.relative_to(repo)),
         requirements_path=str(requirements_path.relative_to(repo)),
         summarizer_agent=summarizer_agent,
         reviewer_agent=reviewer_agent,
@@ -608,3 +660,26 @@ def _cleanup_review_worktree(repo: Path, wt_path: Path) -> None:
             cwd=repo,
             capture_output=True,
         )
+
+
+def _cleanup_wrap_up_worktrees(repo: Path, wrap_up_dir: Path) -> None:
+    """Forcefully remove any ephemeral worktrees under ``wrap_up_dir``.
+
+    Per-agent cleanup already runs in each agent's ``finally:`` block, but if
+    those calls were skipped (crash before cleanup, ``git worktree remove``
+    failure), we sweep the wrap-up folder one more time at end-of-phase so the
+    .review-wt and .pr-writer-wt directories never linger between runs.
+    """
+    if not wrap_up_dir.exists():
+        return
+    for name in (".review-wt", ".pr-writer-wt"):
+        wt = wrap_up_dir / name
+        if not wt.exists():
+            continue
+        subprocess.run(
+            ["git", "worktree", "remove", str(wt), "--force"],
+            cwd=repo,
+            capture_output=True,
+        )
+        if wt.exists():
+            shutil.rmtree(wt, ignore_errors=True)

@@ -172,9 +172,9 @@ async def test_summarizer_writes_empty_file_returns_error(base_kwargs, tmp_repo)
 @pytest.mark.asyncio
 async def test_reviewer_fail_no_pr_opened(base_kwargs, tmp_repo):
     """Report ends in VERDICT: FAIL → verdict='fail', create_pr never called."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -192,8 +192,8 @@ async def test_reviewer_fail_no_pr_opened(base_kwargs, tmp_repo):
             )
         else:
             # Reviewer: write report with FAIL verdict
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("Review report.\n\nVERDICT: FAIL\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Review report.\n\nVERDICT: FAIL\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -218,9 +218,9 @@ async def test_reviewer_fail_no_pr_opened(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_reviewer_pass_opens_pr(base_kwargs, tmp_repo):
     """Report ends in VERDICT: PASS, mocked create_pr returns URL."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -236,8 +236,8 @@ async def test_reviewer_pass_opens_pr(base_kwargs, tmp_repo):
                 "## Requirements\n- Feature\n## Non-goals\n- None\n## Acceptance criteria\n- Pass"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("All good.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("All good.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -265,9 +265,9 @@ async def test_reviewer_pass_opens_pr(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_reviewer_pass_gh_missing_records_null_url(base_kwargs, tmp_repo):
     """Mocked create_pr returns (False, ...) → verdict='pass', pr_url is None."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -283,8 +283,8 @@ async def test_reviewer_pass_gh_missing_records_null_url(base_kwargs, tmp_repo):
                 "## Requirements\n- A\n## Non-goals\n- B\n## Acceptance criteria\n- C"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("Fine.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Fine.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -311,9 +311,9 @@ async def test_reviewer_pass_gh_missing_records_null_url(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_skip_pr_does_not_open_pr_on_pass(base_kwargs, tmp_repo):
     """With skip_pr=True and pass verdict, create_pr is never awaited."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -329,8 +329,8 @@ async def test_skip_pr_does_not_open_pr_on_pass(base_kwargs, tmp_repo):
                 "## Requirements\n- X\n## Non-goals\n- Y\n## Acceptance criteria\n- Z"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("LGTM.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("LGTM.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -353,9 +353,9 @@ async def test_skip_pr_does_not_open_pr_on_pass(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
     """After run, SessionStatus.load(...) includes the new record."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -371,8 +371,8 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
                 "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("Report.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Report.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -395,8 +395,8 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_worktree_creation_failure_persists_record_and_raises(base_kwargs, tmp_repo):
     """Worktree creation failure persists an error record AND propagates the exception."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -432,7 +432,7 @@ async def test_worktree_creation_failure_persists_record_and_raises(base_kwargs,
     assert status.final_reviews[0].verdict == "error"
 
 
-def _make_pass_fake_exec(req_path: Path, report_path: Path):
+def _make_pass_fake_exec(req_path: Path, review_path: Path):
     """Return a fake_exec helper that writes requirements then a PASS report."""
     call_count = {"n": 0}
 
@@ -444,8 +444,8 @@ def _make_pass_fake_exec(req_path: Path, report_path: Path):
                 "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
             )
         elif call_count["n"] == 2:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("Great work.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Great work.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -457,9 +457,9 @@ def _make_pass_fake_exec(req_path: Path, report_path: Path):
 @pytest.mark.asyncio
 async def test_pr_writer_invoked_on_pass(base_kwargs, tmp_repo):
     """On PASS verdict with no pr_body_file, the writer's output drives the PR."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -469,7 +469,7 @@ async def test_pr_writer_invoked_on_pass(base_kwargs, tmp_repo):
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -499,9 +499,9 @@ async def test_pr_writer_invoked_on_pass(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_pr_writer_skipped_when_pr_body_file_provided(base_kwargs, tmp_repo, tmp_path):
     """A user-supplied pr_body_file bypasses the writer entirely."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     body_file = tmp_path / "body.md"
     body_file.write_text("User-supplied body content")
@@ -514,7 +514,7 @@ async def test_pr_writer_skipped_when_pr_body_file_provided(base_kwargs, tmp_rep
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -540,9 +540,9 @@ async def test_pr_writer_skipped_when_pr_body_file_provided(base_kwargs, tmp_rep
 @pytest.mark.asyncio
 async def test_pr_writer_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
     """PrWriterAgentError → fallback body is plan-derived (contains Context text)."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -552,7 +552,7 @@ async def test_pr_writer_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -579,9 +579,9 @@ async def test_pr_writer_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_pr_writer_parse_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
     """PrWriterParseError → fallback body is plan-derived (contains Context text)."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -591,7 +591,7 @@ async def test_pr_writer_parse_error_falls_back_to_plan_body(base_kwargs, tmp_re
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -618,9 +618,9 @@ async def test_pr_writer_parse_error_falls_back_to_plan_body(base_kwargs, tmp_re
 @pytest.mark.asyncio
 async def test_pr_writer_not_called_on_fail_verdict(base_kwargs, tmp_repo):
     """A FAIL verdict skips both the PR writer and create_pr."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -636,8 +636,8 @@ async def test_pr_writer_not_called_on_fail_verdict(base_kwargs, tmp_repo):
                 "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("Nope.\n\nVERDICT: FAIL\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Nope.\n\nVERDICT: FAIL\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -662,9 +662,9 @@ async def test_pr_writer_not_called_on_fail_verdict(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_pr_writer_not_called_when_skip_pr_true(base_kwargs, tmp_repo):
     """PASS + skip_pr=True still skips the PR writer."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -674,7 +674,7 @@ async def test_pr_writer_not_called_when_skip_pr_true(base_kwargs, tmp_repo):
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -692,9 +692,9 @@ async def test_pr_writer_not_called_when_skip_pr_true(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_pr_title_cli_override_wins_over_agent_title(base_kwargs, tmp_repo):
     """An explicit pr_title overrides the agent-authored title."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -704,7 +704,7 @@ async def test_pr_title_cli_override_wins_over_agent_title(base_kwargs, tmp_repo
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -730,10 +730,10 @@ async def test_pr_title_cli_override_wins_over_agent_title(base_kwargs, tmp_repo
 
 @pytest.mark.asyncio
 async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
-    """Regression: requirements.md and report.md must live under .workbench/<plan>/reviews/<session>/."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    """Regression: requirements.md and review.md must live under .workbench/<plan>/wrap-up/<session>/."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     call_count = {"n": 0}
 
@@ -749,8 +749,8 @@ async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
                 "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
             )
         else:
-            report_path.parent.mkdir(parents=True, exist_ok=True)
-            report_path.write_text("All good.\n\nVERDICT: PASS\n")
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("All good.\n\nVERDICT: PASS\n")
         proc = MagicMock()
         proc.returncode = 0
         proc.communicate = AsyncMock(return_value=(b"done", b""))
@@ -766,9 +766,9 @@ async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
         await run_final_review(**base_kwargs)
 
     expected_requirements = (
-        tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "requirements.md"
+        tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "requirements.md"
     )
-    expected_report = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "report.md"
+    expected_report = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "review.md"
     assert expected_requirements.exists()
     assert expected_report.exists()
     assert not (tmp_repo / ".workbench" / "reviews").exists()
@@ -944,9 +944,9 @@ def test_post_task_agent_state_elapsed_formats_finished_time():
 @pytest.mark.asyncio
 async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
     """States progress from pending → running → done across all three agents."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -981,7 +981,7 @@ async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree", side_effect=at_worktree),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -1023,9 +1023,9 @@ async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_run_final_review_marks_pr_writer_skipped_when_skip_pr(base_kwargs, tmp_repo):
     """skip_pr=True → states[2] ends in SKIPPED with note containing 'skip_pr'."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
-    report_path = reviews_dir / "report.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]
@@ -1042,7 +1042,7 @@ async def test_run_final_review_marks_pr_writer_skipped_when_skip_pr(base_kwargs
         patch("workbench.final_review.get_adapter", return_value=adapter),
         patch(
             "asyncio.create_subprocess_exec",
-            side_effect=_make_pass_fake_exec(req_path, report_path),
+            side_effect=_make_pass_fake_exec(req_path, review_path),
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
@@ -1058,8 +1058,8 @@ async def test_run_final_review_marks_pr_writer_skipped_when_skip_pr(base_kwargs
 @pytest.mark.asyncio
 async def test_run_final_review_marks_failed_state_on_agent_failure(base_kwargs, tmp_repo):
     """Branch reviewer raising → states[1] FAILED with note containing exception text."""
-    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
-    req_path = reviews_dir / "requirements.md"
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
 
     adapter = MagicMock()
     adapter.build_command.return_value = ["echo", "ok"]

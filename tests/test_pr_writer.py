@@ -111,7 +111,7 @@ def _exec_factory(
     """Build an async create_subprocess_exec stub.
 
     git invocations succeed and return a stub diff stat. The third call
-    (the agent) optionally writes the pr_body.md and returns `pr_returncode`.
+    (the agent) optionally writes the pr-body.md and returns `pr_returncode`.
     """
     call_count = {"n": 0}
 
@@ -139,7 +139,7 @@ def _exec_factory(
 
 @pytest.mark.asyncio
 async def test_writes_pr_body_and_returns_title_body(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     adapter = _make_adapter(output, "# Add feature X\n\nDoes the thing.\n")
     fake_exec, _ = _exec_factory(output, "# Add feature X\n\nDoes the thing.\n")
 
@@ -156,7 +156,7 @@ async def test_writes_pr_body_and_returns_title_body(base_kwargs, tmp_repo):
 
 @pytest.mark.asyncio
 async def test_existing_pr_body_is_overwritten(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text("stale stale stale", encoding="utf-8")
 
@@ -177,7 +177,7 @@ async def test_existing_pr_body_is_overwritten(base_kwargs, tmp_repo):
 @pytest.mark.asyncio
 async def test_missing_context_section_uses_h1_only(base_kwargs, tmp_repo, plan_source):
     plan_source.write_text("# Title Only\n\nNo context section here.\n")
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     rendered_prompts: list[str] = []
 
     adapter = MagicMock()
@@ -203,7 +203,7 @@ async def test_missing_context_section_uses_h1_only(base_kwargs, tmp_repo, plan_
 
 @pytest.mark.asyncio
 async def test_agent_nonzero_raises_pr_writer_agent_error(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     adapter = _make_adapter(None, "")
     fake_exec, _ = _exec_factory(output, "", pr_returncode=1)
 
@@ -230,7 +230,7 @@ async def test_agent_writes_nothing_raises_pr_writer_agent_error(base_kwargs):
 
 @pytest.mark.asyncio
 async def test_missing_title_heading_raises_parse_error(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     adapter = _make_adapter(output, "no title heading here, just text\n")
     fake_exec, _ = _exec_factory(output, "no title heading here, just text\n")
 
@@ -244,7 +244,7 @@ async def test_missing_title_heading_raises_parse_error(base_kwargs, tmp_repo):
 
 @pytest.mark.asyncio
 async def test_empty_body_raises_parse_error(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     adapter = _make_adapter(output, "# Only Title\n")
     fake_exec, _ = _exec_factory(output, "# Only Title\n")
 
@@ -258,7 +258,7 @@ async def test_empty_body_raises_parse_error(base_kwargs, tmp_repo):
 
 @pytest.mark.asyncio
 async def test_title_truncated_at_200_chars(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     long_title = "A" * 500
     content = f"# {long_title}\n\nplenty of body content right here.\n"
     adapter = _make_adapter(output, content)
@@ -296,7 +296,7 @@ async def test_git_diff_failure_raises_agent_error(base_kwargs):
 @pytest.mark.asyncio
 async def test_profile_pr_writer_agent_used_when_provided(base_kwargs, tmp_repo):
     """profile.pr_writer.agent overrides the default 'claude' agent."""
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     profile = Profile.default()
     profile.pr_writer = RoleConfig(agent="codex", directive="")
     base_kwargs["profile"] = profile
@@ -323,7 +323,7 @@ async def test_profile_pr_writer_agent_used_when_provided(base_kwargs, tmp_repo)
 
 @pytest.mark.asyncio
 async def test_directive_override_takes_precedence_over_profile(base_kwargs, tmp_repo):
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     profile = Profile.default()
     profile.pr_writer = RoleConfig(agent="claude", directive="FROM_PROFILE")
     base_kwargs["profile"] = profile
@@ -383,9 +383,9 @@ def test_derive_body_omits_context_when_absent():
 
 
 def test_derive_body_appends_report_footer():
-    body = derive_body_from_plan("# Plan\n", ["T"], report_path=Path("reviews/report.md"))
+    body = derive_body_from_plan("# Plan\n", ["T"], review_path=Path("wrap-up/review.md"))
     assert "Reviewed by workbench" in body
-    assert "reviews/report.md" in body
+    assert "wrap-up/review.md" in body
 
 
 @pytest.mark.asyncio
@@ -396,7 +396,7 @@ async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_r
     is currently checked out at (typically main) instead of session_branch,
     and silently describes stale code.
     """
-    output = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1" / "pr_body.md"
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     captured_cwds: list[str | None] = []
 
     async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
@@ -427,7 +427,7 @@ async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_r
     # The agent call is the 3rd subprocess (after git diff and git log).
     assert len(captured_cwds) >= 3, "expected at least three subprocess invocations"
     agent_cwd = captured_cwds[2]
-    expected_wt = tmp_repo / ".workbench" / "my-plan" / ".pr-writer-wt" / "workbench-1"
+    expected_wt = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / ".pr-writer-wt"
     assert agent_cwd == str(expected_wt), (
         f"Agent must run with cwd={expected_wt}, got cwd={agent_cwd}. "
         "Running from repo root would expose the wrong branch's files."

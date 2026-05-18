@@ -56,7 +56,7 @@ class FinalReviewRecord:
 
     timestamp: str  # ISO 8601 UTC, e.g. "2026-05-10T14:22:31Z"
     verdict: str  # "pass" | "fail" | "error"
-    report_path: str  # repo-relative path to report.md
+    review_path: str  # repo-relative path to review.md
     requirements_path: str  # repo-relative path to requirements.md
     summarizer_agent: str  # e.g. "claude"
     reviewer_agent: str  # e.g. "claude"
@@ -67,7 +67,7 @@ class FinalReviewRecord:
         return {
             "timestamp": self.timestamp,
             "verdict": self.verdict,
-            "report_path": self.report_path,
+            "review_path": self.review_path,
             "requirements_path": self.requirements_path,
             "summarizer_agent": self.summarizer_agent,
             "reviewer_agent": self.reviewer_agent,
@@ -80,7 +80,7 @@ class FinalReviewRecord:
         return cls(
             timestamp=data.get("timestamp", ""),
             verdict=data.get("verdict", ""),
-            report_path=data.get("report_path", ""),
+            review_path=data.get("review_path", data.get("report_path", "")),
             requirements_path=data.get("requirements_path", ""),
             summarizer_agent=data.get("summarizer_agent", ""),
             reviewer_agent=data.get("reviewer_agent", ""),

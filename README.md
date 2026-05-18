@@ -589,9 +589,12 @@ For finer-grained control (waves, directive overrides, selective tasks), use `wb
 
 Run a whole-branch review for a completed session. Two agents run in sequence: a **requirements summarizer** extracts a structured digest from the plan, then a **branch reviewer** evaluates the session-branch diff against that digest and writes a markdown report. On `VERDICT: PASS`, workbench opens a GitHub PR via `gh pr create`. On `VERDICT: FAIL`, no PR is created; the report lists specific findings with file/line evidence and concrete suggested fixes for a human to address.
 
-Artifacts land under `.workbench/<plan-id>/reviews/<session>/`:
+Artifacts land under `.workbench/<plan-id>/wrap-up/<session>/`:
 - `requirements.md` — the requirements digest
-- `report.md` — the review report
+- `review.md` — the review report
+- `pr-body.md` — the PR title and body (written when the writer runs)
+
+Two ephemeral worktrees (`.review-wt`, `.pr-writer-wt`) are created inside the same `wrap-up/<session>/` folder while the agents run and are deleted when the phase completes.
 
 Each run appends an entry to the session's `final_reviews` list in `.workbench/<plan-id>/status.yaml`, and `wb status` surfaces the latest verdict and PR URL (or report path on fail).
 

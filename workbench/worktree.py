@@ -254,7 +254,7 @@ def iter_worktree_dirs(repo: Path) -> list[Path]:
 
     Scans both the new layout (``.workbench/<plan>/<task>``) and the
     legacy layout (``.workbench/<task>``). Identified by the presence of a
-    ``.git`` gitfile, so non-worktree directories like ``reviews/`` are
+    ``.git`` gitfile, so non-worktree directories like ``wrap-up/`` are
     skipped.
     """
     workbench_dir = repo / ".workbench"

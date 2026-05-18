@@ -601,8 +601,8 @@ class TestFinalReviewRecord:
         defaults = {
             "timestamp": "2026-05-10T14:22:31Z",
             "verdict": "pass",
-            "report_path": ".workbench/my-plan/reviews/wb-1/report.md",
-            "requirements_path": ".workbench/my-plan/reviews/wb-1/requirements.md",
+            "review_path": ".workbench/my-plan/wrap-up/wb-1/review.md",
+            "requirements_path": ".workbench/my-plan/wrap-up/wb-1/requirements.md",
             "summarizer_agent": "claude",
             "reviewer_agent": "claude",
             "cost_usd": 0.42,
@@ -617,7 +617,7 @@ class TestFinalReviewRecord:
         restored = FinalReviewRecord.from_dict(data)
         assert restored.timestamp == rec.timestamp
         assert restored.verdict == rec.verdict
-        assert restored.report_path == rec.report_path
+        assert restored.review_path == rec.review_path
         assert restored.requirements_path == rec.requirements_path
         assert restored.summarizer_agent == rec.summarizer_agent
         assert restored.reviewer_agent == rec.reviewer_agent
@@ -628,7 +628,7 @@ class TestFinalReviewRecord:
         data = {
             "timestamp": "2026-05-10T14:22:31Z",
             "verdict": "fail",
-            "report_path": "r.md",
+            "review_path": "r.md",
             "requirements_path": "req.md",
             "summarizer_agent": "claude",
             "reviewer_agent": "claude",
@@ -636,6 +636,19 @@ class TestFinalReviewRecord:
         rec = FinalReviewRecord.from_dict(data)
         assert rec.cost_usd == 0.0
         assert rec.pr_url is None
+
+    def test_final_review_record_legacy_report_path_key(self):
+        """Old YAML using `report_path:` still loads into review_path."""
+        data = {
+            "timestamp": "2026-05-10T14:22:31Z",
+            "verdict": "pass",
+            "report_path": ".workbench/foo/reviews/wb-1/report.md",
+            "requirements_path": ".workbench/foo/reviews/wb-1/requirements.md",
+            "summarizer_agent": "claude",
+            "reviewer_agent": "claude",
+        }
+        rec = FinalReviewRecord.from_dict(data)
+        assert rec.review_path == ".workbench/foo/reviews/wb-1/report.md"
 
     def test_session_save_persists_final_reviews(self, tmp_path):
         (tmp_path / ".workbench").mkdir()

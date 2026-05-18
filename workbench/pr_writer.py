@@ -44,10 +44,11 @@ async def run_pr_writer(
     profile: Profile | None = None,
     directive_override: str | None = None,
     agents_config_paths: list[Path] | None = None,
+    wrap_up_dir: Path | None = None,
 ) -> tuple[str, str]:
     """Run the PR-writer agent and return (title, body).
 
-    Writes the artifact to .workbench/<plan_slug>/reviews/<session_branch>/pr_body.md.
+    Writes the artifact to .workbench/<plan_slug>/wrap-up/<session_branch>/pr-body.md.
     On parse failure, raises PrWriterParseError.
     On agent crash (non-zero exit), raises PrWriterAgentError.
     Both errors are recoverable — callers fall back to plan-derived defaults.
@@ -70,9 +71,10 @@ async def run_pr_writer(
     )
     agent_cmd_resolved = _resolve_agent_cmd(agent_cmd, profile)
 
-    reviews_dir = repo / ".workbench" / plan_slug / "reviews" / session_branch
-    reviews_dir.mkdir(parents=True, exist_ok=True)
-    output_path = reviews_dir / "pr_body.md"
+    if wrap_up_dir is None:
+        wrap_up_dir = repo / ".workbench" / plan_slug / "wrap-up" / session_branch
+    wrap_up_dir.mkdir(parents=True, exist_ok=True)
+    output_path = wrap_up_dir / "pr-body.md"
     output_path.unlink(missing_ok=True)
 
     directive = PrWriterDirective(
@@ -97,8 +99,7 @@ async def run_pr_writer(
     # on main) would show stale content. Create an ephemeral worktree and clean
     # it up afterwards; the bare git store at `repo` already serviced the
     # diff/log queries above.
-    wt_path = repo / ".workbench" / plan_slug / ".pr-writer-wt" / session_branch
-    wt_path.parent.mkdir(parents=True, exist_ok=True)
+    wt_path = wrap_up_dir / ".pr-writer-wt"
     try:
         _create_pr_writer_worktree(repo, wt_path, session_branch)
     except Exception as e:  # noqa: BLE001
@@ -126,7 +127,7 @@ async def run_pr_writer(
         if returncode != 0:
             raise PrWriterAgentError(f"PR-writer agent exited {returncode}:\n{raw_output[:2000]}")
         if not output_path.exists() or output_path.stat().st_size == 0:
-            raise PrWriterAgentError("Agent did not write pr_body.md")
+            raise PrWriterAgentError("Agent did not write pr-body.md")
 
         return _parse_pr_body(output_path)
     finally:
@@ -149,13 +150,13 @@ def derive_title_from_plan(plan_content: str, plan_slug: str) -> str:
 def derive_body_from_plan(
     plan_content: str,
     merged_task_titles: list[str],
-    report_path: Path | None = None,
+    review_path: Path | None = None,
 ) -> str:
     """Build a plan-derived PR body from the plan's Context section and merged tasks.
 
     The body has up to three sections: the ``## Context`` text from the plan
     (if present), a ``## Tasks`` bullet list of merged_task_titles, and an
-    optional reviewer footer when report_path is provided.
+    optional reviewer footer when review_path is provided.
     """
     context_lines: list[str] = []
     in_context = False
@@ -177,8 +178,8 @@ def derive_body_from_plan(
         tasks_section = "## Tasks\n\n" + "\n".join(f"- {t}" for t in merged_task_titles)
         parts.append(tasks_section)
 
-    if report_path is not None:
-        parts.append(f"🤖 Reviewed by workbench. Report: `{report_path}`")
+    if review_path is not None:
+        parts.append(f"🤖 Reviewed by workbench. Report: `{review_path}`")
 
     return "\n\n".join(parts)
 
@@ -263,7 +264,7 @@ async def _run_git(repo: Path, cmd: list[str]) -> str:
 
 
 def _parse_pr_body(output_path: Path) -> tuple[str, str]:
-    """Parse pr_body.md. First non-blank line is `# <title>`; rest is body."""
+    """Parse pr-body.md. First non-blank line is `# <title>`; rest is body."""
     content = output_path.read_text(encoding="utf-8")
     lines = content.splitlines()
 
@@ -274,20 +275,20 @@ def _parse_pr_body(output_path: Path) -> tuple[str, str]:
             continue
         match = re.match(r"^#\s+(.+)$", line)
         if not match:
-            raise PrWriterParseError("First non-blank line of pr_body.md must be `# <title>`")
+            raise PrWriterParseError("First non-blank line of pr-body.md must be `# <title>`")
         title = match.group(1).strip()
         title_idx = idx
         break
 
     if title is None or title_idx is None:
-        raise PrWriterParseError("pr_body.md has no title heading")
+        raise PrWriterParseError("pr-body.md has no title heading")
 
     if len(title) > _TITLE_MAX:
         title = title[: _TITLE_MAX - 1] + "…"
 
     body = "\n".join(lines[title_idx + 1 :]).strip()
     if len(body) < _BODY_MIN:
-        raise PrWriterParseError("pr_body.md has empty or too-short body")
+        raise PrWriterParseError("pr-body.md has empty or too-short body")
 
     return title, body
 

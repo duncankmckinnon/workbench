@@ -3171,8 +3171,8 @@ def test_run_final_review_flag_invokes_orchestration(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
         pr_url="https://github.com/test/test/pull/1",
@@ -3257,8 +3257,8 @@ def test_merge_review_flag_invokes_orchestration(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3311,8 +3311,8 @@ def test_final_review_standalone_command(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3362,8 +3362,8 @@ def test_review_is_alias_for_final_review(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-11T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3415,8 +3415,8 @@ def test_status_shows_final_review_summary(git_repo):
             {
                 "timestamp": "2026-05-10T00:00:00Z",
                 "verdict": "pass",
-                "report_path": ".workbench/my-plan/reviews/workbench-1/report.md",
-                "requirements_path": ".workbench/my-plan/reviews/workbench-1/requirements.md",
+                "review_path": ".workbench/my-plan/wrap-up/workbench-1/review.md",
+                "requirements_path": ".workbench/my-plan/wrap-up/workbench-1/requirements.md",
                 "summarizer_agent": "claude",
                 "reviewer_agent": "claude",
                 "pr_url": "https://github.com/test/test/pull/1",
@@ -3482,8 +3482,8 @@ def test_pr_title_override_passed_through(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3533,8 +3533,8 @@ def test_skip_pr_flag_propagates(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3588,8 +3588,8 @@ def test_frontmatter_final_review_true_runs_review_without_flag(git_repo, tmp_pa
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -3646,8 +3646,8 @@ def test_cli_flag_overrides_frontmatter(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-10T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -4488,8 +4488,8 @@ def test_run_final_review_passes_pr_writer_directive(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-11T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -4542,8 +4542,8 @@ def test_merge_review_passes_pr_writer_directive(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-11T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -4603,8 +4603,8 @@ def test_final_review_command_passes_pr_writer_directive(git_repo, tmp_path):
     mock_record = FinalReviewRecord(
         timestamp="2026-05-11T00:00:00Z",
         verdict="pass",
-        report_path=".workbench/my-plan/reviews/workbench-1/report.md",
-        requirements_path=".workbench/my-plan/reviews/workbench-1/requirements.md",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
         summarizer_agent="claude",
         reviewer_agent="claude",
     )
@@ -4643,7 +4643,7 @@ def test_final_review_command_passes_pr_writer_directive(git_repo, tmp_path):
 def test_list_ephemeral_worktrees_finds_review_wt(tmp_path):
     from workbench.cli import _list_ephemeral_worktrees
 
-    wt = tmp_path / ".workbench" / "my-plan" / ".review-wt" / "feature-1"
+    wt = tmp_path / ".workbench" / "my-plan" / "wrap-up" / "feature-1" / ".review-wt"
     wt.mkdir(parents=True)
 
     paths = _list_ephemeral_worktrees(tmp_path)
@@ -4651,6 +4651,28 @@ def test_list_ephemeral_worktrees_finds_review_wt(tmp_path):
 
 
 def test_list_ephemeral_worktrees_finds_pr_writer_wt(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    wt = tmp_path / ".workbench" / "my-plan" / "wrap-up" / "feature-1" / ".pr-writer-wt"
+    wt.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert wt in paths
+
+
+def test_list_ephemeral_worktrees_finds_legacy_review_wt(tmp_path):
+    """Pre-wrap-up layout: .workbench/<plan>/.review-wt/<session>/ still cleaned up."""
+    from workbench.cli import _list_ephemeral_worktrees
+
+    wt = tmp_path / ".workbench" / "my-plan" / ".review-wt" / "feature-1"
+    wt.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert wt in paths
+
+
+def test_list_ephemeral_worktrees_finds_legacy_pr_writer_wt(tmp_path):
+    """Pre-wrap-up layout: .workbench/<plan>/.pr-writer-wt/<session>/ still cleaned up."""
     from workbench.cli import _list_ephemeral_worktrees
 
     wt = tmp_path / ".workbench" / "my-plan" / ".pr-writer-wt" / "feature-1"
@@ -4683,18 +4705,19 @@ def test_list_ephemeral_worktrees_returns_empty_when_none(tmp_path):
 def test_list_ephemeral_worktrees_sorted_deterministic(tmp_path):
     from workbench.cli import _list_ephemeral_worktrees
 
-    base = tmp_path / ".workbench" / "my-plan" / ".review-wt"
+    base = tmp_path / ".workbench" / "my-plan" / "wrap-up"
     for name in ("zebra", "alpha", "mango"):
-        (base / name).mkdir(parents=True)
+        (base / name / ".review-wt").mkdir(parents=True)
 
     paths = _list_ephemeral_worktrees(tmp_path)
-    assert [p.name for p in paths] == ["alpha", "mango", "zebra"]
+    assert [p.parent.name for p in paths] == ["alpha", "mango", "zebra"]
+    assert all(p.name == ".review-wt" for p in paths)
 
 
 def test_clean_removes_ephemeral_worktrees(git_repo):
     from unittest.mock import MagicMock
 
-    review_wt = git_repo / ".workbench" / "my-plan" / ".review-wt" / "feature"
+    review_wt = git_repo / ".workbench" / "my-plan" / "wrap-up" / "feature" / ".review-wt"
     review_wt.mkdir(parents=True)
     merge_wt = git_repo / ".workbench" / "_merge"
     merge_wt.mkdir(parents=True)
@@ -4725,7 +4748,7 @@ def test_clean_removes_ephemeral_worktrees(git_repo):
 
 
 def test_clean_dry_run_lists_but_does_not_remove_ephemeral(git_repo):
-    review_wt = git_repo / ".workbench" / "my-plan" / ".review-wt" / "feature"
+    review_wt = git_repo / ".workbench" / "my-plan" / "wrap-up" / "feature" / ".review-wt"
     review_wt.mkdir(parents=True)
     merge_wt = git_repo / ".workbench" / "_merge"
     merge_wt.mkdir(parents=True)
@@ -4737,7 +4760,7 @@ def test_clean_dry_run_lists_but_does_not_remove_ephemeral(git_repo):
     assert result.exit_code == 0, result.output
     assert review_wt.exists()
     assert merge_wt.exists()
-    assert ".review-wt/feature" in result.output
+    assert "feature/.review-wt" in result.output
     assert "_merge" in result.output
 
 

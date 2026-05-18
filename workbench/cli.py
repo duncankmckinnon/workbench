@@ -170,7 +170,7 @@ def _print_final_review_result(record: FinalReviewRecord) -> None:
         "fail": "red",
         "error": "yellow",
     }.get(record.verdict, "dim")
-    location = record.pr_url or record.report_path
+    location = record.pr_url or record.review_path
     console.print(
         f"Final review: [{verdict_style}]{record.verdict.upper()}[/{verdict_style}] — {location}"
     )
@@ -1313,7 +1313,9 @@ def status(repo: Path | None):
                 verdict_style = {"pass": "green", "fail": "red", "error": "yellow"}.get(
                     verdict, "dim"
                 )
-                location = latest.get("pr_url") or latest.get("report_path", "")
+                location = latest.get("pr_url") or latest.get(
+                    "review_path", latest.get("report_path", "")
+                )
                 n = len(reviews)
                 console.print(
                     f"\n  Final review ({sb}, {n} run(s), "
@@ -1370,8 +1372,10 @@ def _list_ephemeral_worktrees(repo: Path) -> list[Path]:
     """Enumerate ephemeral agent worktrees that should never outlive a run.
 
     Includes:
-      - .workbench/<plan>/.review-wt/<session_branch>  (branch reviewer)
-      - .workbench/<plan>/.pr-writer-wt/<session_branch>  (PR writer)
+      - .workbench/<plan>/wrap-up/<session_branch>/.review-wt    (branch reviewer)
+      - .workbench/<plan>/wrap-up/<session_branch>/.pr-writer-wt (PR writer)
+      - .workbench/<plan>/.review-wt/<session_branch>            (legacy reviewer)
+      - .workbench/<plan>/.pr-writer-wt/<session_branch>         (legacy writer)
       - .workbench/_merge  (merge resolver, shared path)
 
     Returns absolute paths in deterministic (sorted) order.
@@ -1383,9 +1387,18 @@ def _list_ephemeral_worktrees(repo: Path) -> list[Path]:
     for plan_dir in sorted(wb.iterdir()):
         if not plan_dir.is_dir():
             continue
+        wrap_up = plan_dir / "wrap-up"
+        if wrap_up.is_dir():
+            for session_dir in sorted(wrap_up.iterdir()):
+                if not session_dir.is_dir():
+                    continue
+                for sub in (".review-wt", ".pr-writer-wt"):
+                    wt = session_dir / sub
+                    if wt.is_dir():
+                        paths.append(wt)
         for sub in (".review-wt", ".pr-writer-wt"):
             sub_dir = plan_dir / sub
-            if sub_dir.exists():
+            if sub_dir.is_dir():
                 for child in sorted(sub_dir.iterdir()):
                     if child.is_dir():
                         paths.append(child)
@@ -2293,7 +2306,7 @@ def pull_request_cmd(
                 f"falling back to plan-derived PR body[/yellow]"
             )
             title = pr_title or derive_title_from_plan(plan_text, plan_slug)
-            body = derive_body_from_plan(plan_text, merged_titles, report_path=None)
+            body = derive_body_from_plan(plan_text, merged_titles, review_path=None)
 
     base = pr_base or base_branch
     push_ok, push_msg = push_session_branch(repo, session)
