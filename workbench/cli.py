@@ -1366,6 +1366,52 @@ def _list_workbench_worktrees(repo: Path) -> list[tuple[str, str | None]]:
     return out
 
 
+def _list_ephemeral_worktrees(repo: Path) -> list[Path]:
+    """Enumerate ephemeral agent worktrees that should never outlive a run.
+
+    Includes:
+      - .workbench/<plan>/.review-wt/<session_branch>  (branch reviewer)
+      - .workbench/<plan>/.pr-writer-wt/<session_branch>  (PR writer)
+      - .workbench/_merge  (merge resolver, shared path)
+
+    Returns absolute paths in deterministic (sorted) order.
+    """
+    wb = repo / ".workbench"
+    if not wb.exists():
+        return []
+    paths: list[Path] = []
+    for plan_dir in sorted(wb.iterdir()):
+        if not plan_dir.is_dir():
+            continue
+        for sub in (".review-wt", ".pr-writer-wt"):
+            sub_dir = plan_dir / sub
+            if sub_dir.exists():
+                for child in sorted(sub_dir.iterdir()):
+                    if child.is_dir():
+                        paths.append(child)
+    merge_dir = wb / "_merge"
+    if merge_dir.exists():
+        paths.append(merge_dir)
+    return paths
+
+
+def _remove_ephemeral_worktree(repo: Path, wt_path: Path) -> tuple[bool, str]:
+    """Remove an ephemeral worktree. Returns (ok, message)."""
+    result = subprocess.run(
+        ["git", "worktree", "remove", str(wt_path), "--force"],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode == 0:
+        return True, "removed"
+    if wt_path.exists():
+        shutil.rmtree(wt_path, ignore_errors=True)
+        if not wt_path.exists():
+            return True, "removed (filesystem)"
+    return False, result.stderr.strip() or "unknown error"
+
+
 def _list_wb_branches(repo: Path) -> list[str]:
     """Return every ``wb/*`` branch name."""
     result = subprocess.run(
@@ -1566,7 +1612,33 @@ def clean(
             console.print(f"{style} plan {rel}")
         counts["plans"] += 1
 
-    # 7. Summary
+    # 7. Ephemeral agent worktrees (branch reviewer / PR writer / merge resolver).
+    ephemeral = _list_ephemeral_worktrees(repo)
+    if ephemeral:
+        console.print("\n[bold]Ephemeral agent worktrees:[/bold]")
+        for p in ephemeral:
+            try:
+                rel = p.relative_to(repo)
+            except ValueError:
+                rel = p
+            console.print(f"  {rel}")
+        if dry_run:
+            console.print(f"[dim]Would remove {len(ephemeral)} ephemeral worktree(s).[/dim]")
+        else:
+            removed = 0
+            for p in ephemeral:
+                ok, msg = _remove_ephemeral_worktree(repo, p)
+                mark = "[green]✓[/green]" if ok else "[red]✗[/red]"
+                try:
+                    rel = p.relative_to(repo)
+                except ValueError:
+                    rel = p
+                console.print(f"  {mark} {rel} — {msg}")
+                if ok:
+                    removed += 1
+            console.print(f"[green]Removed {removed} ephemeral worktree(s).[/green]")
+
+    # 8. Summary
     summary = (
         f"{counts['worktrees']} worktree(s), "
         f"{counts['branches']} branch(es), "

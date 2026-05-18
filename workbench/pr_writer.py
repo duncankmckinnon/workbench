@@ -293,19 +293,30 @@ def _parse_pr_body(output_path: Path) -> tuple[str, str]:
 
 
 def _create_pr_writer_worktree(repo: Path, wt_path: Path, session_branch: str) -> None:
-    """Create a git worktree at wt_path checked out to session_branch."""
+    """Create a git worktree at wt_path checked out to session_branch's tip.
+
+    Uses --detach because the PR writer only reads the tree to describe the
+    diff. A non-detached `git worktree add <path> <branch>` fails with exit
+    128 when the branch is already checked out elsewhere (the main repo
+    typically sits on the session branch right after a run).
+    """
     if wt_path.exists():
         subprocess.run(
             ["git", "worktree", "remove", str(wt_path), "--force"],
             cwd=repo,
             capture_output=True,
         )
-    subprocess.run(
-        ["git", "worktree", "add", str(wt_path), session_branch],
+    result = subprocess.run(
+        ["git", "worktree", "add", "--detach", str(wt_path), session_branch],
         cwd=repo,
         capture_output=True,
-        check=True,
+        text=True,
     )
+    if result.returncode != 0:
+        raise RuntimeError(
+            f"git worktree add (exit {result.returncode}): "
+            f"{result.stderr.strip() or result.stdout.strip() or 'no output'}"
+        )
 
 
 def _cleanup_pr_writer_worktree(repo: Path, wt_path: Path) -> None:

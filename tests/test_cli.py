@@ -4633,3 +4633,153 @@ def test_final_review_command_passes_pr_writer_directive(git_repo, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert mock_final_review.call_args.kwargs.get("pr_writer_directive") == "FinalCustom"
+
+
+# ---------------------------------------------------------------------------
+# Ephemeral worktree enumeration and cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_list_ephemeral_worktrees_finds_review_wt(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    wt = tmp_path / ".workbench" / "my-plan" / ".review-wt" / "feature-1"
+    wt.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert wt in paths
+
+
+def test_list_ephemeral_worktrees_finds_pr_writer_wt(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    wt = tmp_path / ".workbench" / "my-plan" / ".pr-writer-wt" / "feature-1"
+    wt.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert wt in paths
+
+
+def test_list_ephemeral_worktrees_finds_merge_dir(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    merge = tmp_path / ".workbench" / "_merge"
+    merge.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert merge in paths
+
+
+def test_list_ephemeral_worktrees_returns_empty_when_none(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    task = tmp_path / ".workbench" / "my-plan" / "task-1"
+    task.mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert paths == []
+
+
+def test_list_ephemeral_worktrees_sorted_deterministic(tmp_path):
+    from workbench.cli import _list_ephemeral_worktrees
+
+    base = tmp_path / ".workbench" / "my-plan" / ".review-wt"
+    for name in ("zebra", "alpha", "mango"):
+        (base / name).mkdir(parents=True)
+
+    paths = _list_ephemeral_worktrees(tmp_path)
+    assert [p.name for p in paths] == ["alpha", "mango", "zebra"]
+
+
+def test_clean_removes_ephemeral_worktrees(git_repo):
+    from unittest.mock import MagicMock
+
+    review_wt = git_repo / ".workbench" / "my-plan" / ".review-wt" / "feature"
+    review_wt.mkdir(parents=True)
+    merge_wt = git_repo / ".workbench" / "_merge"
+    merge_wt.mkdir(parents=True)
+
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if (
+            isinstance(cmd, list)
+            and len(cmd) >= 3
+            and cmd[0] == "git"
+            and cmd[1] == "worktree"
+            and cmd[2] == "remove"
+        ):
+            return MagicMock(returncode=1, stderr="mock failure", stdout="")
+        return real_run(cmd, *args, **kwargs)
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.subprocess.run", side_effect=fake_run),
+    ):
+        result = runner.invoke(main, ["clean"])
+
+    assert result.exit_code == 0, result.output
+    assert not review_wt.exists()
+    assert not merge_wt.exists()
+
+
+def test_clean_dry_run_lists_but_does_not_remove_ephemeral(git_repo):
+    review_wt = git_repo / ".workbench" / "my-plan" / ".review-wt" / "feature"
+    review_wt.mkdir(parents=True)
+    merge_wt = git_repo / ".workbench" / "_merge"
+    merge_wt.mkdir(parents=True)
+
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["clean", "--dry-run"])
+
+    assert result.exit_code == 0, result.output
+    assert review_wt.exists()
+    assert merge_wt.exists()
+    assert ".review-wt/feature" in result.output
+    assert "_merge" in result.output
+
+
+def test_clean_reports_per_path_failure_without_aborting(git_repo):
+    import os
+    import stat
+    from unittest.mock import MagicMock
+
+    wt_bad = git_repo / ".workbench" / "plan-a" / ".review-wt" / "bad"
+    wt_bad.mkdir(parents=True)
+    wt_good = git_repo / ".workbench" / "plan-b" / ".review-wt" / "good"
+    wt_good.mkdir(parents=True)
+
+    parent_of_bad = wt_bad.parent
+    original_mode = parent_of_bad.stat().st_mode
+    os.chmod(parent_of_bad, stat.S_IRUSR | stat.S_IXUSR)
+
+    real_run = subprocess.run
+
+    def fake_run(cmd, *args, **kwargs):
+        if (
+            isinstance(cmd, list)
+            and len(cmd) >= 3
+            and cmd[0] == "git"
+            and cmd[1] == "worktree"
+            and cmd[2] == "remove"
+        ):
+            return MagicMock(returncode=1, stderr="mock failure", stdout="")
+        return real_run(cmd, *args, **kwargs)
+
+    runner = CliRunner()
+    try:
+        with (
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.subprocess.run", side_effect=fake_run),
+        ):
+            result = runner.invoke(main, ["clean"])
+    finally:
+        os.chmod(parent_of_bad, original_mode)
+
+    assert result.exit_code == 0, result.output
+    assert "✓" in result.output
+    assert "✗" in result.output
+    assert not wt_good.exists()
+    assert wt_bad.exists()

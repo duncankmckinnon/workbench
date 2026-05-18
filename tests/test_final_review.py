@@ -3,13 +3,21 @@
 from __future__ import annotations
 
 import asyncio
+import io
 import subprocess
+import time
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from rich.console import Console
 
-from workbench.final_review import run_final_review
+from workbench.final_review import (
+    PostTaskAgentState,
+    PostTaskAgentStatus,
+    _post_task_table,
+    run_final_review,
+)
 from workbench.pr_writer import PrWriterAgentError, PrWriterParseError
 from workbench.session_status import FinalReviewRecord, SessionStatus
 
@@ -385,8 +393,8 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
 
 
 @pytest.mark.asyncio
-async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_repo):
-    """Worktree creation failure persists an error record instead of crashing."""
+async def test_worktree_creation_failure_persists_record_and_raises(base_kwargs, tmp_repo):
+    """Worktree creation failure persists an error record AND propagates the exception."""
     reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
     req_path = reviews_dir / "requirements.md"
 
@@ -395,7 +403,6 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.02})
 
     async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
-        # Summarizer succeeds and writes requirements
         req_path.parent.mkdir(parents=True, exist_ok=True)
         req_path.write_text(
             "## Requirements\n- Stuff\n## Non-goals\n- None\n## Acceptance criteria\n- Works"
@@ -406,7 +413,9 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
         return proc
 
     def fail_worktree(*args, **kwargs):
-        raise subprocess.CalledProcessError(128, "git worktree add")
+        raise RuntimeError(
+            "git worktree add (exit 128): fatal: 'feature-x' is already checked out"
+        )
 
     with (
         patch("workbench.final_review.get_adapter", return_value=adapter),
@@ -414,11 +423,9 @@ async def test_worktree_creation_failure_returns_error_record(base_kwargs, tmp_r
         patch("workbench.final_review._create_review_worktree", side_effect=fail_worktree),
         patch("workbench.final_review._cleanup_review_worktree"),
     ):
-        record = await run_final_review(**base_kwargs)
+        with pytest.raises(RuntimeError, match="already checked out"):
+            await run_final_review(**base_kwargs)
 
-    assert record.verdict == "error"
-    assert record.pr_url is None
-    # Verify the error was persisted
     status = SessionStatus.load(tmp_repo, "my-plan", "workbench-1")
     assert status is not None
     assert len(status.final_reviews) == 1
@@ -778,3 +785,315 @@ async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
 
     with pytest.raises(RuntimeError, match="Another final-review is running"):
         await run_final_review(**base_kwargs)
+
+
+# ── _create_review_worktree unit tests ───────────────────────────────
+
+
+def test_create_review_worktree_uses_detach():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=False):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    add_call = mock_run.call_args_list[-1]
+    cmd = add_call.args[0]
+    assert cmd[:3] == ["git", "worktree", "add"]
+    assert "--detach" in cmd
+    detach_idx = cmd.index("--detach")
+    add_idx = cmd.index("add")
+    path_idx = cmd.index("/wt")
+    assert add_idx < detach_idx < path_idx
+
+
+def test_create_review_worktree_removes_stale_path_first():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=True):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    assert len(mock_run.call_args_list) == 2
+    first_cmd = mock_run.call_args_list[0].args[0]
+    second_cmd = mock_run.call_args_list[1].args[0]
+    assert first_cmd[:3] == ["git", "worktree", "remove"]
+    assert second_cmd[:3] == ["git", "worktree", "add"]
+
+
+def test_create_review_worktree_raises_runtime_error_with_stderr_on_failure():
+    from workbench.final_review import _create_review_worktree
+
+    def fake_run(cmd, **kwargs):
+        if "add" in cmd:
+            return MagicMock(
+                returncode=128,
+                stderr="fatal: 'feature-x' is already checked out at '/some/path'",
+                stdout="",
+            )
+        return MagicMock(returncode=0, stderr="", stdout="")
+
+    with patch("workbench.final_review.subprocess.run", side_effect=fake_run):
+        with patch.object(Path, "exists", return_value=False):
+            with pytest.raises(RuntimeError) as exc_info:
+                _create_review_worktree(
+                    repo=Path("/repo"),
+                    wt_path=Path("/wt"),
+                    session_branch="feature-x",
+                )
+
+    msg = str(exc_info.value)
+    assert "exit 128" in msg
+    assert "already checked out" in msg
+
+
+def test_create_review_worktree_falls_back_to_stdout_when_stderr_empty():
+    from workbench.final_review import _create_review_worktree
+
+    def fake_run(cmd, **kwargs):
+        if "add" in cmd:
+            return MagicMock(returncode=128, stderr="", stdout="some stdout info")
+        return MagicMock(returncode=0, stderr="", stdout="")
+
+    with patch("workbench.final_review.subprocess.run", side_effect=fake_run):
+        with patch.object(Path, "exists", return_value=False):
+            with pytest.raises(RuntimeError) as exc_info:
+                _create_review_worktree(
+                    repo=Path("/repo"),
+                    wt_path=Path("/wt"),
+                    session_branch="feature-x",
+                )
+
+    assert "some stdout info" in str(exc_info.value)
+
+
+def test_create_review_worktree_no_remove_when_path_absent():
+    from workbench.final_review import _create_review_worktree
+
+    with patch("workbench.final_review.subprocess.run") as mock_run:
+        mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
+        with patch.object(Path, "exists", return_value=False):
+            _create_review_worktree(
+                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+            )
+
+    assert mock_run.call_count == 1
+    assert mock_run.call_args_list[0].args[0][:3] == ["git", "worktree", "add"]
+
+
+# ── Post-task progress table tests ───────────────────────────────────
+
+
+def _table_text(table) -> str:
+    buf = io.StringIO()
+    Console(file=buf, force_terminal=False, width=200).print(table)
+    return buf.getvalue()
+
+
+def test_post_task_table_renders_pending_initial_state():
+    states = [
+        PostTaskAgentState(name="Summarizer"),
+        PostTaskAgentState(name="Branch reviewer"),
+        PostTaskAgentState(name="PR writer"),
+    ]
+    table = _post_task_table(states)
+    text = _table_text(table)
+    assert text.count("pending") == 3
+    assert "Summarizer" in text
+    assert "Branch reviewer" in text
+    assert "PR writer" in text
+
+
+def test_post_task_table_renders_mixed_statuses():
+    states = [
+        PostTaskAgentState(name="Summarizer", status=PostTaskAgentStatus.DONE),
+        PostTaskAgentState(name="Branch reviewer", status=PostTaskAgentStatus.RUNNING),
+        PostTaskAgentState(name="PR writer", status=PostTaskAgentStatus.SKIPPED),
+    ]
+    text = _table_text(_post_task_table(states))
+    assert "done" in text
+    assert "running" in text
+    assert "skipped" in text
+
+    states_failed = [PostTaskAgentState(name="X", status=PostTaskAgentStatus.FAILED)]
+    text2 = _table_text(_post_task_table(states_failed))
+    assert "failed" in text2
+
+
+def test_post_task_agent_state_elapsed_returns_dash_when_not_started():
+    s = PostTaskAgentState(name="x")
+    assert s.elapsed == "-"
+
+
+def test_post_task_agent_state_elapsed_formats_running_time():
+    s = PostTaskAgentState(name="x", started_at=time.time() - 65)
+    assert s.elapsed in {"1m04s", "1m05s", "1m06s"}
+
+
+def test_post_task_agent_state_elapsed_formats_finished_time():
+    s = PostTaskAgentState(name="x", started_at=100.0, finished_at=225.0)
+    assert s.elapsed == "2m05s"
+
+
+@pytest.mark.asyncio
+async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
+    """States progress from pending → running → done across all three agents."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    states_ref: list = []
+    real_renderer = _post_task_table
+
+    def spy(states):
+        if not states_ref:
+            states_ref.append(states)
+        return real_renderer(states)
+
+    snapshots: list[list[PostTaskAgentStatus]] = []
+
+    def snap():
+        if states_ref:
+            snapshots.append([s.status for s in states_ref[0]])
+
+    def at_worktree(*args, **kwargs):
+        snap()
+
+    async def at_pr_writer(*args, **kwargs):
+        snap()
+        return ("t", "b")
+
+    async def at_create_pr(*args, **kwargs):
+        snap()
+        return (True, "https://example/pr/1")
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree", side_effect=at_worktree),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            side_effect=at_pr_writer,
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            side_effect=at_create_pr,
+        ),
+        patch(
+            "workbench.final_review.push_session_branch",
+            return_value=(True, ""),
+        ),
+        patch("workbench.final_review._post_task_table", side_effect=spy),
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False}
+        await run_final_review(**kwargs)
+
+    final = states_ref[0]
+    assert all(s.status == PostTaskAgentStatus.DONE for s in final)
+
+    assert snapshots[0] == [
+        PostTaskAgentStatus.DONE,
+        PostTaskAgentStatus.RUNNING,
+        PostTaskAgentStatus.PENDING,
+    ]
+
+    assert snapshots[1] == [
+        PostTaskAgentStatus.DONE,
+        PostTaskAgentStatus.DONE,
+        PostTaskAgentStatus.RUNNING,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_run_final_review_marks_pr_writer_skipped_when_skip_pr(base_kwargs, tmp_repo):
+    """skip_pr=True → states[2] ends in SKIPPED with note containing 'skip_pr'."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+    report_path = reviews_dir / "report.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    captured: dict = {}
+    real_renderer = _post_task_table
+
+    def spy(states):
+        captured["last"] = states
+        return real_renderer(states)
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_pass_fake_exec(req_path, report_path),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review._post_task_table", side_effect=spy),
+    ):
+        await run_final_review(**base_kwargs)
+
+    states = captured["last"]
+    assert states[2].status == PostTaskAgentStatus.SKIPPED
+    assert "skip_pr" in states[2].note
+
+
+@pytest.mark.asyncio
+async def test_run_final_review_marks_failed_state_on_agent_failure(base_kwargs, tmp_repo):
+    """Branch reviewer raising → states[1] FAILED with note containing exception text."""
+    reviews_dir = tmp_repo / ".workbench" / "my-plan" / "reviews" / "workbench-1"
+    req_path = reviews_dir / "requirements.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        req_path.parent.mkdir(parents=True, exist_ok=True)
+        req_path.write_text("## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    def boom(*args, **kwargs):
+        raise RuntimeError("worktree explosion")
+
+    captured: dict = {}
+    real_renderer = _post_task_table
+
+    def spy(states):
+        captured["last"] = states
+        return real_renderer(states)
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree", side_effect=boom),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review._post_task_table", side_effect=spy),
+    ):
+        with pytest.raises(RuntimeError, match="worktree explosion"):
+            await run_final_review(**base_kwargs)
+
+    states = captured["last"]
+    assert states[1].status == PostTaskAgentStatus.FAILED
+    assert "worktree explosion" in states[1].note
+    assert len(states[1].note) <= 120
