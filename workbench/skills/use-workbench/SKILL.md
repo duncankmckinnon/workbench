@@ -504,7 +504,7 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb stop` — kill all active agent sessions
 - `wb stop --cleanup` — also remove worktrees and branches
 - `wb clean` — remove worktrees, `wb/*` branches, and completed-plan status files (refuses if anything is in-flight; pass `--force` or `--completed`)
-- `wb clean <project>` — scope cleanup to a single plan folder; also removes `.workbench/<project>/` if it ends up empty
+- `wb clean <project>` — scope cleanup to a single plan; accepts a plan name (`my-plan`) or path (`.workbench/my-plan/plan.md`). Also removes `.workbench/<project>/` if it ends up empty
 - `wb clean --dry-run` — preview what would be removed
 - `wb conventions init [--generate]` — create `.workbench/conventions.md` from a template (or from a codebase scan with `--generate`)
 - `wb conventions edit` / `wb conventions show` / `wb conventions delete` — manage the conventions file

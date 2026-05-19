@@ -1621,11 +1621,16 @@ def clean(
     _ensure_workbench_dir(repo)
 
     if project is not None:
+        from .path_resolver import is_plan_reference_path, plan_slug_from_path
+
+        if is_plan_reference_path(project):
+            project = plan_slug_from_path(Path(project))
         project_dir = repo / ".workbench" / project
         if not project_dir.is_dir():
             raise click.ClickException(
                 f"No project folder at {project_dir.relative_to(repo)}. "
-                "Pass the plan folder name (e.g. `wb clean my-plan`)."
+                "Pass the plan folder name (e.g. `wb clean my-plan`) "
+                "or a path to the plan file (e.g. `wb clean .workbench/my-plan/plan.md`)."
             )
 
     # 1. Partition status files into completed vs incomplete.

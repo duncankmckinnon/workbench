@@ -637,17 +637,18 @@ The summarizer and branch_reviewer roles are configurable in `profile.yaml` like
 Removes workbench worktrees, `wb/*` branches, and completed-plan status files. Default mode refuses if any in-flight artifacts exist; pass `--completed` to skip them silently or `--force` to wipe everything.
 
 ```bash
-wb clean                          # remove only fully-completed plans
-wb clean my-plan                  # scope to one plan; also removes the empty .workbench/my-plan/ folder
-wb clean --completed              # skip in-flight artifacts without erroring
-wb clean --force                  # remove everything, including in-flight
-wb clean --remove-plans           # also delete the plan source markdown
-wb clean --dry-run                # preview what would be removed
+wb clean                                # remove only fully-completed plans
+wb clean my-plan                        # scope to one plan; also removes the empty .workbench/my-plan/ folder
+wb clean .workbench/my-plan/plan.md     # same — path form is accepted too
+wb clean --completed                    # skip in-flight artifacts without erroring
+wb clean --force                        # remove everything, including in-flight
+wb clean --remove-plans                 # also delete the plan source markdown
+wb clean --dry-run                      # preview what would be removed
 ```
 
 | Flag / argument | Description |
 |---|---|
-| `PROJECT` (positional, optional) | Plan folder name under `.workbench/`. Scopes cleanup to that plan only and removes the folder when empty. |
+| `PROJECT` (positional, optional) | Plan name or path to a `plan.md` (e.g. `my-plan` or `.workbench/my-plan/plan.md`). Scopes cleanup to that plan only and removes the folder when empty. |
 | `--force` | Remove all worktrees and `wb/*` branches, including in-flight ones. Mutually exclusive with `--completed`. |
 | `--completed` | Only remove artifacts for completed plans; skip in-flight ones silently. |
 | `--remove-plans` | Also delete plan source markdown for completed plans. |

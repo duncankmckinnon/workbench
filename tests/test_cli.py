@@ -4182,6 +4182,38 @@ class TestCleanProjectScope:
         assert result.exit_code != 0
         assert "No project folder" in result.output
 
+    def test_accepts_plan_path_form(self, git_repo):
+        """`wb clean .workbench/<slug>/plan.md` resolves to the same slug."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/b", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", ".workbench/alpha/plan.md"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+        assert (git_repo / ".workbench" / "beta" / "status.yaml").exists()
+
+    def test_errors_when_plan_path_points_outside_workbench(self, git_repo):
+        """A path whose parent dir doesn't exist under .workbench/ errors clearly."""
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "some/random/plan.md"])
+        assert result.exit_code != 0
+        assert "No project folder" in result.output
+
     def test_only_removes_named_project_status_file(self, git_repo):
         _write_status_file(
             git_repo,
