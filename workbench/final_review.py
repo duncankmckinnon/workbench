@@ -20,6 +20,7 @@ from rich.table import Table
 from rich.text import Text
 
 from workbench.adapters import get_adapter
+from workbench.conventions import apply_conventions_fallback
 from workbench.directives import BranchReviewerDirective, RequirementsSummarizerDirective
 from workbench.github_pr import create_pr
 from workbench.pr_writer import (
@@ -304,7 +305,7 @@ async def _execute_sequence_inner(
     requirements_path: Path,
     review_path: Path,
 ) -> FinalReviewRecord:
-    plan_content = plan_source.read_text(encoding="utf-8")
+    plan_content = apply_conventions_fallback(plan_source.read_text(encoding="utf-8"), repo)
 
     summarizer_text = _resolve_directive_text(
         summarizer_directive, profile, "summarizer", RequirementsSummarizerDirective.DEFAULT_TEXT
