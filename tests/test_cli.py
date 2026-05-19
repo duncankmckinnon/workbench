@@ -4806,3 +4806,118 @@ def test_clean_reports_per_path_failure_without_aborting(git_repo):
     assert "✗" in result.output
     assert not wt_good.exists()
     assert wt_bad.exists()
+
+
+class TestConventionsCli:
+    def test_init_writes_template(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "init"])
+        assert result.exit_code == 0, result.output
+        path = git_repo / ".workbench" / "conventions.md"
+        assert path.exists()
+        assert "# Project conventions" in path.read_text()
+
+    def test_init_refuses_if_file_exists(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("existing\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "init"])
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+    def test_show_prints_file_contents(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("# Hi\n- rule\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "show"])
+        assert result.exit_code == 0
+        assert "# Hi" in result.output
+        assert "- rule" in result.output
+
+    def test_show_errors_when_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "show"])
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+
+    def test_delete_with_yes_removes_file(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        path = git_repo / ".workbench" / "conventions.md"
+        path.write_text("x\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete", "--yes"])
+        assert result.exit_code == 0
+        assert not path.exists()
+
+    def test_delete_prompts_without_yes_and_aborts_on_no(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        path = git_repo / ".workbench" / "conventions.md"
+        path.write_text("x\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete"], input="n\n")
+        assert result.exit_code == 0
+        assert path.exists()
+        assert "Aborted" in result.output
+
+    def test_delete_noop_when_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete", "--yes"])
+        assert result.exit_code == 0
+        assert "does not exist" in result.output
+
+    def test_edit_creates_then_opens(self, git_repo, monkeypatch):
+        called: list[list[str]] = []
+        monkeypatch.setenv("EDITOR", "true")
+
+        def fake_call(cmd):
+            called.append(cmd)
+            return 0
+
+        with (
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.subprocess.call", side_effect=fake_call),
+        ):
+            result = CliRunner().invoke(main, ["conventions", "edit"])
+        assert result.exit_code == 0
+        path = git_repo / ".workbench" / "conventions.md"
+        assert path.exists()
+        assert called and called[0][0] == "true" and str(path) in called[0]
+
+
+class TestPlanGenerateLoadsConventions:
+    def test_plan_generate_passes_conventions_text_to_run_planner(self, git_repo, tmp_path):
+        """When .workbench/conventions.md exists, wb plan generate forwards its content."""
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("- conv rule Z\n")
+
+        captured: dict = {}
+
+        async def fake_run_planner(**kwargs):
+            captured.update(kwargs)
+            from workbench.agents import TaskStatus
+
+            class R:
+                status = TaskStatus.DONE
+                output = ""
+                error = ""
+                cost_usd = 0.0
+
+            return R()
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.check_tmux_available", return_value=True),
+            patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+        ):
+            result = runner.invoke(main, ["plan", "generate", "test prompt", "--name", "p"])
+
+        assert result.exit_code == 0, result.output
+        assert "- conv rule Z" in captured.get("conventions_text", "")
