@@ -394,12 +394,31 @@ class PlannerDirective(StandaloneDirective):
     user_prompt: str = ""
     source_content: str = ""
     plan_guide: str = ""
+    conventions_text: str = ""
 
     def render(self) -> str:
         parts = [
             self.resolved_text(),
             f"## Plan Writing Guide\n\n{self.plan_guide}",
         ]
+
+        if self.conventions_text:
+            parts.append(
+                "## Project Conventions\n\n"
+                "The project has shared conventions at .workbench/conventions.md:\n\n"
+                f"{self.conventions_text}\n\n"
+                "Apply these conventions when designing the plan. Do NOT write a "
+                "`## Conventions` section in the plan — the file is the canonical "
+                "source and is merged automatically at execution time."
+            )
+        else:
+            parts.append(
+                "## Conventions\n\n"
+                "No project-wide conventions file exists. If the source material "
+                "implies project conventions worth capturing (language version, "
+                "test framework, naming, etc.), include a `## Conventions` section "
+                "in the plan."
+            )
 
         if self.source_content:
             parts.append(
