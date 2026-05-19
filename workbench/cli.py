@@ -773,7 +773,7 @@ def run(
     resolved_plan_path, plan_slug = _resolve_plan_arg(plan_path, repo)
 
     try:
-        plan = parse_plan(resolved_plan_path)
+        plan = parse_plan(resolved_plan_path, repo=repo)
     except ValueError as e:
         raise click.ClickException(str(e))
 
