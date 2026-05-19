@@ -776,6 +776,127 @@ async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
 
 
 @pytest.mark.asyncio
+async def test_conventions_md_appended_when_plan_lacks_section(base_kwargs, tmp_repo):
+    """Summarizer sees conventions.md content appended to plan when plan has no section."""
+    wb = tmp_repo / ".workbench"
+    wb.mkdir(exist_ok=True)
+    (wb / "conventions.md").write_text("- project rule X\n")
+
+    base_kwargs["plan_source"].write_text("# Plan\n\n## Context\n\nstuff\n")
+
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    captured_prompts: list[str] = []
+
+    adapter = MagicMock()
+
+    def build_command(prompt, cwd):
+        captured_prompts.append(prompt)
+        return ["echo", "ok"]
+
+    adapter.build_command.side_effect = build_command
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Great.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock),
+        patch("workbench.final_review.push_session_branch", return_value=(True, "")),
+        patch(
+            "workbench.pr_writer.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("t", "b" * 50),
+        ),
+    ):
+        await run_final_review(**base_kwargs)
+
+    summarizer_prompt = captured_prompts[0]
+    assert "project rule X" in summarizer_prompt
+
+
+@pytest.mark.asyncio
+async def test_conventions_md_not_appended_when_plan_has_section(base_kwargs, tmp_repo):
+    """Plan's own ## Conventions section wins; conventions.md content is not added."""
+    wb = tmp_repo / ".workbench"
+    wb.mkdir(exist_ok=True)
+    (wb / "conventions.md").write_text("- file rule\n")
+    base_kwargs["plan_source"].write_text(
+        "# Plan\n\n## Conventions\n\n- plan-owned rule\n\n## Context\n\nstuff\n"
+    )
+
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    captured_prompts: list[str] = []
+    adapter = MagicMock()
+
+    def build_command(prompt, cwd):
+        captured_prompts.append(prompt)
+        return ["echo", "ok"]
+
+    adapter.build_command.side_effect = build_command
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Great.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock),
+        patch("workbench.final_review.push_session_branch", return_value=(True, "")),
+        patch(
+            "workbench.pr_writer.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("t", "b" * 50),
+        ),
+    ):
+        await run_final_review(**base_kwargs)
+
+    summarizer_prompt = captured_prompts[0]
+    assert "plan-owned rule" in summarizer_prompt
+    assert "file rule" not in summarizer_prompt
+
+
+@pytest.mark.asyncio
 async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
     """Two concurrent invocations → the second raises RuntimeError."""
     # Pre-create the lock file
