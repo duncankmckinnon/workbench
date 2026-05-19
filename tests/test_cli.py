@@ -592,16 +592,19 @@ def test_setup_select_individual_skills(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    # "n" for install all, then "y", "n", "y" for 3 skills
-    # Skills are sorted: configure-workbench, install-workbench, use-workbench
+    # "n" for install all, then per-skill answers.
+    # Skills are sorted alphabetically:
+    #   configure-workbench (y), generate-conventions (n),
+    #   install-workbench (n), use-workbench (y)
     with patch("workbench.cli.Path.home", return_value=fake_home):
         result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude"], input="n\ny\nn\ny\n"
+            main, ["setup", "--global", "--agent", "claude"], input="n\ny\nn\nn\ny\n"
         )
 
     assert result.exit_code == 0
     skills_dir = fake_home / ".claude" / "skills"
     assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
+    assert not (skills_dir / "generate-conventions" / "SKILL.md").exists()
     assert not (skills_dir / "install-workbench" / "SKILL.md").exists()
     assert (skills_dir / "use-workbench" / "SKILL.md").exists()
 
@@ -612,10 +615,10 @@ def test_setup_select_none_skips(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    # "n" for install all, then "n" for each skill
+    # "n" for install all, then "n" for each of the 4 bundled skills
     with patch("workbench.cli.Path.home", return_value=fake_home):
         result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude"], input="n\nn\nn\nn\n"
+            main, ["setup", "--global", "--agent", "claude"], input="n\nn\nn\nn\nn\n"
         )
 
     assert result.exit_code == 0
