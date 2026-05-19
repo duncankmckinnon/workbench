@@ -389,6 +389,51 @@ def test_derive_body_appends_report_footer():
 
 
 @pytest.mark.asyncio
+async def test_pr_writer_prompt_includes_conventions_when_plan_lacks_section(
+    base_kwargs, tmp_repo
+):
+    """Plan excerpt the PR writer agent sees should include conventions from .workbench/conventions.md."""
+    wb = tmp_repo / ".workbench"
+    wb.mkdir(exist_ok=True)
+    (wb / "conventions.md").write_text("- conv rule alpha\n")
+    base_kwargs["plan_source"].write_text("# Plan\n\n## Context\n\nctx\n")
+
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
+    captured_prompts: list[str] = []
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        proc = MagicMock()
+        if len(captured_prompts) < 2:
+            captured_prompts.append("(git)")
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+            return proc
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("# A title\n\nbody body body\n", encoding="utf-8")
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"", b""))
+        return proc
+
+    adapter = MagicMock()
+
+    def build_command(prompt, cwd):
+        captured_prompts.append(prompt)
+        return ["echo", "ok"]
+
+    adapter.build_command.side_effect = build_command
+    adapter.parse_output.return_value = ("ok", {"cost_usd": 0.0})
+
+    with (
+        patch("workbench.pr_writer.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
+        await run_pr_writer(**base_kwargs)
+
+    agent_prompts = [p for p in captured_prompts if p != "(git)"]
+    assert any("conv rule alpha" in p for p in agent_prompts)
+
+
+@pytest.mark.asyncio
 async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_repo):
     """The agent subprocess must be invoked with cwd=<worktree>, not cwd=<repo>.
 

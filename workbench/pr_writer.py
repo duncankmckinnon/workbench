@@ -12,6 +12,8 @@ from workbench.adapters import get_adapter
 from workbench.directives import PrWriterDirective
 from workbench.tmux import run_in_tmux
 
+from .conventions import apply_conventions_fallback
+
 if TYPE_CHECKING:
     from workbench.profile import Profile
 
@@ -56,8 +58,11 @@ async def run_pr_writer(
     if not plan_source.exists():
         raise FileNotFoundError(f"Plan source not found: {plan_source}")
 
-    plan_content = plan_source.read_text(encoding="utf-8")
+    plan_content = apply_conventions_fallback(plan_source.read_text(encoding="utf-8"), repo)
     plan_excerpt = _extract_plan_excerpt(plan_content)
+    conventions_excerpt = _extract_conventions_section(plan_content)
+    if conventions_excerpt:
+        plan_excerpt = f"{plan_excerpt}\n\n{conventions_excerpt}".strip()
 
     diff_stat = await _run_git(
         repo, ["git", "diff", "--stat", f"{base_branch}...{session_branch}"]
@@ -214,6 +219,22 @@ def _extract_plan_excerpt(plan_content: str) -> str:
     if context_text:
         parts.append(context_text)
     return "\n\n".join(parts).strip()
+
+
+def _extract_conventions_section(plan_content: str) -> str:
+    """Return the plan's ``## Conventions`` heading and its body, or '' if absent."""
+    lines: list[str] = []
+    in_section = False
+    for line in plan_content.splitlines():
+        if line.strip().lower() == "## conventions":
+            in_section = True
+            lines.append("## Conventions")
+            continue
+        if in_section:
+            if line.startswith("## "):
+                break
+            lines.append(line)
+    return "\n".join(lines).rstrip()
 
 
 def _resolve_directive_text(
