@@ -11,40 +11,35 @@ Multi-agent orchestrator that dispatches AI coding agents in parallel across iso
 
 Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks, groups them into dependency waves, and runs each task through an **implement → test → review → fix** pipeline.
 
-## Requirements
-
-**Required:**
-
-- **Python 3.11+**
-  - macOS: `brew install python` or [python.org](https://www.python.org/downloads/)
-  - Linux: `apt install python3` / `dnf install python3`
-  - Windows: [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3.13`
-
-- **Git**
-  - macOS: `xcode-select --install` or `brew install git`
-  - Linux: `apt install git` / `dnf install git`
-  - Windows: [git-scm.com](https://git-scm.com/downloads) or `winget install Git.Git`
-
-- **An agent CLI** — at least one of:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-  - [Codex](https://github.com/openai/codex)
-  - [Cursor CLI](https://cursor.com/docs/cli/overview)
-  - [Copilot CLI](https://github.com/features/copilot/cli)
-  - Any custom CLI via `.workbench/agents.yaml`
-
-**Optional:**
-
-- **tmux** — enables live monitoring of agent sessions. Use `--no-tmux` to run without it.
-  - macOS: `brew install tmux`
-  - Linux: `apt install tmux` / `dnf install tmux`
-  - Windows: available via WSL
-
 ## Install
+
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install duncankmckinnon/tap/workbench
+```
+
+Pulls in Python 3.12, git, and tmux automatically.
+
+**Python package (any platform):**
 
 ```bash
 pip install wbcli
+# or
+uv tool install wbcli
+# or
+pipx install wbcli
 ```
+
+Requires Python 3.11+ and git on `$PATH`. Install tmux separately for live agent monitoring (use `--no-tmux` to skip it).
+
+Workbench dispatches to any agent CLI you wire up. Adapters live in `.workbench/agents.yaml`, so you can swap providers per role (implementor, tester, reviewer, planner, ...) or point at a custom CLI — workbench just shells out and parses the output. Out of the box it knows:
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- [Codex](https://github.com/openai/codex)
+- [Cursor CLI](https://cursor.com/docs/cli/overview)
+- [Copilot CLI](https://github.com/features/copilot/cli)
 
 ## Getting started
 
