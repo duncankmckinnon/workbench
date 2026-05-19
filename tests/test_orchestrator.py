@@ -11,7 +11,7 @@ import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus
 from workbench.orchestrator import TaskState, merge_unmerged, run_plan
-from workbench.plan_parser import Plan, Task
+from workbench.plan_parser import Plan, Task, parse_plan
 from workbench.profile import Profile
 from workbench.session_status import SessionStatus
 
@@ -2462,3 +2462,86 @@ def test_status_table_renders_pending_row():
     assert _cell_text(table, 1, 0) == "-"
     assert _cell_text(table, 3, 0) == "-"
     assert _cell_text(table, 6, 0) == "-"
+
+
+@pytest.mark.asyncio
+async def test_run_plan_inherits_conventions_from_repo_file(tmp_path):
+    """When the plan has no ## Conventions section, .workbench/conventions.md
+    populates plan.conventions, which the orchestrator forwards to run_pipeline."""
+    repo = tmp_path
+    workbench_dir = repo / ".workbench"
+    workbench_dir.mkdir()
+    (workbench_dir / "conventions.md").write_text("- ORCH-SENTINEL\n")
+
+    plan_path = repo / "plan.md"
+    plan_path.write_text(
+        "# Test Plan\n" "\n" "## Task: Test Task\n" "Files: test.py\n" "\n" "A test task body.\n"
+    )
+
+    plan = parse_plan(plan_path, repo=repo)
+
+    captured_kwargs: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert "ORCH-SENTINEL" in captured_kwargs.get("plan_conventions", "")
+
+
+@pytest.mark.asyncio
+async def test_run_plan_plan_conventions_win_over_repo_file(tmp_path):
+    """A plan with its own ## Conventions section wins over .workbench/conventions.md."""
+    repo = tmp_path
+    workbench_dir = repo / ".workbench"
+    workbench_dir.mkdir()
+    (workbench_dir / "conventions.md").write_text("- ORCH-SENTINEL\n")
+
+    plan_path = repo / "plan.md"
+    plan_path.write_text(
+        "# Test Plan\n"
+        "\n"
+        "## Conventions\n"
+        "- PLAN-OWN-CONVENTION\n"
+        "\n"
+        "## Task: Test Task\n"
+        "Files: test.py\n"
+        "\n"
+        "A test task body.\n"
+    )
+
+    plan = parse_plan(plan_path, repo=repo)
+
+    captured_kwargs: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    plan_conventions = captured_kwargs.get("plan_conventions", "")
+    assert "PLAN-OWN-CONVENTION" in plan_conventions
+    assert "ORCH-SENTINEL" not in plan_conventions

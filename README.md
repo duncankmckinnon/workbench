@@ -11,40 +11,35 @@ Multi-agent orchestrator that dispatches AI coding agents in parallel across iso
 
 Write a markdown plan, run `wb run plan.md`, and workbench parses it into tasks, groups them into dependency waves, and runs each task through an **implement → test → review → fix** pipeline.
 
-## Requirements
-
-**Required:**
-
-- **Python 3.11+**
-  - macOS: `brew install python` or [python.org](https://www.python.org/downloads/)
-  - Linux: `apt install python3` / `dnf install python3`
-  - Windows: [python.org](https://www.python.org/downloads/) or `winget install Python.Python.3.13`
-
-- **Git**
-  - macOS: `xcode-select --install` or `brew install git`
-  - Linux: `apt install git` / `dnf install git`
-  - Windows: [git-scm.com](https://git-scm.com/downloads) or `winget install Git.Git`
-
-- **An agent CLI** — at least one of:
-  - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
-  - [Gemini CLI](https://github.com/google-gemini/gemini-cli)
-  - [Codex](https://github.com/openai/codex)
-  - [Cursor CLI](https://cursor.com/docs/cli/overview)
-  - [Copilot CLI](https://github.com/features/copilot/cli)
-  - Any custom CLI via `.workbench/agents.yaml`
-
-**Optional:**
-
-- **tmux** — enables live monitoring of agent sessions. Use `--no-tmux` to run without it.
-  - macOS: `brew install tmux`
-  - Linux: `apt install tmux` / `dnf install tmux`
-  - Windows: available via WSL
-
 ## Install
+
+**Homebrew (macOS / Linux):**
+
+```bash
+brew install duncankmckinnon/tap/workbench
+```
+
+Pulls in Python 3.12, git, and tmux automatically.
+
+**Python package (any platform):**
 
 ```bash
 pip install wbcli
+# or
+uv tool install wbcli
+# or
+pipx install wbcli
 ```
+
+Requires Python 3.11+ and git on `$PATH`. Install tmux separately for live agent monitoring (use `--no-tmux` to skip it).
+
+Workbench dispatches to any agent CLI you wire up. Adapters live in `.workbench/agents.yaml`, so you can swap providers per role (implementor, tester, reviewer, planner, ...) or point at a custom CLI — workbench just shells out and parses the output. Out of the box it knows:
+
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
+- [Gemini CLI](https://github.com/google-gemini/gemini-cli)
+- [Codex](https://github.com/openai/codex)
+- [Cursor CLI](https://cursor.com/docs/cli/overview)
+- [Copilot CLI](https://github.com/features/copilot/cli)
 
 ## Getting started
 
@@ -447,7 +442,9 @@ Available: `--implementor-directive`, `--tester-directive`, `--reviewer-directiv
 | `wb setup` | Create `.workbench/`, install skills, and optionally create a profile |
 | `wb status` | Show active worktrees |
 | `wb stop` | Kill all running agent tmux sessions |
-| `wb clean` | Remove all workbench worktrees and `wb/` branches |
+| `wb clean [project]` | Remove worktrees, branches, and completed-plan status files (scoped to one plan when `project` is given) |
+| `wb conventions init` | Create `.workbench/conventions.md` from a template (or from a codebase scan with `--generate`) |
+| `wb conventions edit` / `show` / `delete` | Manage `.workbench/conventions.md` |
 | `wb agents init` | Create agents.yaml with built-in adapter configs |
 | `wb agents list` | List built-in and custom agent adapters |
 | `wb agents show <name>` | Show details for an agent adapter |
@@ -637,10 +634,48 @@ The summarizer and branch_reviewer roles are configurable in `profile.yaml` like
 
 ### `wb clean`
 
-| Flag | Description |
+Removes workbench worktrees, `wb/*` branches, and completed-plan status files. Default mode refuses if any in-flight artifacts exist; pass `--completed` to skip them silently or `--force` to wipe everything.
+
+```bash
+wb clean                                # remove only fully-completed plans
+wb clean my-plan                        # scope to one plan; also removes the empty .workbench/my-plan/ folder
+wb clean .workbench/my-plan/plan.md     # same — path form is accepted too
+wb clean --completed                    # skip in-flight artifacts without erroring
+wb clean --force                        # remove everything, including in-flight
+wb clean --remove-plans                 # also delete the plan source markdown
+wb clean --dry-run                      # preview what would be removed
+```
+
+| Flag / argument | Description |
 |---|---|
+| `PROJECT` (positional, optional) | Plan name or path to a `plan.md` (e.g. `my-plan` or `.workbench/my-plan/plan.md`). Scopes cleanup to that plan only and removes the folder when empty. |
+| `--force` | Remove all worktrees and `wb/*` branches, including in-flight ones. Mutually exclusive with `--completed`. |
+| `--completed` | Only remove artifacts for completed plans; skip in-flight ones silently. |
+| `--remove-plans` | Also delete plan source markdown for completed plans. |
+| `--dry-run` | Print what would be removed without removing anything. |
 | `--repo PATH` | Repository path (auto-detected if omitted) |
-| `--yes` | Skip confirmation prompt |
+
+### `wb conventions`
+
+Manages the optional project-wide conventions file at `.workbench/conventions.md`. When a plan lacks its own `## Conventions` section, workbench injects this file's content into agent prompts at runtime (orchestrator, summarizer, branch reviewer, PR writer). The planner is also conventions-aware: it sees the file's content when generating a plan and skips writing a duplicate `## Conventions` section.
+
+```bash
+wb conventions init               # write a starter template
+wb conventions init --generate    # dispatch an agent (generate-conventions skill) to draft from the codebase
+wb conventions edit               # open in $EDITOR (creates from template if missing)
+wb conventions show               # print to stdout
+wb conventions delete             # remove the file (prompts unless --yes)
+```
+
+`init` errors if the file already exists; "redo from scratch" is `wb conventions delete && wb conventions init --generate`.
+
+| Subcommand | Flag | Description |
+|---|---|---|
+| `init` | `--generate` | Drafts the file via an agent instead of writing a static template |
+| `init` | `--agent CMD` | Agent CLI for `--generate` (default: `claude`) |
+| `init` | `--no-tmux` | Run `--generate` without tmux |
+| `delete` | `--yes` | Skip confirmation prompt |
+| all | `--repo PATH` | Repository path (auto-detected if omitted) |
 
 ### `wb agents init`
 

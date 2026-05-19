@@ -592,16 +592,19 @@ def test_setup_select_individual_skills(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    # "n" for install all, then "y", "n", "y" for 3 skills
-    # Skills are sorted: configure-workbench, install-workbench, use-workbench
+    # "n" for install all, then per-skill answers.
+    # Skills are sorted alphabetically:
+    #   configure-workbench (y), generate-conventions (n),
+    #   install-workbench (n), use-workbench (y)
     with patch("workbench.cli.Path.home", return_value=fake_home):
         result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude"], input="n\ny\nn\ny\n"
+            main, ["setup", "--global", "--agent", "claude"], input="n\ny\nn\nn\ny\n"
         )
 
     assert result.exit_code == 0
     skills_dir = fake_home / ".claude" / "skills"
     assert (skills_dir / "configure-workbench" / "SKILL.md").exists()
+    assert not (skills_dir / "generate-conventions" / "SKILL.md").exists()
     assert not (skills_dir / "install-workbench" / "SKILL.md").exists()
     assert (skills_dir / "use-workbench" / "SKILL.md").exists()
 
@@ -612,10 +615,10 @@ def test_setup_select_none_skips(tmp_path):
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
-    # "n" for install all, then "n" for each skill
+    # "n" for install all, then "n" for each of the 4 bundled skills
     with patch("workbench.cli.Path.home", return_value=fake_home):
         result = runner.invoke(
-            main, ["setup", "--global", "--agent", "claude"], input="n\nn\nn\nn\n"
+            main, ["setup", "--global", "--agent", "claude"], input="n\nn\nn\nn\nn\n"
         )
 
     assert result.exit_code == 0
@@ -4169,6 +4172,202 @@ def test_clean_removes_legacy_layout_worktrees(git_repo):
     assert not wt.exists()
 
 
+class TestCleanProjectScope:
+    """Tests for `wb clean PROJECT` (project-scoped cleanup)."""
+
+    def test_errors_when_project_folder_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "nonexistent"])
+        assert result.exit_code != 0
+        assert "No project folder" in result.output
+
+    def test_accepts_plan_path_form(self, git_repo):
+        """`wb clean .workbench/<slug>/plan.md` resolves to the same slug."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/b", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", ".workbench/alpha/plan.md"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+        assert (git_repo / ".workbench" / "beta" / "status.yaml").exists()
+
+    def test_errors_when_plan_path_points_outside_workbench(self, git_repo):
+        """A path whose parent dir doesn't exist under .workbench/ errors clearly."""
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "some/random/plan.md"])
+        assert result.exit_code != 0
+        assert "No project folder" in result.output
+
+    def test_only_removes_named_project_status_file(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/b", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()  # folder removed when empty
+        assert (git_repo / ".workbench" / "beta" / "status.yaml").exists()
+
+    def test_removes_empty_project_folder_after_cleanup(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()
+        assert "project folder" in result.output
+
+    def test_keeps_project_folder_when_remnants_exist(self, git_repo):
+        """Plan.md or other untouched files keep the folder around."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha" / "plan.md").exists()
+        assert not (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+
+    def test_dry_run_does_not_remove_project_folder(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+        assert (git_repo / ".workbench" / "alpha").is_dir()
+
+    def test_only_removes_named_project_worktrees(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/alpha-t1", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/beta-t1", "merged": True}},
+        )
+        wt_alpha = _make_real_worktree(git_repo, ".workbench/alpha/t1", "wb/alpha-t1")
+        wt_beta = _make_real_worktree(git_repo, ".workbench/beta/t1", "wb/beta-t1")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not wt_alpha.exists()
+        assert wt_beta.exists()
+
+    def test_only_removes_named_project_branches(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/alpha-t1", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/beta-t1", "merged": True}},
+        )
+        subprocess.run(
+            ["git", "branch", "--no-track", "wb/alpha-t1", "main"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "branch", "--no-track", "wb/beta-t1", "main"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        branches = subprocess.run(
+            ["git", "branch", "--list", "wb/*"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "wb/alpha-t1" not in branches
+        assert "wb/beta-t1" in branches
+
+    def test_only_removes_named_project_ephemeral_worktrees(self, git_repo):
+        # Create ephemeral wt dirs without making them real git worktrees;
+        # _list_ephemeral_worktrees uses filesystem-scan, and the cleanup
+        # falls back to rmtree when git worktree remove fails on a fake wt.
+        alpha = git_repo / ".workbench" / "alpha" / "wrap-up" / "wb-1" / ".review-wt"
+        beta = git_repo / ".workbench" / "beta" / "wrap-up" / "wb-1" / ".review-wt"
+        alpha.mkdir(parents=True)
+        beta.mkdir(parents=True)
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not alpha.exists()
+        assert beta.exists()
+
+
 def test_pull_request_plan_as_path(git_repo, tmp_path):
     """Passing path to plan.md should resolve to slug from parent directory."""
     plan = _make_plan_in_dir(tmp_path, "myfeature")
@@ -4806,3 +5005,118 @@ def test_clean_reports_per_path_failure_without_aborting(git_repo):
     assert "✗" in result.output
     assert not wt_good.exists()
     assert wt_bad.exists()
+
+
+class TestConventionsCli:
+    def test_init_writes_template(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "init"])
+        assert result.exit_code == 0, result.output
+        path = git_repo / ".workbench" / "conventions.md"
+        assert path.exists()
+        assert "# Project conventions" in path.read_text()
+
+    def test_init_refuses_if_file_exists(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("existing\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "init"])
+        assert result.exit_code != 0
+        assert "already exists" in result.output
+
+    def test_show_prints_file_contents(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("# Hi\n- rule\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "show"])
+        assert result.exit_code == 0
+        assert "# Hi" in result.output
+        assert "- rule" in result.output
+
+    def test_show_errors_when_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "show"])
+        assert result.exit_code != 0
+        assert "does not exist" in result.output
+
+    def test_delete_with_yes_removes_file(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        path = git_repo / ".workbench" / "conventions.md"
+        path.write_text("x\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete", "--yes"])
+        assert result.exit_code == 0
+        assert not path.exists()
+
+    def test_delete_prompts_without_yes_and_aborts_on_no(self, git_repo):
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        path = git_repo / ".workbench" / "conventions.md"
+        path.write_text("x\n")
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete"], input="n\n")
+        assert result.exit_code == 0
+        assert path.exists()
+        assert "Aborted" in result.output
+
+    def test_delete_noop_when_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["conventions", "delete", "--yes"])
+        assert result.exit_code == 0
+        assert "does not exist" in result.output
+
+    def test_edit_creates_then_opens(self, git_repo, monkeypatch):
+        called: list[list[str]] = []
+        monkeypatch.setenv("EDITOR", "true")
+
+        def fake_call(cmd):
+            called.append(cmd)
+            return 0
+
+        with (
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.subprocess.call", side_effect=fake_call),
+        ):
+            result = CliRunner().invoke(main, ["conventions", "edit"])
+        assert result.exit_code == 0
+        path = git_repo / ".workbench" / "conventions.md"
+        assert path.exists()
+        assert called and called[0][0] == "true" and str(path) in called[0]
+
+
+class TestPlanGenerateLoadsConventions:
+    def test_plan_generate_passes_conventions_text_to_run_planner(self, git_repo, tmp_path):
+        """When .workbench/conventions.md exists, wb plan generate forwards its content."""
+        (git_repo / ".workbench").mkdir(exist_ok=True)
+        (git_repo / ".workbench" / "conventions.md").write_text("- conv rule Z\n")
+
+        captured: dict = {}
+
+        async def fake_run_planner(**kwargs):
+            captured.update(kwargs)
+            from workbench.agents import TaskStatus
+
+            class R:
+                status = TaskStatus.DONE
+                output = ""
+                error = ""
+                cost_usd = 0.0
+
+            return R()
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.check_tmux_available", return_value=True),
+            patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+        ):
+            result = runner.invoke(main, ["plan", "generate", "test prompt", "--name", "p"])
+
+        assert result.exit_code == 0, result.output
+        assert "- conv rule Z" in captured.get("conventions_text", "")

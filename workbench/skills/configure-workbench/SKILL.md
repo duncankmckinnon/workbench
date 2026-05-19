@@ -255,6 +255,8 @@ implementor:
     and a short example. Tests go in tests/ mirroring the source layout.
 ```
 
+> **Note:** for project-wide conventions that should apply across every plan (not just the implementor), prefer the dedicated file at `.workbench/conventions.md` — it's seen by implementor, tester, reviewer, fixer, summarizer, branch reviewer, and PR writer. Create it with `wb conventions init` (template) or `wb conventions init --generate` (agent-drafted). The directive_extend pattern above is appropriate when you want guidance scoped to a specific role.
+
 Tighter tester verdict for a strict project:
 
 ```yaml

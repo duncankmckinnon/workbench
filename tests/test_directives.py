@@ -532,6 +532,49 @@ class TestPlannerDirectiveRender:
         prompt = d.render()
         assert "Explore the codebase thoroughly before writing." in prompt
 
+    def test_planner_renders_no_conventions_instruction_when_text_empty(self):
+        d = PlannerDirective(
+            output_path=Path("/repo/.workbench/foo/plan.md"),
+            user_prompt="x",
+            plan_guide="GUIDE",
+        )
+        prompt = d.render()
+        assert "No project-wide conventions file exists" in prompt
+        assert "Project Conventions" not in prompt
+
+    def test_planner_renders_project_conventions_block_when_text_set(self):
+        d = PlannerDirective(
+            output_path=Path("/repo/.workbench/foo/plan.md"),
+            user_prompt="x",
+            plan_guide="GUIDE",
+            conventions_text="- Use snake_case",
+        )
+        prompt = d.render()
+        assert "## Project Conventions" in prompt
+        assert "- Use snake_case" in prompt
+        assert "Do NOT write a `## Conventions` section" in prompt
+        assert "No project-wide conventions file exists" not in prompt
+
+    def test_planner_conventions_block_appears_before_source_document(self):
+        d = PlannerDirective(
+            output_path=Path("/repo/.workbench/foo/plan.md"),
+            plan_guide="GUIDE",
+            source_content="SOURCE",
+            conventions_text="- rule",
+        )
+        prompt = d.render()
+        assert prompt.index("Project Conventions") < prompt.index("Source Document")
+
+    def test_planner_conventions_text_appears_in_prompt_verbatim(self):
+        text = "## Code style\n- 100 char lines\n\n## Testing\n- pytest -x"
+        d = PlannerDirective(
+            output_path=Path("/repo/.workbench/foo/plan.md"),
+            user_prompt="x",
+            plan_guide="GUIDE",
+            conventions_text=text,
+        )
+        assert text in d.render()
+
 
 # ── Required field enforcement ────────────────────────────────────────
 
