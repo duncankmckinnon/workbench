@@ -289,3 +289,45 @@ class TestRunConfigFrontmatter:
         assert plan.run_config == {}
         assert plan.tasks[0].files == ["workbench/directives.py"]
         assert plan.tasks[1].depends_on == ["task-1"]
+
+
+def test_parse_plan_without_repo_arg_does_not_apply_fallback(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text("# Plan\n\n## Task: t\nDo it.\n")
+    wb = tmp_path / ".workbench"
+    wb.mkdir()
+    (wb / "conventions.md").write_text("- rule\n")
+
+    plan = parse_plan(plan_path)
+    assert plan.conventions == ""
+
+
+def test_parse_plan_with_repo_applies_fallback_when_section_missing(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text("# Plan\n\n## Task: t\nDo it.\n")
+    wb = tmp_path / ".workbench"
+    wb.mkdir()
+    (wb / "conventions.md").write_text("- shared rule\n")
+
+    plan = parse_plan(plan_path, repo=tmp_path)
+    assert "shared rule" in plan.conventions
+
+
+def test_parse_plan_with_repo_skips_fallback_when_section_present(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text("# Plan\n\n## Conventions\n\n- own rule\n\n## Task: t\nDo it.\n")
+    wb = tmp_path / ".workbench"
+    wb.mkdir()
+    (wb / "conventions.md").write_text("- file rule\n")
+
+    plan = parse_plan(plan_path, repo=tmp_path)
+    assert "own rule" in plan.conventions
+    assert "file rule" not in plan.conventions
+
+
+def test_parse_plan_with_repo_and_no_file_returns_empty_conventions(tmp_path):
+    plan_path = tmp_path / "plan.md"
+    plan_path.write_text("# Plan\n\n## Task: t\nDo it.\n")
+
+    plan = parse_plan(plan_path, repo=tmp_path)
+    assert plan.conventions == ""

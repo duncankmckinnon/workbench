@@ -177,7 +177,7 @@ class Plan:
         return waves
 
 
-def parse_plan(path: Path) -> Plan:
+def parse_plan(path: Path, *, repo: Path | None = None) -> Plan:
     """Parse a markdown plan file into a Plan object.
 
     Expected format:
@@ -194,6 +194,10 @@ def parse_plan(path: Path) -> Plan:
     ...
     """
     text = path.read_text()
+    if repo is not None:
+        from .conventions import apply_conventions_fallback
+
+        text = apply_conventions_fallback(text, repo)
     run_config, text = _extract_frontmatter(text)
     lines = text.split("\n")
 
