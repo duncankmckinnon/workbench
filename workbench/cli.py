@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
 import subprocess
 from importlib import resources
@@ -12,6 +13,8 @@ import click
 import yaml
 from rich.console import Console
 
+from .adapters import get_adapter
+from .conventions import TEMPLATE, conventions_path, load_conventions_text
 from .directives import (
     FixerDirective,
     ImplementorDirective,
@@ -36,7 +39,7 @@ from .plan_parser import parse_plan
 from .pr_writer import PrWriterError, derive_body_from_plan, derive_title_from_plan, run_pr_writer
 from .profile import ModeConfig, Profile, RoleConfig
 from .session_status import FinalReviewRecord, SessionStatus
-from .tmux import check_tmux_available
+from .tmux import check_tmux_available, run_in_tmux
 from .worktree import iter_worktree_dirs, push_session_branch
 
 # Maps role name to the Directive class whose DEFAULT_TEXT seeds the role.
@@ -1224,6 +1227,8 @@ def plan_generate(
 
     from .agents import run_planner
 
+    conventions_text = load_conventions_text(repo)
+
     agents_paths = resolve_agents_config_paths(repo, plan_slug=name)
     result = asyncio.run(
         run_planner(
@@ -1234,6 +1239,7 @@ def plan_generate(
             agent_cmd=agent,
             use_tmux=not no_tmux,
             agents_config_paths=agents_paths,
+            conventions_text=conventions_text,
         )
     )
 
@@ -1273,6 +1279,110 @@ def plan_copy_settings(name: str, repo: Path | None):
     if not plan_dir.exists():
         raise click.ClickException(f"Plan folder not found: {plan_dir}")
     _copy_plan_settings(repo, name)
+
+
+@main.group()
+def conventions():
+    """Manage the project-wide .workbench/conventions.md file."""
+    pass
+
+
+@conventions.command("init")
+@click.option(
+    "--generate",
+    is_flag=True,
+    help="Dispatch an agent (via the configured adapter) with the generate-conventions skill "
+    "to draft the file from a codebase scan. Without --generate, writes a static template.",
+)
+@click.option(
+    "--agent",
+    default="claude",
+    help="Agent CLI command for --generate (default: claude).",
+)
+@click.option("--no-tmux", is_flag=True, help="Run --generate without tmux.")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def conventions_init(generate: bool, agent: str, no_tmux: bool, repo: Path | None):
+    """Create .workbench/conventions.md from a template (or via an agent with --generate)."""
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+    path = conventions_path(repo)
+    if path.exists():
+        raise click.ClickException(
+            f"{path.relative_to(repo)} already exists. "
+            "Run `wb conventions delete` first to start over."
+        )
+
+    if not generate:
+        path.write_text(TEMPLATE, encoding="utf-8")
+        console.print(f"[green]Wrote[/green] {path.relative_to(repo)}")
+        return
+
+    if not no_tmux and not check_tmux_available():
+        raise click.ClickException(
+            "tmux is required but not found on PATH. Install with `brew install tmux` or pass --no-tmux."
+        )
+
+    agents_paths = resolve_agents_config_paths(repo)
+    adapter = get_adapter(agent, agents_paths)
+    prompt = (
+        "Use the generate-conventions skill to draft .workbench/conventions.md "
+        "for this project. Survey the codebase, then write the file."
+    )
+    cmd = adapter.build_command(prompt, repo)
+    if no_tmux:
+        result = subprocess.run(cmd, cwd=str(repo))
+        returncode = result.returncode
+    else:
+        returncode, _ = asyncio.run(run_in_tmux("wb-conventions-generate", cmd, repo))
+
+    if returncode != 0:
+        raise click.ClickException(f"Agent exited {returncode}; file was not written.")
+    if not path.exists():
+        raise click.ClickException("Agent exited 0 but did not write .workbench/conventions.md.")
+    console.print(f"[green]Wrote[/green] {path.relative_to(repo)}")
+
+
+@conventions.command("edit")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def conventions_edit(repo: Path | None):
+    """Open .workbench/conventions.md in $EDITOR (creates from template if missing)."""
+    repo = repo or _find_repo_root()
+    _ensure_workbench_dir(repo)
+    path = conventions_path(repo)
+    if not path.exists():
+        path.write_text(TEMPLATE, encoding="utf-8")
+    editor = os.environ.get("EDITOR", "vi")
+    subprocess.call([editor, str(path)])
+
+
+@conventions.command("show")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def conventions_show(repo: Path | None):
+    """Print .workbench/conventions.md to stdout."""
+    repo = repo or _find_repo_root()
+    path = conventions_path(repo)
+    if not path.exists():
+        raise click.ClickException(
+            f"{path.relative_to(repo)} does not exist. " "Run `wb conventions init` to create it."
+        )
+    click.echo(path.read_text(encoding="utf-8"), nl=False)
+
+
+@conventions.command("delete")
+@click.option("--yes", is_flag=True, help="Skip the confirmation prompt.")
+@click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
+def conventions_delete(yes: bool, repo: Path | None):
+    """Remove .workbench/conventions.md (prompts unless --yes)."""
+    repo = repo or _find_repo_root()
+    path = conventions_path(repo)
+    if not path.exists():
+        console.print(f"{path.relative_to(repo)} does not exist; nothing to do.")
+        return
+    if not yes and not click.confirm(f"Delete {path.relative_to(repo)}?", default=False):
+        console.print("Aborted.")
+        return
+    path.unlink()
+    console.print(f"[green]Deleted[/green] {path.relative_to(repo)}")
 
 
 @main.command()

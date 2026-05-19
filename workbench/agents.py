@@ -517,6 +517,7 @@ async def run_planner(
     adapter: AgentAdapter | None = None,
     profile: Profile | None = None,
     agents_config_paths: list[Path] | None = None,
+    conventions_text: str = "",
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -548,6 +549,7 @@ async def run_planner(
         user_prompt=user_prompt,
         source_content=source_content,
         plan_guide=plan_guide,
+        conventions_text=conventions_text,
     )
     prompt = directive.render()
 
