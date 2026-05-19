@@ -118,7 +118,7 @@ Unknown keys raise `ValueError` — typos are never silently ignored.
 ### Plan Sections
 
 - `## Context` — Injected into every agent's prompt. Describe the project, what's being built, and why.
-- `## Conventions` — Injected into every agent's prompt. Specify language version, test framework, import style, naming conventions. Without this, agents follow their own defaults.
+- `## Conventions` — Injected into every agent's prompt. Specify language version, test framework, import style, naming conventions. If the plan omits this section but `.workbench/conventions.md` exists, workbench injects that file's content as the Conventions section at runtime (see [Project conventions](#project-conventions) below).
 - `## Task: <title>` — Each task becomes an independent agent session in its own git worktree.
 
 ### Task Metadata
@@ -348,6 +348,32 @@ This is useful when you want agents to focus on specific aspects without modifyi
 | Task title is a full sentence | Keep titles to 2-4 words — they become dependency slugs |
 | Line number references for code to change | Line numbers shift — describe code by content/pattern instead |
 
+## Project conventions
+
+A repo can ship a single canonical conventions file at `.workbench/conventions.md` so every plan inherits the same project-wide rules without copy-pasting them into each plan.
+
+**Resolution rule (fallback-only, runtime, no plan mutation):**
+
+| Plan has `## Conventions` section? | `.workbench/conventions.md` exists? | What agents see |
+|---|---|---|
+| Yes | either | The plan's own section. The file is ignored. |
+| No | Yes | The file's content is injected as a `## Conventions` section into in-memory plan text loaded by the orchestrator, summarizer, branch reviewer, and PR writer. |
+| No | No | No conventions section. Agents follow their own defaults. |
+
+The planner (`wb plan generate`) is conventions-aware: if the file exists, it receives the content as context and is told **not** to write a `## Conventions` section in the plan it generates. If the file doesn't exist, it's told to write its own section when the source material implies conventions worth capturing.
+
+### Managing the file
+
+```bash
+wb conventions init              # write a starter template
+wb conventions init --generate   # dispatch an agent (with the generate-conventions skill) to draft it from a codebase scan
+wb conventions edit              # open in $EDITOR (creates from template if missing)
+wb conventions show              # print to stdout
+wb conventions delete            # remove the file (prompts unless --yes)
+```
+
+`init` errors if the file already exists. "Redo from scratch" is `wb conventions delete && wb conventions init --generate`.
+
 ## Branching Strategy
 
 By default, `wb run` fetches `origin/main` and creates a new session branch (`workbench-N`) from the latest remote state. This ensures work starts from the most up-to-date code and avoids merge conflicts when the session branch is later merged back.
@@ -477,7 +503,11 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb status` — show active worktrees
 - `wb stop` — kill all active agent sessions
 - `wb stop --cleanup` — also remove worktrees and branches
-- `wb clean` — remove all workbench worktrees
+- `wb clean` — remove worktrees, `wb/*` branches, and completed-plan status files (refuses if anything is in-flight; pass `--force` or `--completed`)
+- `wb clean <project>` — scope cleanup to a single plan folder; also removes `.workbench/<project>/` if it ends up empty
+- `wb clean --dry-run` — preview what would be removed
+- `wb conventions init [--generate]` — create `.workbench/conventions.md` from a template (or from a codebase scan with `--generate`)
+- `wb conventions edit` / `wb conventions show` / `wb conventions delete` — manage the conventions file
 - `wb setup` — create .workbench/, install skills locally, prepare repo
 - `wb setup --agent gemini` — install skills for Gemini CLI
 - `wb setup --profile` — also create a profile.yaml with the detected agent

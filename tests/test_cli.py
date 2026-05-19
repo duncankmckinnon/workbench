@@ -4172,6 +4172,170 @@ def test_clean_removes_legacy_layout_worktrees(git_repo):
     assert not wt.exists()
 
 
+class TestCleanProjectScope:
+    """Tests for `wb clean PROJECT` (project-scoped cleanup)."""
+
+    def test_errors_when_project_folder_missing(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "nonexistent"])
+        assert result.exit_code != 0
+        assert "No project folder" in result.output
+
+    def test_only_removes_named_project_status_file(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/b", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()  # folder removed when empty
+        assert (git_repo / ".workbench" / "beta" / "status.yaml").exists()
+
+    def test_removes_empty_project_folder_after_cleanup(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()
+        assert "project folder" in result.output
+
+    def test_keeps_project_folder_when_remnants_exist(self, git_repo):
+        """Plan.md or other untouched files keep the folder around."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha" / "plan.md").exists()
+        assert not (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+
+    def test_dry_run_does_not_remove_project_folder(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha" / "status.yaml").exists()
+        assert (git_repo / ".workbench" / "alpha").is_dir()
+
+    def test_only_removes_named_project_worktrees(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/alpha-t1", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/beta-t1", "merged": True}},
+        )
+        wt_alpha = _make_real_worktree(git_repo, ".workbench/alpha/t1", "wb/alpha-t1")
+        wt_beta = _make_real_worktree(git_repo, ".workbench/beta/t1", "wb/beta-t1")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not wt_alpha.exists()
+        assert wt_beta.exists()
+
+    def test_only_removes_named_project_branches(self, git_repo):
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/alpha-t1", "merged": True}},
+        )
+        _write_status_file(
+            git_repo,
+            "beta",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/beta-t1", "merged": True}},
+        )
+        subprocess.run(
+            ["git", "branch", "--no-track", "wb/alpha-t1", "main"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+        subprocess.run(
+            ["git", "branch", "--no-track", "wb/beta-t1", "main"],
+            cwd=git_repo,
+            check=True,
+            capture_output=True,
+        )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        branches = subprocess.run(
+            ["git", "branch", "--list", "wb/*"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "wb/alpha-t1" not in branches
+        assert "wb/beta-t1" in branches
+
+    def test_only_removes_named_project_ephemeral_worktrees(self, git_repo):
+        # Create ephemeral wt dirs without making them real git worktrees;
+        # _list_ephemeral_worktrees uses filesystem-scan, and the cleanup
+        # falls back to rmtree when git worktree remove fails on a fake wt.
+        alpha = git_repo / ".workbench" / "alpha" / "wrap-up" / "wb-1" / ".review-wt"
+        beta = git_repo / ".workbench" / "beta" / "wrap-up" / "wb-1" / ".review-wt"
+        alpha.mkdir(parents=True)
+        beta.mkdir(parents=True)
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha"])
+
+        assert result.exit_code == 0, result.output
+        assert not alpha.exists()
+        assert beta.exists()
+
+
 def test_pull_request_plan_as_path(git_repo, tmp_path):
     """Passing path to plan.md should resolve to slug from parent directory."""
     plan = _make_plan_in_dir(tmp_path, "myfeature")

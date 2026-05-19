@@ -1569,6 +1569,7 @@ def _resolve_plan_source(plan_source: str, repo: Path) -> Path | None:
 
 
 @main.command()
+@click.argument("project", required=False, default=None)
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option(
     "--force",
@@ -1591,6 +1592,7 @@ def _resolve_plan_source(plan_source: str, repo: Path) -> Path | None:
     help="Print what would be removed without removing anything.",
 )
 def clean(
+    project: str | None,
     repo: Path | None,
     force: bool,
     completed: bool,
@@ -1603,6 +1605,12 @@ def clean(
     task done + merged). Refuses if any in-flight worktrees, ``wb/*`` branches,
     or incomplete status files exist; pass --completed to skip them silently
     or --force to wipe everything regardless.
+
+    Pass PROJECT (the plan folder name under .workbench/) to scope cleanup to
+    a single plan. The plan's worktrees, wb/* branches, status file, ephemeral
+    agent worktrees, and (when empty after cleanup) the .workbench/<project>/
+    directory itself are removed. The same --force / --completed / --remove-plans
+    / --dry-run semantics apply, scoped to the project.
     """
     from .session_status import iter_status_files, status_file_branches, status_file_is_complete
 
@@ -1612,8 +1620,18 @@ def clean(
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
 
+    if project is not None:
+        project_dir = repo / ".workbench" / project
+        if not project_dir.is_dir():
+            raise click.ClickException(
+                f"No project folder at {project_dir.relative_to(repo)}. "
+                "Pass the plan folder name (e.g. `wb clean my-plan`)."
+            )
+
     # 1. Partition status files into completed vs incomplete.
     files = iter_status_files(repo)
+    if project is not None:
+        files = [(p, d) for p, d in files if _status_file_slug(p) == project]
     completed_files: list[tuple[Path, dict]] = []
     incomplete_files: list[tuple[Path, dict]] = []
     for path, data in files:
@@ -1629,6 +1647,13 @@ def clean(
     # 2. Enumerate live worktrees and branches.
     worktrees = _list_workbench_worktrees(repo)
     branches = _list_wb_branches(repo)
+    if project is not None:
+        project_root = (repo / ".workbench" / project).resolve()
+        worktrees = [(p, b) for p, b in worktrees if _path_inside(Path(p), project_root)]
+        project_branches: set[str] = set()
+        for _, data in files:
+            project_branches |= status_file_branches(data)
+        branches = [b for b in branches if b in project_branches]
 
     # 3. Classify each.
     completed_worktrees = [(p, b) for p, b in worktrees if b in completed_branches]
@@ -1737,6 +1762,9 @@ def clean(
 
     # 7. Ephemeral agent worktrees (branch reviewer / PR writer / merge resolver).
     ephemeral = _list_ephemeral_worktrees(repo)
+    if project is not None:
+        project_root = (repo / ".workbench" / project).resolve()
+        ephemeral = [p for p in ephemeral if _path_inside(p, project_root)]
     if ephemeral:
         console.print("\n[bold]Ephemeral agent worktrees:[/bold]")
         for p in ephemeral:
@@ -1772,6 +1800,28 @@ def clean(
         console.print(f"\n[bold]Would remove:[/bold] {summary}")
     else:
         console.print(f"\n[green]Cleaned up:[/green] {summary}")
+
+    # 9. When scoped to a single project, drop the now-empty plan folder.
+    if project is not None and not dry_run:
+        project_dir = repo / ".workbench" / project
+        if project_dir.is_dir() and not any(project_dir.iterdir()):
+            project_dir.rmdir()
+            console.print(f"{style} project folder {project_dir.relative_to(repo)}")
+
+
+def _status_file_slug(path: Path) -> str:
+    """Plan slug from a status file path (new or legacy layout)."""
+    if path.name == "status.yaml":
+        return path.parent.name
+    return path.stem.removeprefix("status-")
+
+
+def _path_inside(child: Path, parent: Path) -> bool:
+    """True if `child` (resolved) is at or under `parent` (already resolved)."""
+    try:
+        return child.resolve().is_relative_to(parent)
+    except (OSError, ValueError):
+        return False
 
 
 @main.command()
