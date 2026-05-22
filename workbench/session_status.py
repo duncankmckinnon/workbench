@@ -62,6 +62,10 @@ class FinalReviewRecord:
     reviewer_agent: str  # e.g. "claude"
     cost_usd: float = 0.0
     pr_url: str | None = None
+    iterations: int = 1
+    fixer_runs: int = 0
+    fixer_agent: str = ""
+    merged: bool = False
 
     def to_dict(self) -> dict:
         return {
@@ -73,6 +77,10 @@ class FinalReviewRecord:
             "reviewer_agent": self.reviewer_agent,
             "cost_usd": self.cost_usd,
             "pr_url": self.pr_url,
+            "iterations": self.iterations,
+            "fixer_runs": self.fixer_runs,
+            "fixer_agent": self.fixer_agent,
+            "merged": self.merged,
         }
 
     @classmethod
@@ -86,6 +94,10 @@ class FinalReviewRecord:
             reviewer_agent=data.get("reviewer_agent", ""),
             cost_usd=data.get("cost_usd", 0.0),
             pr_url=data.get("pr_url"),
+            iterations=data.get("iterations", 1),
+            fixer_runs=data.get("fixer_runs", 0),
+            fixer_agent=data.get("fixer_agent", ""),
+            merged=data.get("merged", False),
         )
 
 
