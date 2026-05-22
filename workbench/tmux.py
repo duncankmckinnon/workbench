@@ -19,12 +19,31 @@ def _sanitize_session_name(name: str) -> str:
     return name.lstrip(".")
 
 
+def _build_wrapper_script(
+    cmd: list[str],
+    output_file: str,
+    exitcode_file: str,
+    env: dict[str, str] | None = None,
+) -> str:
+    """Build the bash wrapper script, with optional exported env vars."""
+    exports = ""
+    if env:
+        exports = "".join(f"export {key}={shlex.quote(value)}\n" for key, value in env.items())
+    return (
+        "#!/usr/bin/env bash\n"
+        f"{exports}"
+        f"{shlex.join(cmd)} > {shlex.quote(output_file)} 2>&1\n"
+        f"echo $? > {shlex.quote(exitcode_file)}\n"
+    )
+
+
 async def run_in_tmux(
     session_name: str,
     cmd: list[str],
     cwd: Path,
     poll_interval: float = 2.0,
     timeout: float = 1800.0,
+    env: dict[str, str] | None = None,
 ) -> tuple[int, str]:
     """Run a command in a named tmux session. Returns (returncode, stdout).
 
@@ -34,12 +53,7 @@ async def run_in_tmux(
     output_file = os.path.join(tmpdir, "output.txt")
     exitcode_file = os.path.join(tmpdir, "exitcode")
 
-    # Write the wrapper script
-    script = (
-        "#!/usr/bin/env bash\n"
-        f"{shlex.join(cmd)} > {shlex.quote(output_file)} 2>&1\n"
-        f"echo $? > {shlex.quote(exitcode_file)}\n"
-    )
+    script = _build_wrapper_script(cmd, output_file, exitcode_file, env)
     script_path = os.path.join(tmpdir, "run.sh")
     with open(script_path, "w") as f:
         f.write(script)

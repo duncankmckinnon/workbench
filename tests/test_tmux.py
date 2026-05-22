@@ -2,13 +2,19 @@
 
 import asyncio
 import os
+import shlex
 import tempfile
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from workbench.tmux import _sanitize_session_name, check_tmux_available, run_in_tmux
+from workbench.tmux import (
+    _build_wrapper_script,
+    _sanitize_session_name,
+    check_tmux_available,
+    run_in_tmux,
+)
 
 # ---------------------------------------------------------------------------
 # check_tmux_available
@@ -506,3 +512,42 @@ class TestRunInTmuxEdgeCases:
         new_session_call = [c for c in calls if "new-session" in c][0]
         c_idx = list(new_session_call).index("-c")
         assert new_session_call[c_idx + 1] == str(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# _build_wrapper_script
+# ---------------------------------------------------------------------------
+
+
+class TestBuildWrapperScript:
+    def test_no_env_has_no_exports(self):
+        script = _build_wrapper_script(["claude", "-p", "hi"], "/tmp/out", "/tmp/ec")
+        assert "claude -p hi" in script
+        assert "echo $?" in script
+        assert "export " not in script
+
+    def test_env_exports_appear_before_command(self):
+        script = _build_wrapper_script(
+            ["claude", "-p", "hi"],
+            "/tmp/out",
+            "/tmp/ec",
+            {"WB_PLAN": "p", "WB_WAVE": "2"},
+        )
+        assert "export WB_PLAN=p" in script
+        assert "export WB_WAVE=2" in script
+        plan_idx = script.index("export WB_PLAN=p")
+        wave_idx = script.index("export WB_WAVE=2")
+        cmd_idx = script.index("claude -p hi")
+        assert plan_idx < cmd_idx
+        assert wave_idx < cmd_idx
+
+    def test_env_values_are_shell_quoted(self):
+        script = _build_wrapper_script(["true"], "/tmp/out", "/tmp/ec", {"X": "a b"})
+        assert "export X='a b'" in script
+        export_line = next(line for line in script.splitlines() if line.startswith("export X="))
+        # `shlex.split` strips the `export` keyword treatment, so split the
+        # assignment value back to its original.
+        _, _, assignment = export_line.partition("export ")
+        key, _, value = assignment.partition("=")
+        assert key == "X"
+        assert shlex.split(value) == ["a b"]
