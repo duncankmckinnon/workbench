@@ -9,7 +9,9 @@ import pytest
 
 from workbench.agents import Role
 from workbench.directives import (
+    BranchFixerDirective,
     BranchReviewerDirective,
+    BranchReviewerFollowupDirective,
     Directive,
     FixerDirective,
     ImplementorDirective,
@@ -21,6 +23,7 @@ from workbench.directives import (
     RequirementsSummarizerDirective,
     ReviewerDirective,
     ReviewerFollowupDirective,
+    StandaloneDirective,
     TddImplementorDirective,
     TddTesterDirective,
     TesterDirective,
@@ -876,3 +879,137 @@ class TestPrWriterDirectiveRender:
         tasks_pos = prompt.index("## Merged tasks")
         output_pos = prompt.index("## Output Path")
         assert directive_pos < plan_pos < diff_pos < commits_pos < tasks_pos < output_pos
+
+
+# ── BranchReviewerFollowupDirective render ────────────────────────────
+
+
+class TestBranchReviewerFollowupDirectiveRender:
+    def test_is_standalone_directive(self):
+        assert issubclass(BranchReviewerFollowupDirective, StandaloneDirective)
+
+    def test_default_role_is_branch_reviewer(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="Finding 1 — missing null check",
+            output_path=Path("/repo/report.md"),
+        )
+        assert d.role == Role.BRANCH_REVIEWER
+
+    def test_contains_requirements_path(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/.workbench/reviews/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="finding text",
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "/repo/.workbench/reviews/requirements.md" in prompt
+
+    def test_contains_prior_feedback_text(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="Finding 1 — missing null check in foo()",
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "Finding 1 — missing null check in foo()" in prompt
+
+    def test_contains_prior_review_sha(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="finding text",
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "abc1234" in prompt
+
+    def test_contains_verdict_contract(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="finding text",
+            output_path=Path("/repo/report.md"),
+        )
+        prompt = d.render()
+        assert "VERDICT: PASS" in prompt
+        assert "VERDICT: FAIL" in prompt
+
+    def test_contains_output_path(self):
+        d = BranchReviewerFollowupDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            base_branch="main",
+            prior_review_sha="abc1234",
+            prior_feedback="finding text",
+            output_path=Path("/repo/.workbench/reviews/followup.md"),
+        )
+        prompt = d.render()
+        assert "/repo/.workbench/reviews/followup.md" in prompt
+
+
+# ── BranchFixerDirective render ───────────────────────────────────────
+
+
+class TestBranchFixerDirectiveRender:
+    def test_is_standalone_directive(self):
+        assert issubclass(BranchFixerDirective, StandaloneDirective)
+
+    def test_default_role_is_fixer(self):
+        d = BranchFixerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            review_findings="Finding 1 — fix foo()",
+            base_branch="main",
+            fix_branch="wb/session-1-fix-1",
+        )
+        assert d.role == Role.FIXER
+
+    def test_contains_fix_branch_name(self):
+        d = BranchFixerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            review_findings="findings",
+            base_branch="main",
+            fix_branch="wb/session-1-fix-2",
+        )
+        prompt = d.render()
+        assert "wb/session-1-fix-2" in prompt
+
+    def test_contains_branch_pinning_instruction(self):
+        d = BranchFixerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            review_findings="findings",
+            base_branch="main",
+            fix_branch="wb/session-1-fix-1",
+        )
+        prompt = d.render()
+        assert "Stay on this branch" in prompt
+        assert "Do not create new branches or switch branches" in prompt
+        assert "Commit all changes directly to this branch" in prompt
+
+    def test_contains_requirements_path(self):
+        d = BranchFixerDirective(
+            requirements_path=Path("/repo/.workbench/reviews/requirements.md"),
+            review_findings="findings",
+            base_branch="main",
+            fix_branch="wb/session-1-fix-1",
+        )
+        prompt = d.render()
+        assert "/repo/.workbench/reviews/requirements.md" in prompt
+
+    def test_contains_review_findings_text(self):
+        d = BranchFixerDirective(
+            requirements_path=Path("/repo/requirements.md"),
+            review_findings="Finding 1 — missing null check in foo()",
+            base_branch="main",
+            fix_branch="wb/session-1-fix-1",
+        )
+        prompt = d.render()
+        assert "## Review findings to address" in prompt
+        assert "Finding 1 — missing null check in foo()" in prompt
