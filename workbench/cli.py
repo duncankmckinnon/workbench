@@ -953,6 +953,7 @@ def run(
                     skip_pr=skip_pr,
                 )
                 review_args["agents_config_paths"] = agents_config_paths
+                review_args["max_retries"] = max_retries
                 record = asyncio.run(run_final_review(**review_args))
                 _print_final_review_result(record)
 
@@ -1932,6 +1933,13 @@ def stop(cleanup: bool, repo: Path | None):
     is_flag=True,
     help="Run a final review after merging.",
 )
+@click.option(
+    "--max-retries",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Max fix attempts after a failed review.",
+)
 @click.option("--pr-title", default=None, type=str, help="Override the PR title.")
 @click.option(
     "--pr-body-file",
@@ -1968,6 +1976,7 @@ def merge(
     keep_branches: bool,
     push: bool,
     run_review: bool,
+    max_retries: int,
     pr_title: str | None,
     pr_body_file: Path | None,
     pr_base: str | None,
@@ -2068,6 +2077,7 @@ def merge(
                     review_args["agents_config_paths"] = resolve_agents_config_paths(
                         repo, plan_slug=status.plan_slug
                     )
+                    review_args["max_retries"] = max_retries
                     record = asyncio.run(run_final_review(**review_args))
                     _print_final_review_result(record)
 
@@ -2086,6 +2096,13 @@ def merge(
     help="Agent CLI to dispatch.",
 )
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
+@click.option(
+    "--max-retries",
+    type=int,
+    default=2,
+    show_default=True,
+    help="Max fix attempts after a failed review.",
+)
 @click.option("--pr-title", default=None, type=str, help="Override the PR title.")
 @click.option(
     "--pr-body-file",
@@ -2126,6 +2143,7 @@ def final_review_cmd(
     repo: Path | None,
     agent: str,
     no_tmux: bool,
+    max_retries: int,
     pr_title: str | None,
     pr_body_file: Path | None,
     pr_base: str | None,
@@ -2224,6 +2242,7 @@ def final_review_cmd(
         skip_pr=skip_pr,
     )
     review_args["agents_config_paths"] = agents_paths_for_review
+    review_args["max_retries"] = max_retries
     record = asyncio.run(run_final_review(**review_args))
     _print_final_review_result(record)
 
