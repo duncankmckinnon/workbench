@@ -684,6 +684,41 @@ class TestFinalReviewRecord:
         assert len(loaded_a.final_reviews) == 1
         assert loaded_a.final_reviews[0].verdict == "pass"
 
+    def test_final_review_record_meta_cycle_fields_round_trip(self):
+        rec = self._sample_record(
+            iterations=3,
+            fixer_runs=2,
+            fixer_agent="claude",
+            merged=True,
+        )
+        data = rec.to_dict()
+        assert data["iterations"] == 3
+        assert data["fixer_runs"] == 2
+        assert data["fixer_agent"] == "claude"
+        assert data["merged"] is True
+
+        restored = FinalReviewRecord.from_dict(data)
+        assert restored.iterations == 3
+        assert restored.fixer_runs == 2
+        assert restored.fixer_agent == "claude"
+        assert restored.merged is True
+
+    def test_final_review_record_meta_cycle_defaults_when_omitted(self):
+        """Legacy records without meta-cycle fields load with documented defaults."""
+        data = {
+            "timestamp": "2026-05-10T14:22:31Z",
+            "verdict": "pass",
+            "review_path": "r.md",
+            "requirements_path": "req.md",
+            "summarizer_agent": "claude",
+            "reviewer_agent": "claude",
+        }
+        rec = FinalReviewRecord.from_dict(data)
+        assert rec.iterations == 1
+        assert rec.fixer_runs == 0
+        assert rec.fixer_agent == ""
+        assert rec.merged is False
+
     @pytest.mark.asyncio
     async def test_append_final_review_is_locked(self, tmp_path):
         import asyncio
