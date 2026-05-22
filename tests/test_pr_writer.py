@@ -70,7 +70,7 @@ def base_kwargs(tmp_repo, plan_source):
 def _git_proc_factory(returncode: int = 0, stdout: bytes = b"", stderr: bytes = b""):
     """Build an async-callable that returns a fake git subprocess."""
 
-    async def fake_git(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_git(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         proc = MagicMock()
         proc.returncode = returncode
         proc.communicate = AsyncMock(return_value=(stdout, stderr))
@@ -115,7 +115,7 @@ def _exec_factory(
     """
     call_count = {"n": 0}
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         proc = MagicMock()
         if call_count["n"] <= 2:
@@ -279,7 +279,7 @@ async def test_git_diff_failure_raises_agent_error(base_kwargs):
     """A non-zero `git diff` should raise PrWriterAgentError before invoking the agent."""
     adapter = _make_adapter(None, "")
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         proc = MagicMock()
         proc.returncode = 128
         proc.communicate = AsyncMock(return_value=(b"", b"fatal: bad revision\n"))
@@ -401,7 +401,7 @@ async def test_pr_writer_prompt_includes_conventions_when_plan_lacks_section(
     output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     captured_prompts: list[str] = []
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         proc = MagicMock()
         if len(captured_prompts) < 2:
             captured_prompts.append("(git)")
@@ -444,7 +444,7 @@ async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_r
     output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
     captured_cwds: list[str | None] = []
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         captured_cwds.append(cwd)
         proc = MagicMock()
         # First two calls are git diff/log — succeed silently.
@@ -477,3 +477,83 @@ async def test_agent_runs_in_session_branch_worktree_not_repo(base_kwargs, tmp_r
         f"Agent must run with cwd={expected_wt}, got cwd={agent_cwd}. "
         "Running from repo root would expose the wrong branch's files."
     )
+
+
+# ── Session metadata trace tests ─────────────────────────────────────
+
+
+def _make_trace_adapter(inject_env: bool = True):
+    adapter = MagicMock()
+    adapter.config = MagicMock()
+    adapter.config.inject_env = inject_env
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("ok", {"cost_usd": 0.0})
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_trace_env_injects_pr_writer_env(base_kwargs, tmp_repo):
+    """trace_env=True + built-in adapter → agent dispatch receives WB_* env."""
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
+    adapter = _make_trace_adapter(inject_env=True)
+
+    captured_envs: list[dict | None] = []
+
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
+        captured_envs.append(env)
+        proc = MagicMock()
+        if len(captured_envs) <= 2:
+            # git diff / git log
+            proc.returncode = 0
+            proc.communicate = AsyncMock(return_value=(b"", b""))
+            return proc
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text("# A title\n\nbody body body\n", encoding="utf-8")
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"", b""))
+        return proc
+
+    with (
+        patch("workbench.pr_writer.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
+        kwargs = {**base_kwargs, "trace_env": True}
+        await run_pr_writer(**kwargs)
+
+    assert len(captured_envs) >= 3
+    agent_env = captured_envs[2]
+    assert agent_env is not None
+    assert agent_env.get("WB_AGENT") == "pr_writer"
+    assert agent_env.get("WB_STEP") == "pr"
+    assert agent_env.get("WB_PLAN") == "my-plan"
+
+
+@pytest.mark.asyncio
+async def test_trace_prompt_prepends_session_block_for_pr_writer(base_kwargs, tmp_repo):
+    """trace_prompt=True → agent prompt begins with a ```wb-session block."""
+    output = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1" / "pr-body.md"
+    adapter = _make_trace_adapter(inject_env=True)
+
+    captured_prompts: list[str] = []
+
+    def build_command(prompt, cwd):
+        captured_prompts.append(prompt)
+        return ["echo", "ok"]
+
+    adapter.build_command.side_effect = build_command
+
+    fake_exec, _ = _exec_factory(output, "# A title\n\nbody body body\n")
+
+    with (
+        patch("workbench.pr_writer.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+    ):
+        kwargs = {**base_kwargs, "trace_prompt": True}
+        await run_pr_writer(**kwargs)
+
+    assert captured_prompts
+    prompt = captured_prompts[0]
+    assert prompt.startswith("```wb-session\n")
+    assert "agent: pr_writer" in prompt
+    assert "step: pr" in prompt
+    assert "plan: my-plan" in prompt
