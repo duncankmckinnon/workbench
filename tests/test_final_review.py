@@ -77,7 +77,7 @@ def _make_mock_adapter(write_file: Path | None = None, content: str = "", exit_c
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.05})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         if write_file:
             write_file.parent.mkdir(parents=True, exist_ok=True)
             write_file.write_text(content, encoding="utf-8")
@@ -129,7 +129,7 @@ async def test_summarizer_failure_returns_error_verdict(base_kwargs):
     adapter.build_command.return_value = ["false"]
     adapter.parse_output.return_value = ("error output", {})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         proc = MagicMock()
         proc.returncode = 1
         proc.communicate = AsyncMock(return_value=(b"fail", b"error"))
@@ -152,7 +152,7 @@ async def test_summarizer_writes_empty_file_returns_error(base_kwargs, tmp_repo)
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("ok", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         # Don't write the requirements file
         proc = MagicMock()
         proc.returncode = 0
@@ -182,7 +182,7 @@ async def test_reviewer_fail_no_pr_opened(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.02})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             # Summarizer: write requirements
@@ -228,7 +228,7 @@ async def test_reviewer_pass_opens_pr(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.03})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -279,7 +279,7 @@ async def test_reviewer_pass_gh_missing_records_null_url(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -329,7 +329,7 @@ async def test_skip_pr_does_not_open_pr_on_pass(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -371,7 +371,7 @@ async def test_record_appended_to_status_yaml(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.05})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -410,7 +410,7 @@ async def test_worktree_creation_failure_persists_record_and_raises(base_kwargs,
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.02})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         req_path.parent.mkdir(parents=True, exist_ok=True)
         req_path.write_text(
             "## Requirements\n- Stuff\n## Non-goals\n- None\n## Acceptance criteria\n- Works"
@@ -444,7 +444,7 @@ def _make_pass_fake_exec(req_path: Path, review_path: Path):
     """Return a fake_exec helper that writes requirements then a PASS report."""
     call_count = {"n": 0}
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -652,7 +652,7 @@ async def test_pr_writer_not_called_on_fail_verdict(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -769,7 +769,7 @@ async def test_review_artifacts_land_in_plan_folder(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -829,7 +829,7 @@ async def test_conventions_md_appended_when_plan_lacks_section(base_kwargs, tmp_
 
     call_count = {"n": 0}
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -889,7 +889,7 @@ async def test_conventions_md_not_appended_when_plan_has_section(base_kwargs, tm
 
     call_count = {"n": 0}
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         call_count["n"] += 1
         if call_count["n"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1247,7 +1247,7 @@ async def test_run_final_review_marks_failed_state_on_agent_failure(base_kwargs,
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         req_path.parent.mkdir(parents=True, exist_ok=True)
         req_path.write_text("## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A")
         proc = MagicMock()
@@ -1294,7 +1294,7 @@ def _make_loop_fake_exec(req_path: Path, review_path: Path, verdicts: list[str])
     """
     state = {"call": 0}
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         state["call"] += 1
         if state["call"] == 1:
             req_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1481,7 +1481,7 @@ async def test_review_branch_created_and_cleaned_up(base_kwargs, tmp_repo):
     adapter.build_command.return_value = ["echo", "ok"]
     adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
 
-    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
         # On every reviewer/summarizer call, write the expected files and
         # record whether the review branch exists at session tip.
         if not req_path.exists():
@@ -1533,3 +1533,153 @@ async def test_review_branch_created_and_cleaned_up(base_kwargs, tmp_repo):
         text=True,
     )
     assert branch_check.returncode != 0, "review branch should be deleted by cleanup"
+
+
+# ── Session metadata trace tests ─────────────────────────────────────
+
+
+def _make_trace_adapter(inject_env: bool = True):
+    """Adapter whose .config.inject_env matches a real AgentConfig flag."""
+    adapter = MagicMock()
+    adapter.config = MagicMock()
+    adapter.config.inject_env = inject_env
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+    return adapter
+
+
+@pytest.mark.asyncio
+async def test_trace_env_injects_env_for_summarizer_and_reviewer(base_kwargs, tmp_repo):
+    """trace_env=True + built-in adapter → run_in_tmux receives WB_* env vars."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = _make_trace_adapter(inject_env=True)
+
+    captured_envs: list[dict | None] = []
+    call_count = {"n": 0}
+
+    async def fake_tmux(session_name, cmd, cwd, env=None, **kwargs):
+        captured_envs.append(env)
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("All good.\n\nVERDICT: PASS\n")
+        return (0, "done")
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("workbench.final_review.run_in_tmux", side_effect=fake_tmux),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+    ):
+        kwargs = {**base_kwargs, "use_tmux": True, "trace_env": True}
+        await run_final_review(**kwargs)
+
+    assert len(captured_envs) >= 2
+    summarizer_env = captured_envs[0]
+    assert summarizer_env is not None
+    assert summarizer_env.get("WB_AGENT") == "summarizer"
+    assert summarizer_env.get("WB_STEP") == "requirements"
+    assert summarizer_env.get("WB_PLAN") == "my-plan"
+
+    reviewer_env = captured_envs[1]
+    assert reviewer_env is not None
+    assert reviewer_env.get("WB_AGENT") == "branch_reviewer"
+    assert reviewer_env.get("WB_STEP") == "review#1"
+
+
+@pytest.mark.asyncio
+async def test_trace_prompt_prepends_session_block_for_summarizer(base_kwargs, tmp_repo):
+    """trace_prompt=True → summarizer prompt begins with a ```wb-session block."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = _make_trace_adapter(inject_env=True)
+    captured_prompts: list[str] = []
+
+    def build_command(prompt, cwd):
+        captured_prompts.append(prompt)
+        return ["echo", "ok"]
+
+    adapter.build_command.side_effect = build_command
+
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Good.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+    ):
+        kwargs = {**base_kwargs, "trace_prompt": True}
+        await run_final_review(**kwargs)
+
+    summarizer_prompt = captured_prompts[0]
+    assert summarizer_prompt.startswith("```wb-session\n")
+    assert "agent: summarizer" in summarizer_prompt
+    assert "step: requirements" in summarizer_prompt
+
+
+@pytest.mark.asyncio
+async def test_trace_env_false_passes_env_none(base_kwargs, tmp_repo):
+    """trace_env=False → dispatch calls receive env=None."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = _make_trace_adapter(inject_env=True)
+
+    captured_envs: list[dict | None] = []
+    call_count = {"n": 0}
+
+    async def fake_exec(*cmd, cwd=None, env=None, stdout=None, stderr=None):
+        captured_envs.append(env)
+        call_count["n"] += 1
+        if call_count["n"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("Fine.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+    ):
+        kwargs = {**base_kwargs, "trace_env": False}
+        await run_final_review(**kwargs)
+
+    assert captured_envs, "expected at least one dispatch"
+    for env in captured_envs:
+        assert env is None

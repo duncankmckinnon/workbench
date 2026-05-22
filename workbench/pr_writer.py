@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -10,6 +11,7 @@ from typing import TYPE_CHECKING
 
 from workbench.adapters import get_adapter
 from workbench.directives import PrWriterDirective
+from workbench.session_metadata import SessionMetadata, merge_trace_env, with_session_metadata
 from workbench.tmux import run_in_tmux
 
 from .conventions import apply_conventions_fallback
@@ -47,6 +49,8 @@ async def run_pr_writer(
     directive_override: str | None = None,
     agents_config_paths: list[Path] | None = None,
     wrap_up_dir: Path | None = None,
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> tuple[str, str]:
     """Run the PR-writer agent and return (title, body).
 
@@ -99,6 +103,11 @@ async def run_pr_writer(
     )
     adapter = get_adapter(agent_cmd_resolved, adapter_paths)
 
+    meta = SessionMetadata(plan=plan_slug, agent="pr_writer", step="pr")
+    if trace_prompt:
+        prompt = with_session_metadata(prompt, meta)
+    env = merge_trace_env(os.environ, meta) if trace_env and adapter.config.inject_env else None
+
     # The agent must run inside a checkout of session_branch so its Read/Glob/Bash
     # tools see the actual code being described. Running from `repo` (typically
     # on main) would show stale content. Create an ephemeral worktree and clean
@@ -115,11 +124,12 @@ async def run_pr_writer(
             cmd = adapter.build_command(prompt, wt_path)
             if use_tmux:
                 session_name = f"wb-pr-writer-{plan_slug}"
-                returncode, raw_output = await run_in_tmux(session_name, cmd, wt_path)
+                returncode, raw_output = await run_in_tmux(session_name, cmd, wt_path, env=env)
             else:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(wt_path),
+                    env=env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
