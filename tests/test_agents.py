@@ -661,3 +661,176 @@ class TestPipelineResume:
 
         assert [r.role for r in collected] == [Role.REVIEWER]
         assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.TESTER, Role.REVIEWER]
+
+
+# ---------------------------------------------------------------------------
+# Session metadata wiring (env injection + in-prompt block)
+# ---------------------------------------------------------------------------
+
+
+from workbench.adapters import AgentConfig, ConfigAdapter  # noqa: E402
+from workbench.session_metadata import SessionMetadata  # noqa: E402
+
+
+class TestSessionMetadataWiring:
+    def test_run_agent_env_injected_for_builtin_adapter(self, sample_ctx, tmp_path):
+        """trace_env=True + inject_env=True adapter → run_in_tmux gets WB_* env."""
+        directive = ImplementorDirective()
+        meta = SessionMetadata(plan="p", wave=1, task="task-1", task_title="t")
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+        ) as mock_tmux:
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    meta=meta,
+                    trace_env=True,
+                )
+            )
+
+        _args, kwargs = mock_tmux.call_args
+        env = kwargs["env"]
+        assert env is not None
+        assert env["WB_PLAN"] == "p"
+        assert env["WB_TASK"] == "task-1"
+        assert env["WB_AGENT"] == Role.IMPLEMENTOR.value
+        assert "OTEL_RESOURCE_ATTRIBUTES" in env
+
+    def test_run_agent_trace_prompt_prepends_block(self, sample_ctx, tmp_path):
+        """trace_prompt=True → build_command receives prompt starting with the block."""
+        directive = ImplementorDirective()
+        meta = SessionMetadata(plan="p", wave=1, task="task-1", task_title="t")
+
+        adapter = ClaudeAdapter()
+        captured: dict[str, str] = {}
+        original_build = adapter.build_command
+
+        def spy_build(prompt, cwd):
+            captured["prompt"] = prompt
+            return original_build(prompt, cwd)
+
+        adapter.build_command = spy_build  # type: ignore[assignment]
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+        ):
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    adapter=adapter,
+                    use_tmux=True,
+                    meta=meta,
+                    trace_prompt=True,
+                )
+            )
+
+        assert captured["prompt"].splitlines()[0] == "```wb-session"
+
+    def test_run_agent_trace_env_false_passes_none(self, sample_ctx, tmp_path):
+        """trace_env=False → env=None to run_in_tmux even when meta is set."""
+        directive = ImplementorDirective()
+        meta = SessionMetadata(plan="p", task="task-1")
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+        ) as mock_tmux:
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    use_tmux=True,
+                    meta=meta,
+                    trace_env=False,
+                )
+            )
+
+        _args, kwargs = mock_tmux.call_args
+        assert kwargs["env"] is None
+
+    def test_run_agent_inject_env_false_skips_env(self, sample_ctx, tmp_path):
+        """Adapter.config.inject_env=False → env=None even when trace_env=True."""
+        directive = ImplementorDirective()
+        meta = SessionMetadata(plan="p", task="task-1")
+        config = AgentConfig(command="claude", args=["{prompt}"], inject_env=False)
+        adapter = ConfigAdapter(name="claude", config=config)
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, "ok"),
+        ) as mock_tmux:
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    adapter=adapter,
+                    use_tmux=True,
+                    meta=meta,
+                    trace_env=True,
+                )
+            )
+
+        _args, kwargs = mock_tmux.call_args
+        assert kwargs["env"] is None
+
+    def test_run_pipeline_threads_step_and_agent_to_run_agent(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        """Verify the meta.step + meta.agent sequence for impl → test#1 fail → fix → test#2 → review."""
+        tester_calls = {"n": 0}
+        captured: list[tuple[str, str]] = []  # (agent, step)
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            role = directive.role
+            meta = kwargs.get("meta")
+            # Mirror real run_agent: stamp agent from directive.role.
+            effective_agent = role.value if meta is not None else ""
+            effective_step = meta.step if meta is not None else ""
+            captured.append((effective_agent, effective_step))
+
+            if role == Role.TESTER:
+                tester_calls["n"] += 1
+                return _result(role, passed=tester_calls["n"] >= 2)
+            if role == Role.FIXER:
+                return _done(role)
+            return _result(role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    plan_name="myplan",
+                    wave_num=2,
+                    max_retries=1,
+                )
+            )
+
+        steps = [step for _agent, step in captured]
+        assert steps == ["implement", "test#1", "test-fix#1", "test#2", "review#1"]
+
+        agent_by_step = {step: agent for agent, step in captured}
+        assert agent_by_step["implement"] == Role.IMPLEMENTOR.value
+        assert agent_by_step["test#1"] == Role.TESTER.value
+        assert agent_by_step["test-fix#1"] == Role.FIXER.value

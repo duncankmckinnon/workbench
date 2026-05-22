@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import dataclass, field
+import os
+from dataclasses import dataclass, field, replace
 from enum import StrEnum
 from importlib import resources
 from pathlib import Path
@@ -11,6 +12,7 @@ from typing import TYPE_CHECKING, Any
 
 from .adapters import AgentAdapter, get_adapter
 from .plan_parser import Task
+from .session_metadata import SessionMetadata, merge_trace_env, with_session_metadata
 from .tmux import run_in_tmux
 from .worktree import Worktree, get_head_sha, get_main_branch
 
@@ -78,6 +80,9 @@ async def run_agent(
     adapter: AgentAdapter | None = None,
     task_id: str | None = None,
     agents_config_paths: list[Path] | None = None,
+    meta: SessionMetadata | None = None,
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> AgentResult:
     """Spawn an agent in a worktree to run a single pipeline stage."""
     if adapter is None:
@@ -87,20 +92,31 @@ async def run_agent(
             else [repo / ".workbench" / "agents.yaml"]
         )
         adapter = get_adapter(agent_cmd, paths)
+    if meta is not None:
+        meta = replace(meta, agent=directive.role.value)
     prompt = directive.render(ctx)
+    if trace_prompt:
+        prompt = with_session_metadata(prompt, meta)
     effective_task_id = task_id or ctx.task.id
+
+    env: dict[str, str] | None = None
+    if trace_env and meta is not None and adapter.config.inject_env:
+        env = merge_trace_env(os.environ, meta)
 
     try:
         cmd = adapter.build_command(prompt, ctx.worktree.path)
         if use_tmux:
             session_name = f"wb-{effective_task_id}-{directive.role.value}"
-            returncode, raw_output = await run_in_tmux(session_name, cmd, ctx.worktree.path)
+            returncode, raw_output = await run_in_tmux(
+                session_name, cmd, ctx.worktree.path, env=env
+            )
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(ctx.worktree.path),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await proc.communicate()
             returncode = proc.returncode
@@ -147,6 +163,10 @@ async def run_pipeline(
     tdd: bool = False,
     profile: Profile | None = None,
     agents_config_paths: list[Path] | None = None,
+    plan_name: str = "",
+    wave_num: int | None = None,
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -187,6 +207,12 @@ async def run_pipeline(
         base_branch=base,
         plan_context=plan_context,
         plan_conventions=plan_conventions,
+    )
+    base_meta = SessionMetadata(
+        plan=plan_name,
+        wave=wave_num,
+        task=task.id,
+        task_title=task.slug,
     )
 
     def _notify(status: TaskStatus):
@@ -237,6 +263,9 @@ async def run_pipeline(
             agent_cmd=_agent_for(Role.TESTER),
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
+            meta=replace(base_meta, step="tdd-test"),
+            trace_env=trace_env,
+            trace_prompt=trace_prompt,
         )
         _record(test_write_result)
 
@@ -256,6 +285,9 @@ async def run_pipeline(
             agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
+            meta=replace(base_meta, step="tdd-implement"),
+            trace_env=trace_env,
+            trace_prompt=trace_prompt,
         )
         _record(impl_result)
 
@@ -281,6 +313,9 @@ async def run_pipeline(
             agent_cmd=_agent_for(Role.IMPLEMENTOR),
             use_tmux=use_tmux,
             agents_config_paths=agents_config_paths,
+            meta=replace(base_meta, step="implement"),
+            trace_env=trace_env,
+            trace_prompt=trace_prompt,
         )
         _record(impl_result)
 
@@ -302,6 +337,9 @@ async def run_pipeline(
                 agent_cmd=_agent_for(Role.TESTER),
                 use_tmux=use_tmux,
                 agents_config_paths=agents_config_paths,
+                meta=replace(base_meta, step=f"test#{attempt}"),
+                trace_env=trace_env,
+                trace_prompt=trace_prompt,
             )
             test_result.attempt = attempt
             _record(test_result)
@@ -331,6 +369,9 @@ async def run_pipeline(
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                     agents_config_paths=agents_config_paths,
+                    meta=replace(base_meta, step=f"test-fix#{attempt}"),
+                    trace_env=trace_env,
+                    trace_prompt=trace_prompt,
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -377,6 +418,9 @@ async def run_pipeline(
                 agent_cmd=_agent_for(Role.REVIEWER),
                 use_tmux=use_tmux,
                 agents_config_paths=agents_config_paths,
+                meta=replace(base_meta, step=f"review#{attempt}"),
+                trace_env=trace_env,
+                trace_prompt=trace_prompt,
             )
             review_result.attempt = attempt
             _record(review_result)
@@ -408,6 +452,9 @@ async def run_pipeline(
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                     agents_config_paths=agents_config_paths,
+                    meta=replace(base_meta, step=f"review-fix#{attempt}"),
+                    trace_env=trace_env,
+                    trace_prompt=trace_prompt,
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -435,6 +482,9 @@ async def run_merge_resolver(
     profile: Profile | None = None,
     directive_override: str | None = None,
     agents_config_paths: list[Path] | None = None,
+    plan_name: str = "",
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> AgentResult:
     """Run a merge conflict resolution agent in the merge worktree.
 
@@ -459,18 +509,30 @@ async def run_merge_resolver(
         conflicts=conflicts,
     )
     prompt = directive.render()
+    meta = SessionMetadata(
+        plan=plan_name,
+        task=task_branch,
+        agent="merger",
+        step="merge",
+    )
+    if trace_prompt:
+        prompt = with_session_metadata(prompt, meta)
+    env: dict[str, str] | None = None
+    if trace_env and adapter.config.inject_env:
+        env = merge_trace_env(os.environ, meta)
 
     try:
         cmd = adapter.build_command(prompt, merge_dir)
         if use_tmux:
             session_name = f"wb-merge-{task_branch.replace('/', '-')}"
-            returncode, raw_output = await run_in_tmux(session_name, cmd, merge_dir)
+            returncode, raw_output = await run_in_tmux(session_name, cmd, merge_dir, env=env)
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(merge_dir),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await proc.communicate()
             returncode = proc.returncode
@@ -518,6 +580,8 @@ async def run_planner(
     profile: Profile | None = None,
     agents_config_paths: list[Path] | None = None,
     conventions_text: str = "",
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -552,18 +616,25 @@ async def run_planner(
         conventions_text=conventions_text,
     )
     prompt = directive.render()
+    meta = SessionMetadata(plan=plan_name, agent="planner", step="plan")
+    if trace_prompt:
+        prompt = with_session_metadata(prompt, meta)
+    env: dict[str, str] | None = None
+    if trace_env and adapter.config.inject_env:
+        env = merge_trace_env(os.environ, meta)
 
     try:
         cmd = adapter.build_command(prompt, repo)
         if use_tmux:
             session_name = f"wb-planner-{plan_name}"
-            returncode, raw_output = await run_in_tmux(session_name, cmd, repo)
+            returncode, raw_output = await run_in_tmux(session_name, cmd, repo, env=env)
         else:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
                 cwd=str(repo),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=env,
             )
             stdout, stderr = await proc.communicate()
             returncode = proc.returncode
