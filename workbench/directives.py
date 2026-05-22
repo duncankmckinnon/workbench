@@ -356,6 +356,71 @@ class BranchReviewerDirective(StandaloneDirective):
 
 
 @dataclass(kw_only=True)
+class BranchReviewerFollowupDirective(StandaloneDirective):
+    DEFAULT_TEXT: ClassVar[str] = _load_text("branch_reviewer_followup.md")
+    role: Role = Role.BRANCH_REVIEWER
+    requirements_path: Path
+    base_branch: str
+    prior_review_sha: str
+    prior_feedback: str
+    output_path: Path
+
+    def render(self) -> str:
+        parts = [
+            self.resolved_text(),
+            f"## Requirements Digest\n\nRead the requirements digest at: {self.requirements_path}",
+            (
+                f"## Prior review findings\n\n{self.prior_feedback}\n\n"
+                f"Verify each finding above has been addressed by the changes "
+                f"since your prior review. Inspect the delta with "
+                f"`git diff {self.prior_review_sha}...HEAD` and read referenced "
+                f"files as needed. Do not raise new issues beyond your prior "
+                f"findings, except for regressions introduced in the delta."
+            ),
+            (
+                f"## Output Path\n\n"
+                f"Write your follow-up review report to: {self.output_path}\n\n"
+                "End the report with a line `VERDICT: PASS` or `VERDICT: FAIL`.\n\n"
+                "On FAIL, each finding must use the format:\n\n"
+                "```\n"
+                "### Finding N — <title>\n\n"
+                "**Requirement:** <which one>\n\n"
+                "**Evidence:** <file:line>\n\n"
+                "**Suggested fix:** <concrete change>\n"
+                "```"
+            ),
+        ]
+        return "\n\n".join(parts)
+
+
+@dataclass(kw_only=True)
+class BranchFixerDirective(StandaloneDirective):
+    DEFAULT_TEXT: ClassVar[str] = _load_text("branch_fixer.md")
+    role: Role = Role.FIXER
+    requirements_path: Path
+    review_findings: str
+    base_branch: str
+    fix_branch: str
+
+    def render(self) -> str:
+        parts = [
+            self.resolved_text(),
+            (
+                f"IMPORTANT: You are working on branch '{self.fix_branch}'. "
+                "Stay on this branch. Do not create new branches or switch branches. "
+                "Commit all changes directly to this branch."
+            ),
+            f"## Requirements Digest\n\nRead the requirements digest at: {self.requirements_path}",
+            f"## Review findings to address\n\n{self.review_findings}",
+            (
+                "Make targeted, minimal changes that resolve the findings above "
+                "and commit them to the current branch."
+            ),
+        ]
+        return "\n\n".join(parts)
+
+
+@dataclass(kw_only=True)
 class PrWriterDirective(StandaloneDirective):
     DEFAULT_TEXT: ClassVar[str] = _load_text("pr_writer.md")
     role: Role = Role.PR_WRITER

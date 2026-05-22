@@ -5120,3 +5120,245 @@ class TestPlanGenerateLoadsConventions:
 
         assert result.exit_code == 0, result.output
         assert "- conv rule Z" in captured.get("conventions_text", "")
+
+
+# ---------------------------------------------------------------------------
+# --max-retries threading into run_final_review
+# ---------------------------------------------------------------------------
+
+
+def _final_review_mock_record():
+    from workbench.session_status import FinalReviewRecord
+
+    return FinalReviewRecord(
+        timestamp="2026-05-11T00:00:00Z",
+        verdict="pass",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+
+def test_run_final_review_forwards_max_retries(git_repo, tmp_path):
+    """wb run --final-review --max-retries 5 should forward max_retries=5."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    record = _final_review_mock_record()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return record
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "run",
+                str(plan),
+                "--no-tmux",
+                "--final-review",
+                "-b",
+                "workbench-1",
+                "--max-retries",
+                "5",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("max_retries") == 5
+
+
+def test_run_final_review_default_max_retries(git_repo, tmp_path):
+    """wb run --final-review without --max-retries should forward the default (2)."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    record = _final_review_mock_record()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return record
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("max_retries") == 2
+
+
+def test_merge_review_forwards_max_retries(git_repo, tmp_path):
+    """wb merge --review --max-retries 4 should forward max_retries=4."""
+    from workbench.session_status import SessionStatus
+
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    status = SessionStatus(
+        plan_slug="my-plan",
+        session_branch="workbench-1",
+        plan_source=str(plan),
+    )
+    status.record_task("task-1", "done", "wb/feat", merged=True, last_agent="reviewer")
+
+    record = _final_review_mock_record()
+
+    async def fake_merge(**kwargs):
+        return status
+
+    async def fake_final_review(**kwargs):
+        return record
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.merge_unmerged", side_effect=fake_merge),
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "merge",
+                "-b",
+                "workbench-1",
+                "--review",
+                "--no-tmux",
+                "--max-retries",
+                "4",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("max_retries") == 4
+
+
+def test_final_review_command_forwards_max_retries(git_repo, tmp_path):
+    """wb final-review --max-retries 7 should forward max_retries=7."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    record = _final_review_mock_record()
+
+    async def fake_final_review(**kwargs):
+        return record
+
+    runner = CliRunner()
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "final-review",
+                "workbench-1",
+                "--no-tmux",
+                "--max-retries",
+                "7",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("max_retries") == 7
+
+
+def test_final_review_command_default_max_retries(git_repo, tmp_path):
+    """wb final-review without --max-retries should forward the default (2)."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "done",
+                "branch": "wb/feat",
+                "merged": True,
+                "last_agent": "reviewer",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    record = _final_review_mock_record()
+
+    async def fake_final_review(**kwargs):
+        return record
+
+    runner = CliRunner()
+    with (
+        patch(
+            "workbench.cli.run_final_review", side_effect=fake_final_review
+        ) as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["final-review", "workbench-1", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_final_review.call_args.kwargs.get("max_retries") == 2

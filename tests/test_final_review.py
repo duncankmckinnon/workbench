@@ -249,6 +249,10 @@ async def test_reviewer_pass_opens_pr(base_kwargs, tmp_repo):
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
         patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
+        patch(
             "workbench.final_review.create_pr",
             new_callable=AsyncMock,
             return_value=(True, "https://github.com/org/repo/pull/42"),
@@ -295,6 +299,10 @@ async def test_reviewer_pass_gh_missing_records_null_url(base_kwargs, tmp_repo):
         patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
         patch(
             "workbench.final_review.create_pr",
             new_callable=AsyncMock,
@@ -474,6 +482,10 @@ async def test_pr_writer_invoked_on_pass(base_kwargs, tmp_repo):
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
         patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
+        patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
             return_value=("Custom title", "Custom body"),
@@ -519,6 +531,10 @@ async def test_pr_writer_skipped_when_pr_body_file_provided(base_kwargs, tmp_rep
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
         patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
+        patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
         ) as mock_writer,
@@ -556,6 +572,10 @@ async def test_pr_writer_error_falls_back_to_plan_body(base_kwargs, tmp_repo):
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
         patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
@@ -595,6 +615,10 @@ async def test_pr_writer_parse_error_falls_back_to_plan_body(base_kwargs, tmp_re
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
         patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
@@ -708,6 +732,10 @@ async def test_pr_title_cli_override_wins_over_agent_title(base_kwargs, tmp_repo
         ),
         patch("workbench.final_review._create_review_worktree"),
         patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
         patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
@@ -911,48 +939,57 @@ async def test_concurrent_runs_rejected_by_lock(base_kwargs, tmp_repo):
 # ── _create_review_worktree unit tests ───────────────────────────────
 
 
-def test_create_review_worktree_uses_detach():
+def test_create_review_worktree_creates_branch():
+    """Worktree is added on a fresh ``-b <review_branch>`` rooted at session_branch."""
     from workbench.final_review import _create_review_worktree
 
     with patch("workbench.final_review.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
         with patch.object(Path, "exists", return_value=False):
             _create_review_worktree(
-                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+                repo=Path("/repo"),
+                wt_path=Path("/wt"),
+                session_branch="feature-x",
+                review_branch="feature-x-review",
             )
 
     add_call = mock_run.call_args_list[-1]
     cmd = add_call.args[0]
     assert cmd[:3] == ["git", "worktree", "add"]
-    assert "--detach" in cmd
-    detach_idx = cmd.index("--detach")
-    add_idx = cmd.index("add")
-    path_idx = cmd.index("/wt")
-    assert add_idx < detach_idx < path_idx
+    assert "-b" in cmd
+    b_idx = cmd.index("-b")
+    assert cmd[b_idx + 1] == "feature-x-review"
+    assert cmd[-2] == "/wt"
+    assert cmd[-1] == "feature-x"
 
 
 def test_create_review_worktree_removes_stale_path_first():
+    """A pre-existing worktree path is force-removed, then the branch is recreated."""
     from workbench.final_review import _create_review_worktree
 
     with patch("workbench.final_review.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
         with patch.object(Path, "exists", return_value=True):
             _create_review_worktree(
-                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+                repo=Path("/repo"),
+                wt_path=Path("/wt"),
+                session_branch="feature-x",
+                review_branch="feature-x-review",
             )
 
-    assert len(mock_run.call_args_list) == 2
-    first_cmd = mock_run.call_args_list[0].args[0]
-    second_cmd = mock_run.call_args_list[1].args[0]
-    assert first_cmd[:3] == ["git", "worktree", "remove"]
-    assert second_cmd[:3] == ["git", "worktree", "add"]
+    cmds = [call.args[0] for call in mock_run.call_args_list]
+    assert cmds[0][:3] == ["git", "worktree", "remove"]
+    # We always delete a leftover branch with the same name so the new add
+    # creates a fresh branch at the session tip.
+    assert ["git", "branch", "-D", "feature-x-review"] in cmds
+    assert cmds[-1][:3] == ["git", "worktree", "add"]
 
 
 def test_create_review_worktree_raises_runtime_error_with_stderr_on_failure():
     from workbench.final_review import _create_review_worktree
 
     def fake_run(cmd, **kwargs):
-        if "add" in cmd:
+        if cmd[:3] == ["git", "worktree", "add"]:
             return MagicMock(
                 returncode=128,
                 stderr="fatal: 'feature-x' is already checked out at '/some/path'",
@@ -967,6 +1004,7 @@ def test_create_review_worktree_raises_runtime_error_with_stderr_on_failure():
                     repo=Path("/repo"),
                     wt_path=Path("/wt"),
                     session_branch="feature-x",
+                    review_branch="feature-x-review",
                 )
 
     msg = str(exc_info.value)
@@ -978,7 +1016,7 @@ def test_create_review_worktree_falls_back_to_stdout_when_stderr_empty():
     from workbench.final_review import _create_review_worktree
 
     def fake_run(cmd, **kwargs):
-        if "add" in cmd:
+        if cmd[:3] == ["git", "worktree", "add"]:
             return MagicMock(returncode=128, stderr="", stdout="some stdout info")
         return MagicMock(returncode=0, stderr="", stdout="")
 
@@ -989,23 +1027,29 @@ def test_create_review_worktree_falls_back_to_stdout_when_stderr_empty():
                     repo=Path("/repo"),
                     wt_path=Path("/wt"),
                     session_branch="feature-x",
+                    review_branch="feature-x-review",
                 )
 
     assert "some stdout info" in str(exc_info.value)
 
 
 def test_create_review_worktree_no_remove_when_path_absent():
+    """No worktree remove call when ``wt_path`` doesn't exist (branch -D + add only)."""
     from workbench.final_review import _create_review_worktree
 
     with patch("workbench.final_review.subprocess.run") as mock_run:
         mock_run.return_value = MagicMock(returncode=0, stderr="", stdout="")
         with patch.object(Path, "exists", return_value=False):
             _create_review_worktree(
-                repo=Path("/repo"), wt_path=Path("/wt"), session_branch="feature-x"
+                repo=Path("/repo"),
+                wt_path=Path("/wt"),
+                session_branch="feature-x",
+                review_branch="feature-x-review",
             )
 
-    assert mock_run.call_count == 1
-    assert mock_run.call_args_list[0].args[0][:3] == ["git", "worktree", "add"]
+    cmds = [call.args[0] for call in mock_run.call_args_list]
+    assert all(c[:3] != ["git", "worktree", "remove"] for c in cmds)
+    assert cmds[-1][:3] == ["git", "worktree", "add"]
 
 
 # ── Post-task progress table tests ───────────────────────────────────
@@ -1107,6 +1151,10 @@ async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
         patch("workbench.final_review._create_review_worktree", side_effect=at_worktree),
         patch("workbench.final_review._cleanup_review_worktree"),
         patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
+        patch(
             "workbench.final_review.run_pr_writer",
             new_callable=AsyncMock,
             side_effect=at_pr_writer,
@@ -1128,13 +1176,26 @@ async def test_run_final_review_transitions_states(base_kwargs, tmp_repo):
     final = states_ref[0]
     assert all(s.status == PostTaskAgentStatus.DONE for s in final)
 
+    # On PASS at attempt 1 the dynamic table grows to:
+    #   [Summarizer, Review #1, Merge, PR writer]
+    assert [s.name for s in final] == [
+        "Summarizer",
+        "Review #1",
+        "Merge",
+        "PR writer",
+    ]
+
+    # Snapshot captured inside _create_review_worktree: summarizer done,
+    # review #1 just started, merge + pr writer rows not appended yet.
     assert snapshots[0] == [
         PostTaskAgentStatus.DONE,
         PostTaskAgentStatus.RUNNING,
-        PostTaskAgentStatus.PENDING,
     ]
 
+    # Snapshot captured inside run_pr_writer: review and merge done,
+    # pr writer running.
     assert snapshots[1] == [
+        PostTaskAgentStatus.DONE,
         PostTaskAgentStatus.DONE,
         PostTaskAgentStatus.DONE,
         PostTaskAgentStatus.RUNNING,
@@ -1218,3 +1279,257 @@ async def test_run_final_review_marks_failed_state_on_agent_failure(base_kwargs,
     assert states[1].status == PostTaskAgentStatus.FAILED
     assert "worktree explosion" in states[1].note
     assert len(states[1].note) <= 120
+
+
+# ── Review → fix loop tests ──────────────────────────────────────────
+
+
+def _make_loop_fake_exec(req_path: Path, review_path: Path, verdicts: list[str]):
+    """Drive the requirements → (review → fix)* loop with explicit per-attempt verdicts.
+
+    Call sequence is: summarizer (call 1), reviewer #1 (call 2), fixer #1 (call 3),
+    reviewer #2 (call 4), fixer #2 (call 5), … Reviewer calls write review.md
+    with the verdict at the corresponding zero-based attempt index. Fixer calls
+    are no-ops.
+    """
+    state = {"call": 0}
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        state["call"] += 1
+        if state["call"] == 1:
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            offset = state["call"] - 2  # 0=rev1, 1=fix1, 2=rev2, 3=fix2, …
+            if offset % 2 == 0:
+                attempt_idx = offset // 2
+                verdict = verdicts[attempt_idx] if attempt_idx < len(verdicts) else "FAIL"
+                review_path.parent.mkdir(parents=True, exist_ok=True)
+                review_path.write_text(f"### Finding 1\nDo the thing.\n\nVERDICT: {verdict}\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    return fake_exec
+
+
+@pytest.mark.asyncio
+async def test_loop_fail_fail_pass_reaches_merge_and_pr(base_kwargs, tmp_repo):
+    """FAIL → FAIL → PASS: 3 reviews + 2 fixers, then merge + PR."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_loop_fake_exec(req_path, review_path, ["FAIL", "FAIL", "PASS"]),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ) as mock_merge,
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("Title", "Body"),
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/100"),
+        ) as mock_pr,
+        patch("workbench.final_review.push_session_branch", return_value=(True, "")),
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False, "max_retries": 2}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "pass"
+    assert record.iterations == 3
+    assert record.fixer_runs == 2
+    assert record.merged is True
+    assert record.pr_url == "https://github.com/org/repo/pull/100"
+    mock_merge.assert_called_once()
+    mock_pr.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_loop_all_fail_no_pr(base_kwargs, tmp_repo):
+    """FAIL on every attempt → no PR, no merge, fixer_runs == max_retries."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_loop_fake_exec(req_path, review_path, ["FAIL", "FAIL", "FAIL"]),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ) as mock_merge,
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock) as mock_pr,
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False, "max_retries": 2}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "fail"
+    assert record.iterations == 3
+    assert record.fixer_runs == 2
+    assert record.merged is False
+    assert record.pr_url is None
+    mock_merge.assert_not_called()
+    mock_pr.assert_not_awaited()
+
+
+@pytest.mark.asyncio
+async def test_loop_pass_on_attempt_1_no_fixer(base_kwargs, tmp_repo):
+    """PASS on attempt 1 → no fixer runs, iterations == 1, merge + PR open."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=_make_loop_fake_exec(req_path, review_path, ["PASS"]),
+        ),
+        patch("workbench.final_review._create_review_worktree"),
+        patch("workbench.final_review._cleanup_review_worktree"),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ) as mock_merge,
+        patch(
+            "workbench.final_review.run_pr_writer",
+            new_callable=AsyncMock,
+            return_value=("Title", "Body"),
+        ),
+        patch(
+            "workbench.final_review.create_pr",
+            new_callable=AsyncMock,
+            return_value=(True, "https://github.com/org/repo/pull/200"),
+        ) as mock_pr,
+        patch("workbench.final_review.push_session_branch", return_value=(True, "")),
+    ):
+        kwargs = {**base_kwargs, "skip_pr": False, "max_retries": 2}
+        record = await run_final_review(**kwargs)
+
+    assert record.verdict == "pass"
+    assert record.iterations == 1
+    assert record.fixer_runs == 0
+    assert record.merged is True
+    assert record.pr_url == "https://github.com/org/repo/pull/200"
+    mock_merge.assert_called_once()
+    mock_pr.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_review_branch_created_and_cleaned_up(base_kwargs, tmp_repo):
+    """The ``<session>-review`` branch + ``.review-wt`` are gone after the run."""
+    wrap_up_dir = tmp_repo / ".workbench" / "my-plan" / "wrap-up" / "workbench-1"
+    req_path = wrap_up_dir / "requirements.md"
+    review_path = wrap_up_dir / "review.md"
+    wt_path = wrap_up_dir / ".review-wt"
+    review_branch = "workbench-1-review"
+
+    # Snapshot the session-branch tip so we can verify the review branch is
+    # created from it.
+    session_tip = subprocess.run(
+        ["git", "rev-parse", "workbench-1"],
+        cwd=tmp_repo,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+
+    branch_existed: dict = {"during": False, "tip_matches": False}
+
+    def fake_create(repo, wt, sb, rb):
+        # Mirror the real implementation so the branch + worktree exist
+        # on disk during the loop.
+        subprocess.run(["git", "branch", "-D", rb], cwd=repo, capture_output=True)
+        subprocess.run(
+            ["git", "worktree", "add", "-b", rb, str(wt), sb],
+            cwd=repo,
+            capture_output=True,
+        )
+
+    adapter = MagicMock()
+    adapter.build_command.return_value = ["echo", "ok"]
+    adapter.parse_output.return_value = ("done", {"cost_usd": 0.01})
+
+    async def fake_exec(*cmd, cwd=None, stdout=None, stderr=None):
+        # On every reviewer/summarizer call, write the expected files and
+        # record whether the review branch exists at session tip.
+        if not req_path.exists():
+            req_path.parent.mkdir(parents=True, exist_ok=True)
+            req_path.write_text(
+                "## Requirements\n- R\n## Non-goals\n- N\n## Acceptance criteria\n- A"
+            )
+        else:
+            # capture branch state during the run
+            check = subprocess.run(
+                ["git", "rev-parse", review_branch],
+                cwd=tmp_repo,
+                capture_output=True,
+                text=True,
+            )
+            if check.returncode == 0:
+                branch_existed["during"] = True
+                branch_existed["tip_matches"] = check.stdout.strip() == session_tip
+            review_path.parent.mkdir(parents=True, exist_ok=True)
+            review_path.write_text("All good.\n\nVERDICT: PASS\n")
+        proc = MagicMock()
+        proc.returncode = 0
+        proc.communicate = AsyncMock(return_value=(b"done", b""))
+        return proc
+
+    with (
+        patch("workbench.final_review.get_adapter", return_value=adapter),
+        patch("asyncio.create_subprocess_exec", side_effect=fake_exec),
+        patch("workbench.final_review._create_review_worktree", side_effect=fake_create),
+        patch(
+            "workbench.final_review._merge_review_branch",
+            return_value=(True, "ff-merged"),
+        ),
+        patch("workbench.final_review.run_pr_writer", new_callable=AsyncMock),
+        patch("workbench.final_review.create_pr", new_callable=AsyncMock),
+    ):
+        # skip_pr=True keeps the test independent of gh; cleanup runs either way.
+        await run_final_review(**base_kwargs)
+
+    assert branch_existed["during"], "review branch should exist during the run"
+    assert branch_existed["tip_matches"], "review branch should be created at session tip"
+
+    # After the run, both the worktree and the branch are gone.
+    assert not wt_path.exists()
+    branch_check = subprocess.run(
+        ["git", "rev-parse", "--verify", review_branch],
+        cwd=tmp_repo,
+        capture_output=True,
+        text=True,
+    )
+    assert branch_check.returncode != 0, "review branch should be deleted by cleanup"
