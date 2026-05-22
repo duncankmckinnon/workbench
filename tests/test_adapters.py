@@ -329,7 +329,12 @@ class TestAgentConfig:
     def test_to_dict_text(self):
         config = AgentConfig(command="my-cli", args=["{prompt}"])
         d = config.to_dict()
-        assert d == {"command": "my-cli", "args": ["{prompt}"], "output_format": "text"}
+        assert d == {
+            "command": "my-cli",
+            "args": ["{prompt}"],
+            "output_format": "text",
+            "inject_env": True,
+        }
         assert "json_result_key" not in d
 
     def test_to_dict_json(self):
@@ -362,6 +367,29 @@ class TestAgentConfig:
         )
         assert config.output_format == OutputFormat.JSON
         assert config.json_result_key == "answer"
+
+    def test_builtin_adapters_inject_env_default_true(self):
+        assert ClaudeAdapter().config.inject_env is True
+        assert CodexAdapter().config.inject_env is True
+        assert GeminiAdapter().config.inject_env is True
+
+    def test_from_dict_inject_env_defaults_false(self):
+        config = AgentConfig.from_dict({"command": "x", "args": ["{prompt}"]})
+        assert config.inject_env is False
+
+    def test_from_dict_inject_env_opt_in(self):
+        config = AgentConfig.from_dict({"command": "x", "args": ["{prompt}"], "inject_env": True})
+        assert config.inject_env is True
+
+    def test_round_trip_inject_env_true(self):
+        original = AgentConfig(command="my-cli", args=["{prompt}"], inject_env=True)
+        restored = AgentConfig.from_dict(original.to_dict())
+        assert restored.inject_env == original.inject_env
+
+    def test_round_trip_inject_env_false(self):
+        original = AgentConfig(command="my-cli", args=["{prompt}"], inject_env=False)
+        restored = AgentConfig.from_dict(original.to_dict())
+        assert restored.inject_env == original.inject_env
 
     def test_round_trip(self):
         original = AgentConfig(

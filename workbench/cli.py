@@ -94,6 +94,9 @@ _FRONTMATTER_TO_PARAM: dict[str, str] = {
     "keep_branches": "keep_branches",
     "push": "push",
     "final_review": "final_review",
+    "trace": "trace",
+    "trace_env": "trace_env",
+    "trace_prompt": "trace_prompt",
 }
 
 # Click's --profile option converts the string to a Path via
@@ -712,6 +715,24 @@ def main():
     type=str,
     help="Override the PR writer agent's instructions.",
 )
+@click.option(
+    "--trace/--no-trace",
+    "trace",
+    default=True,
+    help="Master switch for session trace metadata (env + prompt). Default on.",
+)
+@click.option(
+    "--trace-env/--no-trace-env",
+    "trace_env",
+    default=True,
+    help="Inject WB_*/OTEL trace env vars into agent processes. Default on.",
+)
+@click.option(
+    "--trace-prompt/--no-trace-prompt",
+    "trace_prompt",
+    default=False,
+    help="Prepend a wb-session metadata block to agent prompts. Default off.",
+)
 def run(
     plan_path: str,
     max_concurrent: int,
@@ -750,6 +771,9 @@ def run(
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
     pr_writer_directive: str | None,
+    trace: bool,
+    trace_env: bool,
+    trace_prompt: bool,
 ):
     """Run a plan with parallel agents.
 
@@ -799,6 +823,9 @@ def run(
         "keep_branches": keep_branches,
         "push": push,
         "final_review": final_review,
+        "trace": trace,
+        "trace_env": trace_env,
+        "trace_prompt": trace_prompt,
     }
     effective = _apply_plan_run_config(ctx, mapped_run_config, flag_values)
     session_branch = effective["session_branch"]
@@ -819,6 +846,12 @@ def run(
     keep_branches = effective["keep_branches"]
     push = effective["push"]
     final_review = effective["final_review"]
+    trace = effective["trace"]
+    trace_env = effective["trace_env"]
+    trace_prompt = effective["trace_prompt"]
+
+    effective_trace_env = trace and trace_env
+    effective_trace_prompt = trace and trace_prompt
 
     if tdd and skip_test:
         raise click.ClickException("--tdd and --skip-test are mutually exclusive.")
@@ -903,6 +936,8 @@ def run(
             task_filter=set(task_ids) if task_ids else None,
             push=push,
             agents_config_paths=agents_config_paths,
+            trace_env=effective_trace_env,
+            trace_prompt=effective_trace_prompt,
         )
     )
 
@@ -954,6 +989,8 @@ def run(
                 )
                 review_args["agents_config_paths"] = agents_config_paths
                 review_args["max_retries"] = max_retries
+                review_args["trace_env"] = effective_trace_env
+                review_args["trace_prompt"] = effective_trace_prompt
                 record = asyncio.run(run_final_review(**review_args))
                 _print_final_review_result(record)
 
@@ -1075,6 +1112,9 @@ def resume(
         summarizer_directive=None,
         branch_reviewer_directive=None,
         pr_writer_directive=None,
+        trace=True,
+        trace_env=True,
+        trace_prompt=False,
     )
 
 
@@ -1168,6 +1208,24 @@ def plan():
     is_flag=True,
     help="Copy the current effective profile.yaml and agents.yaml into the plan folder.",
 )
+@click.option(
+    "--trace/--no-trace",
+    "trace",
+    default=True,
+    help="Master switch for session trace metadata (env + prompt). Default on.",
+)
+@click.option(
+    "--trace-env/--no-trace-env",
+    "trace_env",
+    default=True,
+    help="Inject WB_*/OTEL trace env vars into agent processes. Default on.",
+)
+@click.option(
+    "--trace-prompt/--no-trace-prompt",
+    "trace_prompt",
+    default=False,
+    help="Prepend a wb-session metadata block to agent prompts. Default off.",
+)
 def plan_generate(
     prompt: str,
     from_file: Path | None,
@@ -1176,6 +1234,9 @@ def plan_generate(
     repo: Path | None,
     no_tmux: bool,
     copy_settings: bool,
+    trace: bool,
+    trace_env: bool,
+    trace_prompt: bool,
 ):
     """Generate a workbench plan from a description or existing document.
 
@@ -1231,6 +1292,9 @@ def plan_generate(
     conventions_text = load_conventions_text(repo)
 
     agents_paths = resolve_agents_config_paths(repo, plan_slug=name)
+    effective_trace_env = trace and trace_env
+    effective_trace_prompt = trace and trace_prompt
+
     result = asyncio.run(
         run_planner(
             repo=repo,
@@ -1241,6 +1305,8 @@ def plan_generate(
             use_tmux=not no_tmux,
             agents_config_paths=agents_paths,
             conventions_text=conventions_text,
+            trace_env=effective_trace_env,
+            trace_prompt=effective_trace_prompt,
         )
     )
 
@@ -1967,6 +2033,24 @@ def stop(cleanup: bool, repo: Path | None):
     type=str,
     help="Override the PR writer agent's instructions.",
 )
+@click.option(
+    "--trace/--no-trace",
+    "trace",
+    default=True,
+    help="Master switch for session trace metadata (env + prompt). Default on.",
+)
+@click.option(
+    "--trace-env/--no-trace-env",
+    "trace_env",
+    default=True,
+    help="Inject WB_*/OTEL trace env vars into agent processes. Default on.",
+)
+@click.option(
+    "--trace-prompt/--no-trace-prompt",
+    "trace_prompt",
+    default=False,
+    help="Prepend a wb-session metadata block to agent prompts. Default off.",
+)
 def merge(
     session_branch: str,
     plan_path: Path | None,
@@ -1984,6 +2068,9 @@ def merge(
     summarizer_directive: str | None,
     branch_reviewer_directive: str | None,
     pr_writer_directive: str | None,
+    trace: bool,
+    trace_env: bool,
+    trace_prompt: bool,
 ):
     """Merge completed-but-unmerged task branches into the session branch.
 
@@ -2078,6 +2165,8 @@ def merge(
                         repo, plan_slug=status.plan_slug
                     )
                     review_args["max_retries"] = max_retries
+                    review_args["trace_env"] = trace and trace_env
+                    review_args["trace_prompt"] = trace and trace_prompt
                     record = asyncio.run(run_final_review(**review_args))
                     _print_final_review_result(record)
 
@@ -2138,6 +2227,24 @@ def merge(
     help="Path to a profile.yaml to use.",
 )
 @click.option("--profile-name", default=None, help="Named profile to resolve.")
+@click.option(
+    "--trace/--no-trace",
+    "trace",
+    default=True,
+    help="Master switch for session trace metadata (env + prompt). Default on.",
+)
+@click.option(
+    "--trace-env/--no-trace-env",
+    "trace_env",
+    default=True,
+    help="Inject WB_*/OTEL trace env vars into agent processes. Default on.",
+)
+@click.option(
+    "--trace-prompt/--no-trace-prompt",
+    "trace_prompt",
+    default=False,
+    help="Prepend a wb-session metadata block to agent prompts. Default off.",
+)
 def final_review_cmd(
     session_branch: str,
     repo: Path | None,
@@ -2153,6 +2260,9 @@ def final_review_cmd(
     pr_writer_directive: str | None,
     profile_path: Path | None,
     profile_name: str | None,
+    trace: bool,
+    trace_env: bool,
+    trace_prompt: bool,
 ):
     """Run a final whole-branch review for a session.
 
@@ -2243,6 +2353,8 @@ def final_review_cmd(
     )
     review_args["agents_config_paths"] = agents_paths_for_review
     review_args["max_retries"] = max_retries
+    review_args["trace_env"] = trace and trace_env
+    review_args["trace_prompt"] = trace and trace_prompt
     record = asyncio.run(run_final_review(**review_args))
     _print_final_review_result(record)
 

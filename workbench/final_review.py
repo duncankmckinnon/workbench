@@ -41,6 +41,7 @@ from workbench.pr_writer import (
     derive_title_from_plan,
     run_pr_writer,
 )
+from workbench.session_metadata import SessionMetadata, merge_trace_env, with_session_metadata
 from workbench.session_status import FinalReviewRecord, SessionStatus
 from workbench.tmux import run_in_tmux
 from workbench.worktree import push_session_branch
@@ -124,6 +125,8 @@ async def run_final_review(
     skip_pr: bool = False,
     agents_config_paths: list[Path] | None = None,
     max_retries: int = 2,
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> FinalReviewRecord:
     """Run the final review fix loop and return the persisted record.
 
@@ -170,6 +173,8 @@ async def run_final_review(
             skip_pr=skip_pr,
             agents_config_paths=agents_config_paths,
             max_retries=max_retries,
+            trace_env=trace_env,
+            trace_prompt=trace_prompt,
         )
     finally:
         lock_path.unlink(missing_ok=True)
@@ -194,6 +199,8 @@ async def _run_review_sequence(
     skip_pr: bool,
     agents_config_paths: list[Path] | None,
     max_retries: int,
+    trace_env: bool,
+    trace_prompt: bool,
 ) -> FinalReviewRecord:
     """Inner sequence, runs inside the lock."""
 
@@ -233,6 +240,8 @@ async def _run_review_sequence(
                 skip_pr=skip_pr,
                 agents_config_paths=agents_config_paths,
                 max_retries=max_retries,
+                trace_env=trace_env,
+                trace_prompt=trace_prompt,
             )
         finally:
             shutdown.set()
@@ -264,6 +273,8 @@ async def _execute_sequence(
     skip_pr: bool,
     agents_config_paths: list[Path] | None,
     max_retries: int,
+    trace_env: bool,
+    trace_prompt: bool,
 ) -> FinalReviewRecord:
     wrap_up_dir = repo / ".workbench" / plan_slug / "wrap-up" / session_branch
     wrap_up_dir.mkdir(parents=True, exist_ok=True)
@@ -291,6 +302,8 @@ async def _execute_sequence(
             skip_pr=skip_pr,
             agents_config_paths=agents_config_paths,
             max_retries=max_retries,
+            trace_env=trace_env,
+            trace_prompt=trace_prompt,
             wrap_up_dir=wrap_up_dir,
             requirements_path=requirements_path,
             review_path=review_path,
@@ -319,6 +332,8 @@ async def _execute_sequence_inner(
     skip_pr: bool,
     agents_config_paths: list[Path] | None,
     max_retries: int,
+    trace_env: bool,
+    trace_prompt: bool,
     wrap_up_dir: Path,
     requirements_path: Path,
     review_path: Path,
@@ -351,6 +366,15 @@ async def _execute_sequence_inner(
     )
     summarizer_prompt = summarizer_dir.render()
 
+    summarizer_meta = SessionMetadata(plan=plan_slug, agent="summarizer", step="requirements")
+    if trace_prompt:
+        summarizer_prompt = with_session_metadata(summarizer_prompt, summarizer_meta)
+    summarizer_env = (
+        merge_trace_env(os.environ, summarizer_meta)
+        if trace_env and summarizer_adapter.config.inject_env
+        else None
+    )
+
     states[0].status = PostTaskAgentStatus.RUNNING
     states[0].started_at = time.time()
     summarizer_cost: dict = {}
@@ -359,11 +383,14 @@ async def _execute_sequence_inner(
             cmd = summarizer_adapter.build_command(summarizer_prompt, repo)
             if use_tmux:
                 session_name = "wb-final-review-summarizer"
-                returncode, raw_output = await run_in_tmux(session_name, cmd, repo)
+                returncode, raw_output = await run_in_tmux(
+                    session_name, cmd, repo, env=summarizer_env
+                )
             else:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(repo),
+                    env=summarizer_env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -499,6 +526,16 @@ async def _execute_sequence_inner(
 
         reviewer_adapter = get_adapter(reviewer_agent_cmd, adapter_paths)
         reviewer_prompt = reviewer_dir.render()
+        reviewer_meta = SessionMetadata(
+            plan=plan_slug, agent="branch_reviewer", step=f"review#{attempt}"
+        )
+        if trace_prompt:
+            reviewer_prompt = with_session_metadata(reviewer_prompt, reviewer_meta)
+        reviewer_env = (
+            merge_trace_env(os.environ, reviewer_meta)
+            if trace_env and reviewer_adapter.config.inject_env
+            else None
+        )
         reviewer_returncode = 1
         reviewer_output = ""
         reviewer_cost: dict = {}
@@ -507,12 +544,13 @@ async def _execute_sequence_inner(
             if use_tmux:
                 session_name = f"wb-final-review-branch-reviewer-{attempt}"
                 reviewer_returncode, reviewer_output = await run_in_tmux(
-                    session_name, cmd, wt_path
+                    session_name, cmd, wt_path, env=reviewer_env
                 )
             else:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(wt_path),
+                    env=reviewer_env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )
@@ -575,6 +613,14 @@ async def _execute_sequence_inner(
             fix_branch=review_branch,
         )
         fixer_prompt = fixer_dir.render()
+        fixer_meta = SessionMetadata(plan=plan_slug, agent="fixer", step=f"fix#{attempt}")
+        if trace_prompt:
+            fixer_prompt = with_session_metadata(fixer_prompt, fixer_meta)
+        fixer_env = (
+            merge_trace_env(os.environ, fixer_meta)
+            if trace_env and fixer_adapter.config.inject_env
+            else None
+        )
         fixer_returncode = 1
         fixer_output = ""
         fixer_cost: dict = {}
@@ -582,11 +628,14 @@ async def _execute_sequence_inner(
             cmd = fixer_adapter.build_command(fixer_prompt, wt_path)
             if use_tmux:
                 session_name = f"wb-final-review-fixer-{attempt}"
-                fixer_returncode, fixer_output = await run_in_tmux(session_name, cmd, wt_path)
+                fixer_returncode, fixer_output = await run_in_tmux(
+                    session_name, cmd, wt_path, env=fixer_env
+                )
             else:
                 proc = await asyncio.create_subprocess_exec(
                     *cmd,
                     cwd=str(wt_path),
+                    env=fixer_env,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                 )

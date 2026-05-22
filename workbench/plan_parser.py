@@ -44,6 +44,9 @@ _RUN_CONFIG_SCHEMA: dict[str, type | tuple[type, ...]] = {
     "keep_branches": bool,
     "push": bool,
     "final_review": bool,
+    "trace": bool,
+    "trace_env": bool,
+    "trace_prompt": bool,
 }
 
 

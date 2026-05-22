@@ -24,6 +24,7 @@ class AgentConfig:
     output_format: OutputFormat = OutputFormat.TEXT
     json_result_key: str = "result"
     json_cost_key: str = "cost_usd"
+    inject_env: bool = True
 
     def __post_init__(self) -> None:
         # Coerce string to enum (raises ValueError for invalid values)
@@ -46,6 +47,7 @@ class AgentConfig:
         if self.output_format == OutputFormat.JSON:
             entry["json_result_key"] = self.json_result_key
             entry["json_cost_key"] = self.json_cost_key
+        entry["inject_env"] = self.inject_env
         return entry
 
     @classmethod
@@ -57,6 +59,7 @@ class AgentConfig:
             output_format=entry.get("output_format", "text"),
             json_result_key=entry.get("json_result_key", "result"),
             json_cost_key=entry.get("json_cost_key", "cost_usd"),
+            inject_env=entry.get("inject_env", False),
         )
 
 
