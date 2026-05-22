@@ -291,6 +291,35 @@ class TestRunConfigFrontmatter:
         assert plan.tasks[1].depends_on == ["task-1"]
 
 
+class TestTraceFrontmatter:
+    def test_trace_keys_parse(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\n"
+            "trace_prompt: true\n"
+            "trace_env: false\n"
+            "---\n"
+            "# Plan\n## Task: x\nDo it.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.run_config["trace_prompt"] is True
+        assert plan.run_config["trace_env"] is False
+
+    def test_trace_master_switch_parses(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\ntrace: false\n---\n# Plan\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert plan.run_config["trace"] is False
+
+    def test_omitting_trace_keys_is_fine(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text("---\ntdd: true\n---\n# Plan\n## Task: x\nDo it.\n")
+        plan = parse_plan(plan_file)
+        assert "trace" not in plan.run_config
+        assert "trace_env" not in plan.run_config
+        assert "trace_prompt" not in plan.run_config
+
+
 def test_parse_plan_without_repo_arg_does_not_apply_fallback(tmp_path):
     plan_path = tmp_path / "plan.md"
     plan_path.write_text("# Plan\n\n## Task: t\nDo it.\n")

@@ -5325,6 +5325,69 @@ def test_final_review_command_forwards_max_retries(git_repo, tmp_path):
     assert mock_final_review.call_args.kwargs.get("max_retries") == 7
 
 
+# ---------------------------------------------------------------------------
+# wb run trace metadata flags
+# ---------------------------------------------------------------------------
+
+
+def _invoke_run_with_trace_flags(git_repo, tmp_path, extra_flags: list[str]):
+    """Invoke `wb run` with the given extra flags and capture run_plan kwargs."""
+    plan = tmp_path / "trace-plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan") as mock_run_plan,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.asyncio") as mock_asyncio,
+    ):
+        mock_asyncio.run = lambda coro: None
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux", *extra_flags])
+
+    return result, mock_run_plan
+
+
+def test_run_trace_prompt_forwards_true(git_repo, tmp_path):
+    """--trace-prompt should forward trace_prompt=True (trace_env=True default) to run_plan."""
+    result, mock_run_plan = _invoke_run_with_trace_flags(git_repo, tmp_path, ["--trace-prompt"])
+    assert "no such option" not in (result.output or "").lower()
+    assert mock_run_plan.called
+    kwargs = mock_run_plan.call_args.kwargs
+    assert kwargs.get("trace_prompt") is True
+    assert kwargs.get("trace_env") is True
+
+
+def test_run_no_trace_disables_both_even_with_trace_prompt(git_repo, tmp_path):
+    """--no-trace overrides --trace-prompt: both effective values are False."""
+    result, mock_run_plan = _invoke_run_with_trace_flags(
+        git_repo, tmp_path, ["--no-trace", "--trace-prompt"]
+    )
+    assert "no such option" not in (result.output or "").lower()
+    assert mock_run_plan.called
+    kwargs = mock_run_plan.call_args.kwargs
+    assert kwargs.get("trace_env") is False
+    assert kwargs.get("trace_prompt") is False
+
+
+def test_run_no_trace_env_disables_env_only(git_repo, tmp_path):
+    """--no-trace-env disables env injection but leaves trace_prompt at the default (False)."""
+    result, mock_run_plan = _invoke_run_with_trace_flags(git_repo, tmp_path, ["--no-trace-env"])
+    assert "no such option" not in (result.output or "").lower()
+    assert mock_run_plan.called
+    kwargs = mock_run_plan.call_args.kwargs
+    assert kwargs.get("trace_env") is False
+    assert kwargs.get("trace_prompt") is False
+
+
+def test_run_bare_defaults_trace_env_on_trace_prompt_off(git_repo, tmp_path):
+    """A bare `run` (no trace flags) forwards trace_env=True, trace_prompt=False."""
+    result, mock_run_plan = _invoke_run_with_trace_flags(git_repo, tmp_path, [])
+    assert mock_run_plan.called
+    kwargs = mock_run_plan.call_args.kwargs
+    assert kwargs.get("trace_env") is True
+    assert kwargs.get("trace_prompt") is False
+
+
 def test_final_review_command_default_max_retries(git_repo, tmp_path):
     """wb final-review without --max-retries should forward the default (2)."""
     plan = _make_plan_in_dir(tmp_path, "my-plan")

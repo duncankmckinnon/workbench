@@ -172,6 +172,8 @@ async def run_plan(
     task_filter: set[str] | None = None,
     push: bool = False,
     agents_config_paths: list[Path] | None = None,
+    trace_env: bool = True,
+    trace_prompt: bool = False,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -535,6 +537,10 @@ async def run_plan(
                             tdd=tdd,
                             profile=profile,
                             agents_config_paths=agents_config_paths,
+                            plan_name=plan.folder_id,
+                            wave_num=state.wave_num,
+                            trace_env=trace_env,
+                            trace_prompt=trace_prompt,
                         )
 
                         state.results = results
@@ -606,6 +612,9 @@ async def run_plan(
                             repo=repo,
                             agent_cmd=agent_cmd,
                             agents_config_paths=agents_config_paths,
+                            plan_name=plan.folder_id,
+                            trace_env=trace_env,
+                            trace_prompt=trace_prompt,
                         )
                         state.results.append(resolver_result)
 

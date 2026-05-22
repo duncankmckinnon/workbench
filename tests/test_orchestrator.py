@@ -2545,3 +2545,39 @@ async def test_run_plan_plan_conventions_win_over_repo_file(tmp_path):
     plan_conventions = captured_kwargs.get("plan_conventions", "")
     assert "PLAN-OWN-CONVENTION" in plan_conventions
     assert "ORCH-SENTINEL" not in plan_conventions
+
+
+@pytest.mark.asyncio
+async def test_run_plan_passes_trace_metadata_to_pipeline(tmp_path):
+    """run_plan should forward plan_name, wave_num, trace_env, trace_prompt to run_pipeline."""
+    plan = _make_plan(title="My Feature")
+    repo = tmp_path
+
+    captured_kwargs: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            trace_env=True,
+            trace_prompt=True,
+        )
+
+    assert captured_kwargs.get("plan_name") == plan.folder_id
+    assert captured_kwargs.get("wave_num") == 1
+    assert captured_kwargs.get("trace_env") is True
+    assert captured_kwargs.get("trace_prompt") is True
