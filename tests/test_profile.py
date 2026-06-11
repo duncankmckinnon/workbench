@@ -730,6 +730,7 @@ class TestRoleConfig:
         """RoleConfig() has agent='claude' and empty directive."""
         rc = RoleConfig()
         assert rc.agent == "claude"
+        assert rc.model == ""
         assert rc.directive == ""
         assert rc.tdd is None
         assert rc.followup is None
@@ -739,6 +740,76 @@ class TestRoleConfig:
         rc = RoleConfig(agent="gemini", directive="Do things.")
         assert rc.agent == "gemini"
         assert rc.directive == "Do things."
+
+
+# ---------------------------------------------------------------------------
+# Profile model field
+# ---------------------------------------------------------------------------
+
+
+class TestProfileModel:
+    def test_model_unset_by_default(self):
+        """Every role on a default Profile has model=''."""
+        profile = Profile.default()
+        for role_name in ALL_ROLE_NAMES:
+            assert getattr(profile, role_name).model == ""
+
+    def test_yaml_sets_role_model(self, tmp_path):
+        """A YAML model: field populates RoleConfig.model on the right role."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"implementor": {"model": "claude-opus-4-8"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.implementor.model == "claude-opus-4-8"
+        # Other roles still unset
+        for role_name in ALL_ROLE_NAMES:
+            if role_name != "implementor":
+                assert getattr(profile, role_name).model == ""
+
+    def test_role_without_model_keeps_empty(self, tmp_path):
+        """A role config that omits 'model' keeps the default empty string."""
+        yaml_path = _write_yaml(
+            tmp_path / "profile.yaml",
+            {"roles": {"implementor": {"agent": "codex"}}},
+        )
+        profile = Profile.from_yaml(yaml_path)
+        assert profile.implementor.agent == "codex"
+        assert profile.implementor.model == ""
+
+    def test_save_omits_model_when_empty(self, tmp_path):
+        """Roles with an empty model do not emit a 'model:' key on save."""
+        out = tmp_path / "output.yaml"
+        Profile.default().save(out)
+        data = yaml.safe_load(out.read_text())
+        for role_name in ALL_ROLE_NAMES:
+            assert "model" not in data["roles"][role_name]
+
+    def test_save_includes_model_when_set(self, tmp_path):
+        """A role with model set emits a 'model:' key on save."""
+        profile = Profile.default()
+        profile.tester.model = "gpt-5-codex"
+        out = tmp_path / "output.yaml"
+        profile.save(out)
+        data = yaml.safe_load(out.read_text())
+        assert data["roles"]["tester"]["model"] == "gpt-5-codex"
+        # Other roles still omit the key
+        assert "model" not in data["roles"]["implementor"]
+        assert "model" not in data["roles"]["reviewer"]
+
+    def test_model_roundtrip(self, tmp_path):
+        """A profile with model set survives save/load roundtrip."""
+        profile = Profile.default()
+        profile.implementor.model = "claude-opus-4-8"
+        profile.reviewer.model = "gpt-5-codex"
+        out = tmp_path / "roundtrip.yaml"
+        profile.save(out)
+        reloaded = Profile.from_yaml(out)
+        assert reloaded.implementor.model == "claude-opus-4-8"
+        assert reloaded.reviewer.model == "gpt-5-codex"
+        # Unset roles still unset after roundtrip
+        assert reloaded.tester.model == ""
+        assert reloaded.fixer.model == ""
 
 
 # ---------------------------------------------------------------------------
