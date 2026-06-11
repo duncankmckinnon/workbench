@@ -21,6 +21,35 @@ if TYPE_CHECKING:
     from .profile import Profile, RoleConfig
 
 
+def resolve_model(
+    *,
+    role: str,
+    agent: str,
+    cli_models: dict[str, str] | None,
+    profile: Profile | None,
+    plan_models: dict[str, str] | None,
+) -> str | None:
+    """Resolve the model for a (role, agent). Returns None if unset.
+
+    Precedence: CLI (agent key, then "" key) > profile.<role>.model
+    (if non-empty) > plan (agent key, then "" key) > None.
+    """
+
+    def _pick(d: dict[str, str] | None) -> str | None:
+        if not d:
+            return None
+        return d.get(agent) or d.get("") or None
+
+    cli = _pick(cli_models)
+    if cli:
+        return cli
+    if profile is not None:
+        pm = getattr(profile, role, None)
+        if pm is not None and getattr(pm, "model", ""):
+            return pm.model
+    return _pick(plan_models)
+
+
 class Role(StrEnum):
     IMPLEMENTOR = "implementor"
     TESTER = "tester"
@@ -83,6 +112,7 @@ async def run_agent(
     meta: SessionMetadata | None = None,
     trace_env: bool = True,
     trace_prompt: bool = False,
+    model: str | None = None,
 ) -> AgentResult:
     """Spawn an agent in a worktree to run a single pipeline stage."""
     if adapter is None:
@@ -104,7 +134,7 @@ async def run_agent(
         env = merge_trace_env(os.environ, meta)
 
     try:
-        cmd = adapter.build_command(prompt, ctx.worktree.path)
+        cmd = adapter.build_command(prompt, ctx.worktree.path, model)
         if use_tmux:
             session_name = f"wb-{effective_task_id}-{directive.role.value}"
             returncode, raw_output = await run_in_tmux(
@@ -167,6 +197,8 @@ async def run_pipeline(
     wave_num: int | None = None,
     trace_env: bool = True,
     trace_prompt: bool = False,
+    cli_models: dict[str, str] | None = None,
+    plan_models: dict[str, str] | None = None,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -230,6 +262,15 @@ async def run_pipeline(
             return getattr(profile, role.value).agent
         return agent_cmd
 
+    def _model_for(role: Role) -> str | None:
+        return resolve_model(
+            role=role.value,
+            agent=_agent_for(role),
+            cli_models=cli_models,
+            profile=profile,
+            plan_models=plan_models,
+        )
+
     def _text_for(role: Role, mode: str = "main") -> str:
         """Resolve directive_text for a (role, mode) from CLI / profile.
 
@@ -266,6 +307,7 @@ async def run_pipeline(
             meta=replace(base_meta, step="tdd-test"),
             trace_env=trace_env,
             trace_prompt=trace_prompt,
+            model=_model_for(Role.TESTER),
         )
         _record(test_write_result)
 
@@ -288,6 +330,7 @@ async def run_pipeline(
             meta=replace(base_meta, step="tdd-implement"),
             trace_env=trace_env,
             trace_prompt=trace_prompt,
+            model=_model_for(Role.IMPLEMENTOR),
         )
         _record(impl_result)
 
@@ -316,6 +359,7 @@ async def run_pipeline(
             meta=replace(base_meta, step="implement"),
             trace_env=trace_env,
             trace_prompt=trace_prompt,
+            model=_model_for(Role.IMPLEMENTOR),
         )
         _record(impl_result)
 
@@ -340,6 +384,7 @@ async def run_pipeline(
                 meta=replace(base_meta, step=f"test#{attempt}"),
                 trace_env=trace_env,
                 trace_prompt=trace_prompt,
+                model=_model_for(Role.TESTER),
             )
             test_result.attempt = attempt
             _record(test_result)
@@ -372,6 +417,7 @@ async def run_pipeline(
                     meta=replace(base_meta, step=f"test-fix#{attempt}"),
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
+                    model=_model_for(Role.FIXER),
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -421,6 +467,7 @@ async def run_pipeline(
                 meta=replace(base_meta, step=f"review#{attempt}"),
                 trace_env=trace_env,
                 trace_prompt=trace_prompt,
+                model=_model_for(Role.REVIEWER),
             )
             review_result.attempt = attempt
             _record(review_result)
@@ -455,6 +502,7 @@ async def run_pipeline(
                     meta=replace(base_meta, step=f"review-fix#{attempt}"),
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
+                    model=_model_for(Role.FIXER),
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -485,6 +533,7 @@ async def run_merge_resolver(
     plan_name: str = "",
     trace_env: bool = True,
     trace_prompt: bool = False,
+    model: str | None = None,
 ) -> AgentResult:
     """Run a merge conflict resolution agent in the merge worktree.
 
@@ -522,7 +571,7 @@ async def run_merge_resolver(
         env = merge_trace_env(os.environ, meta)
 
     try:
-        cmd = adapter.build_command(prompt, merge_dir)
+        cmd = adapter.build_command(prompt, merge_dir, model)
         if use_tmux:
             session_name = f"wb-merge-{task_branch.replace('/', '-')}"
             returncode, raw_output = await run_in_tmux(session_name, cmd, merge_dir, env=env)
@@ -582,6 +631,7 @@ async def run_planner(
     conventions_text: str = "",
     trace_env: bool = True,
     trace_prompt: bool = False,
+    model: str | None = None,
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -624,7 +674,7 @@ async def run_planner(
         env = merge_trace_env(os.environ, meta)
 
     try:
-        cmd = adapter.build_command(prompt, repo)
+        cmd = adapter.build_command(prompt, repo, model)
         if use_tmux:
             session_name = f"wb-planner-{plan_name}"
             returncode, raw_output = await run_in_tmux(session_name, cmd, repo, env=env)

@@ -434,7 +434,7 @@ def test_run_planner_with_source_content(tmp_path):
 
     mock_adapter = MagicMock()
 
-    def capture_command(prompt, cwd):
+    def capture_command(prompt, cwd, model=None):
         captured_prompt["prompt"] = prompt
         return ["echo", "ok"]
 

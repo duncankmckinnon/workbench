@@ -712,9 +712,9 @@ class TestSessionMetadataWiring:
         captured: dict[str, str] = {}
         original_build = adapter.build_command
 
-        def spy_build(prompt, cwd):
+        def spy_build(prompt, cwd, model=None):
             captured["prompt"] = prompt
-            return original_build(prompt, cwd)
+            return original_build(prompt, cwd, model)
 
         adapter.build_command = spy_build  # type: ignore[assignment]
 
@@ -834,3 +834,314 @@ class TestSessionMetadataWiring:
         assert agent_by_step["implement"] == Role.IMPLEMENTOR.value
         assert agent_by_step["test#1"] == Role.TESTER.value
         assert agent_by_step["test-fix#1"] == Role.FIXER.value
+
+
+# ---------------------------------------------------------------------------
+# Model resolution + wiring
+# ---------------------------------------------------------------------------
+
+
+from workbench.agents import resolve_model  # noqa: E402
+from workbench.profile import Profile, RoleConfig  # noqa: E402
+
+
+class TestResolveModel:
+    def test_cli_agent_key_beats_profile(self):
+        profile = Profile.default()
+        profile.implementor = RoleConfig(agent="claude", model="profile-model")
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="claude",
+                cli_models={"claude": "cli-model"},
+                profile=profile,
+                plan_models={"claude": "plan-model"},
+            )
+            == "cli-model"
+        )
+
+    def test_cli_empty_key_used_when_no_agent_key(self):
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="claude",
+                cli_models={"": "shared-model"},
+                profile=None,
+                plan_models=None,
+            )
+            == "shared-model"
+        )
+
+    def test_cli_agent_key_preferred_over_empty_key(self):
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="codex",
+                cli_models={"": "shared", "codex": "specific"},
+                profile=None,
+                plan_models=None,
+            )
+            == "specific"
+        )
+
+    def test_profile_beats_plan(self):
+        profile = Profile.default()
+        profile.tester = RoleConfig(agent="claude", model="profile-model")
+        assert (
+            resolve_model(
+                role="tester",
+                agent="claude",
+                cli_models=None,
+                profile=profile,
+                plan_models={"claude": "plan-model"},
+            )
+            == "profile-model"
+        )
+
+    def test_plan_agent_key(self):
+        assert (
+            resolve_model(
+                role="reviewer",
+                agent="codex",
+                cli_models=None,
+                profile=None,
+                plan_models={"codex": "plan-codex"},
+            )
+            == "plan-codex"
+        )
+
+    def test_plan_empty_key_fallback(self):
+        assert (
+            resolve_model(
+                role="reviewer",
+                agent="codex",
+                cli_models=None,
+                profile=None,
+                plan_models={"": "plan-any"},
+            )
+            == "plan-any"
+        )
+
+    def test_returns_none_when_nothing_set(self):
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="claude",
+                cli_models=None,
+                profile=Profile.default(),
+                plan_models=None,
+            )
+            is None
+        )
+
+    def test_empty_profile_model_is_skipped(self):
+        profile = Profile.default()
+        profile.implementor = RoleConfig(agent="claude", model="")
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="claude",
+                cli_models=None,
+                profile=profile,
+                plan_models={"claude": "plan-model"},
+            )
+            == "plan-model"
+        )
+
+    def test_empty_dicts_treated_as_unset(self):
+        assert (
+            resolve_model(
+                role="implementor",
+                agent="claude",
+                cli_models={},
+                profile=None,
+                plan_models={},
+            )
+            is None
+        )
+
+
+class TestRunAgentPassesModel:
+    def test_model_threaded_to_build_command(self, sample_ctx, tmp_path):
+        """run_agent passes model to adapter.build_command as third positional arg."""
+        directive = ImplementorDirective()
+        adapter = MagicMock()
+        adapter.config = MagicMock(inject_env=False)
+        adapter.build_command.return_value = ["echo", "hi"]
+        adapter.parse_output.return_value = ("ok", {})
+
+        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, "ok")):
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    adapter=adapter,
+                    use_tmux=True,
+                    model="claude-opus-4-8",
+                )
+            )
+
+        args, _kwargs = adapter.build_command.call_args
+        assert args[2] == "claude-opus-4-8"
+
+    def test_model_none_threaded_to_build_command(self, sample_ctx, tmp_path):
+        """When model is not provided, build_command receives None."""
+        directive = ImplementorDirective()
+        adapter = MagicMock()
+        adapter.config = MagicMock(inject_env=False)
+        adapter.build_command.return_value = ["echo", "hi"]
+        adapter.parse_output.return_value = ("ok", {})
+
+        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, "ok")):
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    adapter=adapter,
+                    use_tmux=True,
+                )
+            )
+
+        args, _kwargs = adapter.build_command.call_args
+        assert args[2] is None
+
+
+class TestRunPipelineModelResolution:
+    def test_pipeline_resolves_per_role_models(self, pipeline_task, pipeline_worktree, tmp_path):
+        """Each stage in the pipeline gets the model resolved for its role."""
+        captured: list[tuple[Role, str | None]] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append((directive.role, kwargs.get("model")))
+            return _result(directive.role, passed=True)
+
+        profile = Profile.default()
+        profile.tester = RoleConfig(agent="claude", model="profile-tester-model")
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                    cli_models={"claude": "cli-impl-model"},
+                )
+            )
+
+        by_role = dict(captured)
+        # CLI wins for all roles using the claude agent.
+        assert by_role[Role.IMPLEMENTOR] == "cli-impl-model"
+        # Tester also resolves to CLI since CLI has agent-key precedence.
+        assert by_role[Role.TESTER] == "cli-impl-model"
+        assert by_role[Role.REVIEWER] == "cli-impl-model"
+
+    def test_pipeline_falls_back_to_profile_model(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        """Without CLI models, profile.<role>.model is used."""
+        captured: dict[Role, str | None] = {}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured[directive.role] = kwargs.get("model")
+            return _result(directive.role, passed=True)
+
+        profile = Profile.default()
+        profile.tester = RoleConfig(agent="claude", model="tester-model")
+        profile.reviewer = RoleConfig(agent="claude", model="reviewer-model")
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    profile=profile,
+                )
+            )
+
+        assert captured[Role.IMPLEMENTOR] is None
+        assert captured[Role.TESTER] == "tester-model"
+        assert captured[Role.REVIEWER] == "reviewer-model"
+
+    def test_pipeline_default_no_model(self, pipeline_task, pipeline_worktree, tmp_path):
+        """No model configured anywhere → model=None for every stage."""
+        captured: list[str | None] = []
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            captured.append(kwargs.get("model"))
+            return _result(directive.role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                )
+            )
+
+        assert captured == [None, None, None]
+
+
+class TestRunPlannerAndMergeResolverModel:
+    def test_run_planner_passes_model(self, tmp_path):
+        adapter = MagicMock()
+        adapter.config = MagicMock(inject_env=False)
+        adapter.build_command.return_value = ["echo", "hi"]
+        adapter.parse_output.return_value = ("ok", {})
+
+        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, "ok")):
+            asyncio.run(
+                run_planner(
+                    repo=tmp_path,
+                    user_prompt="build a thing",
+                    plan_name="myplan",
+                    adapter=adapter,
+                    use_tmux=True,
+                    model="planner-model",
+                )
+            )
+
+        args, _kwargs = adapter.build_command.call_args
+        assert args[2] == "planner-model"
+
+    def test_run_merge_resolver_passes_model(self, tmp_path):
+        adapter = MagicMock()
+        adapter.config = MagicMock(inject_env=False)
+        adapter.build_command.return_value = ["echo", "hi"]
+        adapter.parse_output.return_value = ("ok", {})
+
+        with patch("workbench.agents.run_in_tmux", new_callable=AsyncMock, return_value=(0, "ok")):
+            asyncio.run(
+                run_merge_resolver(
+                    task_branch="wb/task-1",
+                    session_branch="wb/session",
+                    merge_dir=tmp_path,
+                    conflicts=["src/foo.py"],
+                    repo=tmp_path,
+                    adapter=adapter,
+                    use_tmux=True,
+                    model="merger-model",
+                )
+            )
+
+        args, _kwargs = adapter.build_command.call_args
+        assert args[2] == "merger-model"
