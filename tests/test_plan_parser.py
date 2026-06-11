@@ -2,7 +2,7 @@
 
 import pytest
 
-from workbench.plan_parser import parse_plan
+from workbench.plan_parser import normalize_model_config, parse_plan
 
 
 def test_parse_single_task(tmp_path):
@@ -318,6 +318,55 @@ class TestTraceFrontmatter:
         assert "trace" not in plan.run_config
         assert "trace_env" not in plan.run_config
         assert "trace_prompt" not in plan.run_config
+
+
+class TestModelFrontmatter:
+    def test_scalar_model_parses(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\nmodel: claude-opus-4-8\n---\n# Plan\n## Task: x\nDo it.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.run_config["model"] == "claude-opus-4-8"
+
+    def test_map_model_parses(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\n"
+            "model:\n"
+            "  claude: claude-opus-4-8\n"
+            "  codex: gpt-5-codex\n"
+            "---\n"
+            "# Plan\n## Task: x\nDo it.\n"
+        )
+        plan = parse_plan(plan_file)
+        assert plan.run_config["model"] == {
+            "claude": "claude-opus-4-8",
+            "codex": "gpt-5-codex",
+        }
+
+    def test_map_with_non_string_value_errors(self, tmp_path):
+        plan_file = tmp_path / "plan.md"
+        plan_file.write_text(
+            "---\nmodel:\n  claude: 5\n---\n# Plan\n## Task: x\nDo it.\n"
+        )
+        with pytest.raises(ValueError, match=r"model map values must be strings"):
+            parse_plan(plan_file)
+
+
+class TestNormalizeModelConfig:
+    def test_scalar_string(self):
+        assert normalize_model_config("x") == {"": "x"}
+
+    def test_dict_passthrough(self):
+        assert normalize_model_config({"claude": "x"}) == {"claude": "x"}
+
+    def test_none_returns_empty(self):
+        assert normalize_model_config(None) == {}
+
+    def test_dict_non_string_value_raises(self):
+        with pytest.raises(ValueError, match=r"model map values must be strings"):
+            normalize_model_config({"claude": 5})
 
 
 def test_parse_plan_without_repo_arg_does_not_apply_fallback(tmp_path):

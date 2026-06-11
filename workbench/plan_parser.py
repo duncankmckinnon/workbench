@@ -47,7 +47,29 @@ _RUN_CONFIG_SCHEMA: dict[str, type | tuple[type, ...]] = {
     "trace": bool,
     "trace_env": bool,
     "trace_prompt": bool,
+    "model": (str, dict),
 }
+
+
+def normalize_model_config(value: str | dict | None) -> dict[str, str]:
+    """Normalize a frontmatter/CLI model value to {agent: model}.
+
+    A scalar string becomes {"": value} (the "" key means "all agents").
+    A dict is validated (all values str) and returned as-is.
+    None/empty returns {}.
+    """
+    if value is None or value == "" or value == {}:
+        return {}
+    if isinstance(value, str):
+        return {"": value}
+    if isinstance(value, dict):
+        for k, v in value.items():
+            if not isinstance(v, str):
+                raise ValueError("Plan frontmatter model map values must be strings")
+        return dict(value)
+    raise ValueError(
+        f"model value must be a string or mapping, got {type(value).__name__}"
+    )
 
 
 def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
@@ -116,6 +138,11 @@ def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
                     f"Plan frontmatter key {key!r} must be of type {expected_name}, "
                     f"got {type(value).__name__}"
                 )
+
+    if "model" in parsed and isinstance(parsed["model"], dict):
+        for v in parsed["model"].values():
+            if not isinstance(v, str):
+                raise ValueError("Plan frontmatter model map values must be strings")
 
     if "max_concurrent" in parsed and parsed["max_concurrent"] < 1:
         raise ValueError(
