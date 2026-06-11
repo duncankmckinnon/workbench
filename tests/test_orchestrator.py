@@ -2581,3 +2581,95 @@ async def test_run_plan_passes_trace_metadata_to_pipeline(tmp_path):
     assert captured_kwargs.get("wave_num") == 1
     assert captured_kwargs.get("trace_env") is True
     assert captured_kwargs.get("trace_prompt") is True
+
+
+# ---------------------------------------------------------------------------
+# Model selection wiring
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_run_plan_forwards_cli_models_and_plan_models(tmp_path):
+    """run_plan forwards cli_models verbatim and normalizes plan.run_config[model]."""
+    plan = _make_plan()
+    plan.run_config = {"model": {"claude": "plan-model"}}
+    repo = tmp_path
+
+    captured: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            cli_models={"claude": "cli-model"},
+        )
+
+    assert captured.get("cli_models") == {"claude": "cli-model"}
+    assert captured.get("plan_models") == {"claude": "plan-model"}
+
+
+@pytest.mark.asyncio
+async def test_run_plan_normalizes_scalar_frontmatter_model(tmp_path):
+    """A scalar frontmatter model normalizes to the "" key."""
+    plan = _make_plan()
+    plan.run_config = {"model": "shared-model"}
+    repo = tmp_path
+
+    captured: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert captured.get("plan_models") == {"": "shared-model"}
+
+
+@pytest.mark.asyncio
+async def test_run_plan_defaults_models_to_empty(tmp_path):
+    """No frontmatter model and no --model: plan_models={} and cli_models is None."""
+    plan = _make_plan()
+    repo = tmp_path
+
+    captured: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/task-1-test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False)
+
+    assert captured.get("plan_models") == {}
+    assert captured.get("cli_models") is None

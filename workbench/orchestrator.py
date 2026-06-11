@@ -12,9 +12,16 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from .agents import AgentResult, Role, TaskStatus, run_merge_resolver, run_pipeline
+from .agents import (
+    AgentResult,
+    Role,
+    TaskStatus,
+    resolve_model,
+    run_merge_resolver,
+    run_pipeline,
+)
 from .path_resolver import resolve_agents_config_paths, resolve_profile_paths
-from .plan_parser import Plan, Task
+from .plan_parser import Plan, Task, normalize_model_config
 from .profile import Profile
 from .session_status import SessionStatus
 from .worktree import (
@@ -174,6 +181,7 @@ async def run_plan(
     agents_config_paths: list[Path] | None = None,
     trace_env: bool = True,
     trace_prompt: bool = False,
+    cli_models: dict[str, str] | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -186,6 +194,7 @@ async def run_plan(
     profile = Profile.from_layered_yaml(list(reversed(profile_paths)))
     if agents_config_paths is None:
         agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan.folder_id)
+    plan_models = normalize_model_config(plan.run_config.get("model"))
     waves = plan.independent_groups
     all_states: list[TaskState] = []
     state_map: dict[str, TaskState] = {}
@@ -541,6 +550,8 @@ async def run_plan(
                             wave_num=state.wave_num,
                             trace_env=trace_env,
                             trace_prompt=trace_prompt,
+                            cli_models=cli_models,
+                            plan_models=plan_models,
                         )
 
                         state.results = results
@@ -604,6 +615,15 @@ async def run_plan(
 
                         state.status = TaskStatus.MERGING
 
+                        merger_agent = profile.merger.agent if profile else agent_cmd
+                        merger_model = resolve_model(
+                            role="merger",
+                            agent=merger_agent,
+                            cli_models=cli_models,
+                            profile=profile,
+                            plan_models=plan_models,
+                        )
+
                         resolver_result = await run_merge_resolver(
                             task_branch=state.worktree.branch,
                             session_branch=session_branch,
@@ -615,6 +635,7 @@ async def run_plan(
                             plan_name=plan.folder_id,
                             trace_env=trace_env,
                             trace_prompt=trace_prompt,
+                            model=merger_model,
                         )
                         state.results.append(resolver_result)
 
