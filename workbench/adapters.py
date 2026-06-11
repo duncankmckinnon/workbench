@@ -25,6 +25,8 @@ class AgentConfig:
     json_result_key: str = "result"
     json_cost_key: str = "cost_usd"
     inject_env: bool = True
+    model: str | None = None
+    model_flag: str | None = None
 
     def __post_init__(self) -> None:
         # Coerce string to enum (raises ValueError for invalid values)
@@ -48,6 +50,10 @@ class AgentConfig:
             entry["json_result_key"] = self.json_result_key
             entry["json_cost_key"] = self.json_cost_key
         entry["inject_env"] = self.inject_env
+        if self.model is not None:
+            entry["model"] = self.model
+        if self.model_flag is not None:
+            entry["model_flag"] = self.model_flag
         return entry
 
     @classmethod
@@ -60,6 +66,8 @@ class AgentConfig:
             json_result_key=entry.get("json_result_key", "result"),
             json_cost_key=entry.get("json_cost_key", "cost_usd"),
             inject_env=entry.get("inject_env", False),
+            model=entry.get("model"),
+            model_flag=entry.get("model_flag"),
         )
 
 
@@ -90,9 +98,17 @@ class AgentAdapter(ABC):
                 return (raw, {})
         return (raw.strip(), {})
 
-    def build_command(self, prompt: str, cwd: Path) -> list[str]:
-        """Build the CLI command from config, substituting the prompt."""
+    def build_command(self, prompt: str, cwd: Path, model: str | None = None) -> list[str]:
+        """Build the CLI command from config, substituting the prompt.
+
+        ``model`` overrides ``self.config.model`` when provided. If a model is
+        resolved and ``self.config.model_flag`` is set, ``[flag, model]`` is
+        appended to the args.
+        """
+        resolved = model or self.config.model
         resolved_args = [a.replace("{prompt}", prompt) for a in self.config.args]
+        if resolved and self.config.model_flag:
+            resolved_args += [self.config.model_flag, resolved]
         return [self.config.command, *resolved_args]
 
     def to_config(self) -> dict[str, Any]:
@@ -136,6 +152,7 @@ class ClaudeAdapter(AgentAdapter):
             output_format=OutputFormat.JSON,
             json_result_key="result",
             json_cost_key="cost_usd",
+            model_flag="--model",
         )
 
 
@@ -155,7 +172,25 @@ class CodexAdapter(AgentAdapter):
             output_format=OutputFormat.JSON,
             json_result_key="result",
             json_cost_key="cost_usd",
+            model_flag="--model",
         )
+
+    def build_command(self, prompt: str, cwd: Path, model: str | None = None) -> list[str]:
+        """Insert the model flag *before* the positional prompt arg.
+
+        codex's prompt is positional, so a trailing flag would be swallowed
+        into the prompt.
+        """
+        resolved = model or self.config.model
+        args: list[str] = []
+        for a in self.config.args:
+            if a == "{prompt}":
+                if resolved and self.config.model_flag:
+                    args += [self.config.model_flag, resolved]
+                args.append(prompt)
+            else:
+                args.append(a.replace("{prompt}", prompt))
+        return [self.config.command, *args]
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
         # codex exec --json outputs newline-delimited JSON events
@@ -187,6 +222,7 @@ class CursorAdapter(AgentAdapter):
             command="agent",
             args=["-p", "{prompt}", "--output-format", "text"],
             output_format=OutputFormat.TEXT,
+            model_flag="--model",
         )
 
 
@@ -213,6 +249,7 @@ class CopilotAdapter(AgentAdapter):
             output_format=OutputFormat.JSON,
             json_result_key="result",
             json_cost_key="cost_usd",
+            model_flag="--model",
         )
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
@@ -249,6 +286,7 @@ class GeminiAdapter(AgentAdapter):
             output_format=OutputFormat.JSON,
             json_result_key="response",
             json_cost_key="stats",
+            model_flag="--model",
         )
 
 
