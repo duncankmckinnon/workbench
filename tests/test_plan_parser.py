@@ -323,9 +323,7 @@ class TestTraceFrontmatter:
 class TestModelFrontmatter:
     def test_scalar_model_parses(self, tmp_path):
         plan_file = tmp_path / "plan.md"
-        plan_file.write_text(
-            "---\nmodel: claude-opus-4-8\n---\n# Plan\n## Task: x\nDo it.\n"
-        )
+        plan_file.write_text("---\nmodel: claude-opus-4-8\n---\n# Plan\n## Task: x\nDo it.\n")
         plan = parse_plan(plan_file)
         assert plan.run_config["model"] == "claude-opus-4-8"
 
@@ -347,9 +345,7 @@ class TestModelFrontmatter:
 
     def test_map_with_non_string_value_errors(self, tmp_path):
         plan_file = tmp_path / "plan.md"
-        plan_file.write_text(
-            "---\nmodel:\n  claude: 5\n---\n# Plan\n## Task: x\nDo it.\n"
-        )
+        plan_file.write_text("---\nmodel:\n  claude: 5\n---\n# Plan\n## Task: x\nDo it.\n")
         with pytest.raises(ValueError, match=r"model map values must be strings"):
             parse_plan(plan_file)
 

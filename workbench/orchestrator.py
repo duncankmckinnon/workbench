@@ -12,14 +12,7 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from .agents import (
-    AgentResult,
-    Role,
-    TaskStatus,
-    resolve_model,
-    run_merge_resolver,
-    run_pipeline,
-)
+from .agents import AgentResult, Role, TaskStatus, resolve_model, run_merge_resolver, run_pipeline
 from .path_resolver import resolve_agents_config_paths, resolve_profile_paths
 from .plan_parser import Plan, Task, normalize_model_config
 from .profile import Profile

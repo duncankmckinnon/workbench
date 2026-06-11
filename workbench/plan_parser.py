@@ -67,9 +67,7 @@ def normalize_model_config(value: str | dict | None) -> dict[str, str]:
             if not isinstance(v, str):
                 raise ValueError("Plan frontmatter model map values must be strings")
         return dict(value)
-    raise ValueError(
-        f"model value must be a string or mapping, got {type(value).__name__}"
-    )
+    raise ValueError(f"model value must be a string or mapping, got {type(value).__name__}")
 
 
 def _extract_frontmatter(text: str) -> tuple[dict[str, Any], str]:
