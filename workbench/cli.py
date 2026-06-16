@@ -1050,6 +1050,13 @@ def run(
 )
 @click.option("--tdd", is_flag=True, help="Run pending tasks in TDD mode.")
 @click.option(
+    "--fail-fast/--no-fail-fast",
+    "fail_fast",
+    default=True,
+    help="On the first wave with a failed task, finish the in-flight wave then "
+    "stop (default: on; use --no-fail-fast to disable).",
+)
+@click.option(
     "--profile",
     "profile_path",
     type=click.Path(exists=True, path_type=Path),
@@ -1067,6 +1074,7 @@ def resume(
     max_concurrent: int,
     max_retries: int,
     tdd: bool,
+    fail_fast: bool,
     profile_path: Path | None,
     profile_name: str | None,
 ):
@@ -1129,7 +1137,7 @@ def resume(
         profile_name=profile_name,
         session_name=None,
         retry_failed=False,
-        fail_fast=False,
+        fail_fast=fail_fast,
         only_incomplete=True,
         task_ids=(),
         implementor_directive=None,

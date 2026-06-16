@@ -2424,9 +2424,38 @@ class TestResume:
         kwargs = mock_run_plan.call_args.kwargs
         assert kwargs["session_branch"] == "workbench-1"
         assert kwargs["only_incomplete"] is True
-        assert kwargs["fail_fast"] is False
+        assert kwargs["fail_fast"] is True
         # Plan path passed through
         assert Path(str(kwargs["plan"].source)).name == "demo.md"
+
+    def test_resume_no_fail_fast_flag(self, git_repo):
+        """wb resume --no-fail-fast should pass fail_fast=False to run_plan."""
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plans_dir / "demo.md"
+        plan_path.write_text("# Plan\n## Task: hello\nDo it.\n")
+        self._write_status(git_repo, "demo", "workbench-1", plan_source=str(plan_path))
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli.run_plan") as mock_run_plan,
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.asyncio") as mock_asyncio,
+            patch("workbench.cli.check_tmux_available", return_value=True),
+        ):
+            import asyncio
+
+            async def fake_run_plan(**kwargs):
+                return []
+
+            mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+            mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+            result = runner.invoke(main, ["resume", "workbench-1", "--no-fail-fast", "--no-tmux"])
+
+        assert result.exit_code == 0, result.output
+        kwargs = mock_run_plan.call_args.kwargs
+        assert kwargs["fail_fast"] is False
 
     def test_resume_passes_through_tdd(self, git_repo):
         plans_dir = git_repo / ".workbench" / "plans"
