@@ -2291,6 +2291,30 @@ def test_run_no_fail_fast_flag(git_repo, tmp_path):
     assert captured.get("fail_fast") is False
 
 
+def test_run_fail_fast_frontmatter_precedence(git_repo, tmp_path):
+    """Frontmatter should override default, and CLI should override frontmatter."""
+    # 1. Frontmatter 'fail_fast: false' overrides the default True -> False
+    plan_text = "---\nfail_fast: false\n---\n# Plan\n## Task: hello\nDo something\n"
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, [], plan_text=plan_text)
+    assert result.exit_code == 0, result.output
+    assert captured.get("fail_fast") is False
+
+    # 2. CLI --fail-fast overrides frontmatter 'fail_fast: false' -> True
+    result, captured = _run_cli_with_capture(
+        git_repo, tmp_path, ["--fail-fast"], plan_text=plan_text
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("fail_fast") is True
+
+    # 3. CLI --no-fail-fast overrides frontmatter 'fail_fast: true' -> False
+    plan_text_true = "---\nfail_fast: true\n---\n# Plan\n## Task: hello\nDo something\n"
+    result, captured = _run_cli_with_capture(
+        git_repo, tmp_path, ["--no-fail-fast"], plan_text=plan_text_true
+    )
+    assert result.exit_code == 0, result.output
+    assert captured.get("fail_fast") is False
+
+
 def test_run_only_incomplete_requires_session_branch(git_repo, tmp_path):
     """--only-incomplete without --session-branch should error."""
     plan = tmp_path / "plan.md"
@@ -2314,8 +2338,8 @@ def test_run_only_incomplete_with_session_branch(git_repo, tmp_path):
     assert captured.get("session_branch") == "workbench-1"
 
 
-def test_run_flags_default_to_false(git_repo, tmp_path):
-    """Without flags, retry_failed and only_incomplete default to False, fail_fast defaults to True."""
+def test_run_flags_defaults(git_repo, tmp_path):
+    """Without flags, retry_failed and only_incomplete default to False; fail_fast defaults to True."""
     result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
     assert result.exit_code == 0, result.output
     assert captured.get("retry_failed") is False
@@ -2403,6 +2427,35 @@ class TestResume:
         assert kwargs["fail_fast"] is True
         # Plan path passed through
         assert Path(str(kwargs["plan"].source)).name == "demo.md"
+
+    def test_resume_no_fail_fast_flag(self, git_repo):
+        """wb resume --no-fail-fast should pass fail_fast=False to run_plan."""
+        plans_dir = git_repo / ".workbench" / "plans"
+        plans_dir.mkdir(parents=True, exist_ok=True)
+        plan_path = plans_dir / "demo.md"
+        plan_path.write_text("# Plan\n## Task: hello\nDo it.\n")
+        self._write_status(git_repo, "demo", "workbench-1", plan_source=str(plan_path))
+
+        runner = CliRunner()
+        with (
+            patch("workbench.cli.run_plan") as mock_run_plan,
+            patch("workbench.cli._find_repo_root", return_value=git_repo),
+            patch("workbench.cli.asyncio") as mock_asyncio,
+            patch("workbench.cli.check_tmux_available", return_value=True),
+        ):
+            import asyncio
+
+            async def fake_run_plan(**kwargs):
+                return []
+
+            mock_run_plan.side_effect = lambda **kwargs: fake_run_plan(**kwargs)
+            mock_asyncio.run = lambda coro: asyncio.new_event_loop().run_until_complete(coro)
+
+            result = runner.invoke(main, ["resume", "workbench-1", "--no-fail-fast", "--no-tmux"])
+
+        assert result.exit_code == 0, result.output
+        kwargs = mock_run_plan.call_args.kwargs
+        assert kwargs["fail_fast"] is False
 
     def test_resume_passes_through_tdd(self, git_repo):
         plans_dir = git_repo / ".workbench" / "plans"
