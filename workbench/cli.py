@@ -655,9 +655,11 @@ def main():
     help="Automatically retry tasks that failed due to transient errors (not exhausted retries).",
 )
 @click.option(
-    "--fail-fast",
-    is_flag=True,
-    help="Stop after the first wave that has any failed tasks.",
+    "--fail-fast/--no-fail-fast",
+    "fail_fast",
+    default=True,
+    help="On the first wave with a failed task, finish the in-flight wave then "
+    "stop (default: on; use --no-fail-fast to disable).",
 )
 @click.option(
     "--only-incomplete",
