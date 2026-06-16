@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 
 from workbench.adapters import (
+    BUILTIN_ADAPTERS,
     AgentAdapter,
     AgentConfig,
     ClaudeAdapter,
@@ -15,6 +16,7 @@ from workbench.adapters import (
     GeminiAdapter,
     GenericAdapter,
     OutputFormat,
+    default_agents_config,
     get_adapter,
 )
 
@@ -405,6 +407,135 @@ class TestAgentConfig:
         assert restored.output_format == original.output_format
         assert restored.json_result_key == original.json_result_key
         assert restored.json_cost_key == original.json_cost_key
+
+
+class TestAgentConfigModel:
+    def test_defaults_none(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"])
+        assert config.model is None
+        assert config.model_flag is None
+
+    def test_to_dict_omits_when_none(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"])
+        d = config.to_dict()
+        assert "model" not in d
+        assert "model_flag" not in d
+
+    def test_to_dict_includes_when_set(self):
+        config = AgentConfig(
+            command="my-cli",
+            args=["{prompt}"],
+            model="my-model-1",
+            model_flag="--model",
+        )
+        d = config.to_dict()
+        assert d["model"] == "my-model-1"
+        assert d["model_flag"] == "--model"
+
+    def test_to_dict_includes_model_flag_alone(self):
+        config = AgentConfig(command="my-cli", args=["{prompt}"], model_flag="--model")
+        d = config.to_dict()
+        assert "model" not in d
+        assert d["model_flag"] == "--model"
+
+    def test_from_dict_reads_model_fields(self):
+        config = AgentConfig.from_dict(
+            {
+                "command": "my-cli",
+                "model": "foo-1",
+                "model_flag": "-m",
+            }
+        )
+        assert config.model == "foo-1"
+        assert config.model_flag == "-m"
+
+    def test_from_dict_missing_model_fields_none(self):
+        config = AgentConfig.from_dict({"command": "my-cli"})
+        assert config.model is None
+        assert config.model_flag is None
+
+    def test_round_trip_model_fields(self):
+        original = AgentConfig(
+            command="my-cli",
+            args=["{prompt}"],
+            model="some-model",
+            model_flag="--model",
+        )
+        restored = AgentConfig.from_dict(original.to_dict())
+        assert restored.model == original.model
+        assert restored.model_flag == original.model_flag
+
+
+class TestBuildCommandModel:
+    def test_claude_appends_model_flag(self, tmp_path):
+        cmd = ClaudeAdapter().build_command("p", tmp_path, model="claude-opus-4-8")
+        assert cmd[-2:] == ["--model", "claude-opus-4-8"]
+
+    def test_claude_uses_config_default_model(self, tmp_path):
+        adapter = ClaudeAdapter()
+        adapter.config.model = "claude-default"
+        cmd = adapter.build_command("p", tmp_path)
+        assert cmd[-2:] == ["--model", "claude-default"]
+
+    def test_claude_caller_model_overrides_config(self, tmp_path):
+        adapter = ClaudeAdapter()
+        adapter.config.model = "claude-default"
+        cmd = adapter.build_command("p", tmp_path, model="claude-override")
+        assert cmd[-2:] == ["--model", "claude-override"]
+
+    def test_claude_no_model_appends_nothing(self, tmp_path):
+        cmd = ClaudeAdapter().build_command("p", tmp_path)
+        assert "--model" not in cmd
+
+    def test_codex_inserts_model_before_prompt(self, tmp_path):
+        cmd = CodexAdapter().build_command("p", tmp_path, model="gpt-5-codex")
+        assert "--model" in cmd
+        assert cmd.index("--model") < cmd.index("p")
+        assert cmd[cmd.index("--model") + 1] == "gpt-5-codex"
+
+    def test_codex_no_model_unchanged(self, tmp_path):
+        cmd = CodexAdapter().build_command("p", tmp_path)
+        assert cmd == ["codex", "exec", "--full-auto", "--json", "p"]
+
+    def test_codex_uses_config_default_model(self, tmp_path):
+        adapter = CodexAdapter()
+        adapter.config.model = "codex-default"
+        cmd = adapter.build_command("p", tmp_path)
+        assert "--model" in cmd
+        assert cmd.index("--model") < cmd.index("p")
+
+    def test_generic_with_model_arg_but_no_flag_injects_nothing(self, tmp_path):
+        adapter = GenericAdapter("my-tool")
+        cmd = adapter.build_command("hello", tmp_path, model="some-model")
+        assert cmd == ["my-tool", "hello"]
+        assert "--model" not in cmd
+
+    def test_config_adapter_with_model_flag(self, tmp_path):
+        config = AgentConfig(
+            command="my-cli",
+            args=["--headless", "{prompt}"],
+            model_flag="-m",
+        )
+        adapter = ConfigAdapter(name="custom", config=config)
+        cmd = adapter.build_command("work", tmp_path, model="model-x")
+        assert cmd == ["my-cli", "--headless", "work", "-m", "model-x"]
+
+
+class TestDefaultAgentsConfigModelFlag:
+    def test_builtin_adapters_have_model_flag(self):
+        for name in ("claude", "codex", "gemini", "cursor", "copilot"):
+            adapter = BUILTIN_ADAPTERS[name]()
+            assert adapter.config.model_flag == "--model", name
+
+    def test_default_agents_config_surfaces_model_flag(self):
+        cfg = default_agents_config()
+        for name in ("claude", "codex", "gemini", "cursor", "copilot"):
+            assert cfg[name].get("model_flag") == "--model", name
+
+    def test_default_agents_config_omits_model_when_unset(self):
+        cfg = default_agents_config()
+        for name in ("claude", "codex", "gemini", "cursor", "copilot"):
+            assert "model" not in cfg[name], name
 
 
 class TestGetAdapter:

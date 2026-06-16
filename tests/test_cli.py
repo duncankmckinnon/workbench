@@ -5425,3 +5425,219 @@ def test_final_review_command_default_max_retries(git_repo, tmp_path):
 
     assert result.exit_code == 0, result.output
     assert mock_final_review.call_args.kwargs.get("max_retries") == 2
+
+
+# ---------------------------------------------------------------------------
+# --model flag plumbing
+# ---------------------------------------------------------------------------
+
+
+def test_parse_model_overrides_empty():
+    from workbench.cli import _parse_model_overrides
+
+    assert _parse_model_overrides(()) == {}
+
+
+def test_parse_model_overrides_bare_value():
+    from workbench.cli import _parse_model_overrides
+
+    assert _parse_model_overrides(("claude-opus-4-8",)) == {"": "claude-opus-4-8"}
+
+
+def test_parse_model_overrides_scoped():
+    from workbench.cli import _parse_model_overrides
+
+    out = _parse_model_overrides(("claude=claude-opus-4-8", "codex=gpt-5-codex"))
+    assert out == {"claude": "claude-opus-4-8", "codex": "gpt-5-codex"}
+
+
+def test_parse_model_overrides_strips_whitespace():
+    from workbench.cli import _parse_model_overrides
+
+    out = _parse_model_overrides(("  claude  =  claude-opus-4-8  ",))
+    assert out == {"claude": "claude-opus-4-8"}
+
+
+def test_parse_model_overrides_last_wins():
+    from workbench.cli import _parse_model_overrides
+
+    out = _parse_model_overrides(("claude=a", "claude=b"))
+    assert out == {"claude": "b"}
+
+    out = _parse_model_overrides(("x", "y"))
+    assert out == {"": "y"}
+
+
+def test_parse_model_overrides_mixed():
+    from workbench.cli import _parse_model_overrides
+
+    out = _parse_model_overrides(("shared-model", "codex=gpt-5-codex"))
+    assert out == {"": "shared-model", "codex": "gpt-5-codex"}
+
+
+def test_run_forwards_cli_models_to_run_plan(git_repo, tmp_path):
+    """wb run --model forwards a correct cli_models dict to run_plan."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    captured: dict = {}
+
+    async def fake_run_plan(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "run",
+                str(plan),
+                "--no-tmux",
+                "--model",
+                "claude=claude-opus-4-8",
+                "--model",
+                "codex=gpt-5-codex",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("cli_models") == {
+        "claude": "claude-opus-4-8",
+        "codex": "gpt-5-codex",
+    }
+
+
+def test_run_without_model_forwards_empty_cli_models(git_repo, tmp_path):
+    """wb run without --model still forwards an empty dict, preserving behavior."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    captured: dict = {}
+
+    async def fake_run_plan(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+    ):
+        result = runner.invoke(main, ["run", str(plan), "--no-tmux"])
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("cli_models") == {}
+
+
+def test_run_bare_model_applies_to_all_agents(git_repo, tmp_path):
+    """A bare --model value uses the "" key meaning "all agents"."""
+    plan = tmp_path / "plan.md"
+    plan.write_text("# Plan\n## Task: hello\nDo something\n")
+
+    captured: dict = {}
+
+    async def fake_run_plan(**kwargs):
+        captured.update(kwargs)
+        return []
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--model", "claude-opus-4-8"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("cli_models") == {"": "claude-opus-4-8"}
+
+
+def test_plan_forwards_resolved_model_to_run_planner(git_repo):
+    """wb plan --model resolves the planner model and forwards it to run_planner."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    fake_result = AgentResult(
+        task_id="planner-myplan",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="ok",
+    )
+
+    captured: dict = {}
+
+    async def fake_run_planner(**kwargs):
+        captured.update(kwargs)
+        plan_name = kwargs["plan_name"]
+        output_path = git_repo / ".workbench" / plan_name / "plan.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Generated Plan\n## Task: Foo\nDo it.\n")
+        return fake_result
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "plan",
+                "Add JWT auth",
+                "--name",
+                "myplan",
+                "--no-tmux",
+                "--agent",
+                "claude",
+                "--model",
+                "claude=claude-opus-4-8",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("model") == "claude-opus-4-8"
+
+
+def test_plan_without_model_forwards_none(git_repo):
+    """wb plan without --model forwards model=None to run_planner."""
+    from workbench.agents import AgentResult, Role, TaskStatus
+
+    fake_result = AgentResult(
+        task_id="planner-x",
+        role=Role.IMPLEMENTOR,
+        status=TaskStatus.DONE,
+        output="ok",
+    )
+
+    captured: dict = {}
+
+    async def fake_run_planner(**kwargs):
+        captured.update(kwargs)
+        plan_name = kwargs["plan_name"]
+        output_path = git_repo / ".workbench" / plan_name / "plan.md"
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text("# Generated Plan\n## Task: Foo\nDo it.\n")
+        return fake_result
+
+    runner = CliRunner()
+    with (
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+        patch("workbench.cli.check_tmux_available", return_value=True),
+        patch("workbench.agents.run_planner", side_effect=fake_run_planner),
+    ):
+        result = runner.invoke(
+            main,
+            ["plan", "Add JWT auth", "--name", "x", "--no-tmux"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert captured.get("model") is None

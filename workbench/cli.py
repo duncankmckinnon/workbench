@@ -107,6 +107,22 @@ _FRONTMATTER_PARAM_COERCIONS: dict[str, type] = {
 }
 
 
+def _parse_model_overrides(values: tuple[str, ...]) -> dict[str, str]:
+    """Parse repeated --model values into {agent: model}.
+
+    'agent=model' → scoped; bare 'model' → {"": model} (all agents).
+    Later values override earlier ones for the same key.
+    """
+    out: dict[str, str] = {}
+    for v in values:
+        if "=" in v:
+            agent, model = v.split("=", 1)
+            out[agent.strip()] = model.strip()
+        else:
+            out[""] = v.strip()
+    return out
+
+
 def _apply_plan_run_config(
     ctx: click.Context,
     plan_run_config: dict[str, object],
@@ -733,6 +749,13 @@ def main():
     default=False,
     help="Prepend a wb-session metadata block to agent prompts. Default off.",
 )
+@click.option(
+    "--model",
+    "model_overrides",
+    multiple=True,
+    help="Model per agent: --model claude=claude-opus-4-8 (repeatable), "
+    "or --model claude-opus-4-8 to apply to all agents.",
+)
 def run(
     plan_path: str,
     max_concurrent: int,
@@ -774,6 +797,7 @@ def run(
     trace: bool,
     trace_env: bool,
     trace_prompt: bool,
+    model_overrides: tuple[str, ...],
 ):
     """Run a plan with parallel agents.
 
@@ -803,7 +827,11 @@ def run(
 
     # Merge frontmatter run_config into effective flag values
     ctx = click.get_current_context()
-    mapped_run_config = {_FRONTMATTER_TO_PARAM[k]: v for k, v in plan.run_config.items()}
+    mapped_run_config = {
+        _FRONTMATTER_TO_PARAM[k]: v
+        for k, v in plan.run_config.items()
+        if k in _FRONTMATTER_TO_PARAM
+    }
     flag_values = {
         "session_branch": session_branch,
         "session_name": session_name,
@@ -907,6 +935,8 @@ def run(
 
     agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan_slug)
 
+    cli_models = _parse_model_overrides(model_overrides)
+
     console.print()
     asyncio.run(
         run_plan(
@@ -938,6 +968,7 @@ def run(
             agents_config_paths=agents_config_paths,
             trace_env=effective_trace_env,
             trace_prompt=effective_trace_prompt,
+            cli_models=cli_models,
         )
     )
 
@@ -1226,6 +1257,13 @@ def plan():
     default=False,
     help="Prepend a wb-session metadata block to agent prompts. Default off.",
 )
+@click.option(
+    "--model",
+    "model_overrides",
+    multiple=True,
+    help="Model per agent: --model claude=claude-opus-4-8 (repeatable), "
+    "or --model claude-opus-4-8 to apply to all agents.",
+)
 def plan_generate(
     prompt: str,
     from_file: Path | None,
@@ -1237,6 +1275,7 @@ def plan_generate(
     trace: bool,
     trace_env: bool,
     trace_prompt: bool,
+    model_overrides: tuple[str, ...],
 ):
     """Generate a workbench plan from a description or existing document.
 
@@ -1287,13 +1326,24 @@ def plan_generate(
         console.print(f"\n[bold]Planning:[/bold] {prompt}")
     console.print(f"[bold]Output:[/bold]  {output_path}\n")
 
-    from .agents import run_planner
+    from .agents import resolve_model, run_planner
 
     conventions_text = load_conventions_text(repo)
 
     agents_paths = resolve_agents_config_paths(repo, plan_slug=name)
     effective_trace_env = trace and trace_env
     effective_trace_prompt = trace and trace_prompt
+
+    cli_models = _parse_model_overrides(model_overrides)
+    profile = None
+    planner_agent = profile.planner.agent if profile else agent
+    planner_model = resolve_model(
+        role="planner",
+        agent=planner_agent,
+        cli_models=cli_models,
+        profile=profile,
+        plan_models={},
+    )
 
     result = asyncio.run(
         run_planner(
@@ -1307,6 +1357,7 @@ def plan_generate(
             conventions_text=conventions_text,
             trace_env=effective_trace_env,
             trace_prompt=effective_trace_prompt,
+            model=planner_model,
         )
     )
 

@@ -26,3 +26,4 @@ workbench/_version.py
 .agents/
 .claude/
 docs/superpowers/*
+docs/design/*

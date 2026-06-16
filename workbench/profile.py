@@ -37,6 +37,7 @@ class ModeConfig:
 @dataclass
 class RoleConfig:
     agent: str = "claude"
+    model: str = ""
     directive: str = ""
     tdd: ModeConfig | None = None
     followup: ModeConfig | None = None
@@ -110,6 +111,9 @@ class Profile:
             if "agent" in role_data:
                 cfg.agent = role_data["agent"]
 
+            if "model" in role_data:
+                cfg.model = role_data["model"]
+
             if "directive" in role_data:
                 cfg.directive = role_data["directive"]
             elif "directive_extend" in role_data:
@@ -169,6 +173,8 @@ class Profile:
                 "agent": cfg.agent,
                 "directive": cfg.directive.strip(),
             }
+            if cfg.model:
+                role_dict["model"] = cfg.model
             if cfg.tdd is not None:
                 role_dict["tdd"] = {"directive": cfg.tdd.directive.strip()}
             if cfg.followup is not None:
