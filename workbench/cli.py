@@ -655,9 +655,9 @@ def main():
     help="Automatically retry tasks that failed due to transient errors (not exhausted retries).",
 )
 @click.option(
-    "--fail-fast",
-    is_flag=True,
-    help="Stop after the first wave that has any failed tasks.",
+    "--fail-fast/--no-fail-fast",
+    default=True,
+    help="Stop after the first wave that has any failed tasks. Default on. Use --no-fail-fast to disable.",
 )
 @click.option(
     "--only-incomplete",
@@ -1127,7 +1127,6 @@ def resume(
         profile_name=profile_name,
         session_name=None,
         retry_failed=False,
-        fail_fast=False,
         only_incomplete=True,
         task_ids=(),
         implementor_directive=None,

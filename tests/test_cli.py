@@ -2284,6 +2284,13 @@ def test_run_fail_fast_flag(git_repo, tmp_path):
     assert captured.get("fail_fast") is True
 
 
+def test_run_no_fail_fast_flag(git_repo, tmp_path):
+    """--no-fail-fast should pass fail_fast=False to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--no-fail-fast"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("fail_fast") is False
+
+
 def test_run_only_incomplete_requires_session_branch(git_repo, tmp_path):
     """--only-incomplete without --session-branch should error."""
     plan = tmp_path / "plan.md"
@@ -2308,11 +2315,11 @@ def test_run_only_incomplete_with_session_branch(git_repo, tmp_path):
 
 
 def test_run_flags_default_to_false(git_repo, tmp_path):
-    """Without flags, retry_failed, fail_fast, and only_incomplete default to False."""
+    """Without flags, retry_failed and only_incomplete default to False, fail_fast defaults to True."""
     result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
     assert result.exit_code == 0, result.output
     assert captured.get("retry_failed") is False
-    assert captured.get("fail_fast") is False
+    assert captured.get("fail_fast") is True
     assert captured.get("only_incomplete") is False
 
 
@@ -2393,6 +2400,7 @@ class TestResume:
         kwargs = mock_run_plan.call_args.kwargs
         assert kwargs["session_branch"] == "workbench-1"
         assert kwargs["only_incomplete"] is True
+        assert kwargs["fail_fast"] is True
         # Plan path passed through
         assert Path(str(kwargs["plan"].source)).name == "demo.md"
 
