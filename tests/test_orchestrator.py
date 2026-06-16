@@ -2673,3 +2673,112 @@ async def test_run_plan_defaults_models_to_empty(tmp_path):
 
     assert captured.get("plan_models") == {}
     assert captured.get("cli_models") is None
+
+
+# ---------------------------------------------------------------------------
+# Resume fix and fail-fast default
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_resume_reuses_stages(tmp_path):
+    """Resume reuses stages (the regression test — must fail before the fix)."""
+    plan = _make_plan(title="Resume Plan")
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    # Seed a prior status: task-1 failed after implementor succeeded
+    prior = SessionStatus(plan_slug="resume-plan", session_branch="workbench-1")
+    prior.record_task(
+        "task-1",
+        status="failed",
+        branch="wb/test-task",
+        completed_stages=["implementor"],
+    )
+    prior.save(repo)
+
+    captured_kwargs = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    # Fake attach_worktree to return a fake worktree
+    fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree", return_value=fake_wt) as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch") as mock_delete,
+    ):
+        mock_create.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            only_incomplete=True,
+            retry_failed=False,
+            keep_branches=True,
+        )
+
+    # In the bugged state, can_resume is false because retry_failed=False.
+    # So create_worktree is called and delete_branch is called.
+    # After fix, attach_worktree should be called.
+    assert mock_attach.called, "attach_worktree should be called on resume"
+    assert not mock_create.called, "create_worktree should NOT be called on resume"
+    # Check that branch was NOT deleted (mock_delete called for 'wb/test-task')
+    for call in mock_delete.call_args_list:
+        assert call.args[1] != "wb/test-task", "Branch should NOT be deleted on resume"
+
+    assert captured_kwargs.get("resume_completed_stages") == ["implementor"]
+
+
+@pytest.mark.asyncio
+async def test_fresh_run_unaffected(tmp_path):
+    """Fresh run unaffected: no prior record means create_worktree is used."""
+    plan = _make_plan(title="Fresh Plan")
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    captured_kwargs = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree") as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_create.return_value = MagicMock(
+            branch="wb/fresh-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False, session_branch="workbench-1")
+
+    assert mock_create.called
+    assert not mock_attach.called
+    assert captured_kwargs.get("resume_completed_stages") in (None, [])
+
+
+def test_run_plan_default_fail_fast():
+    """assert the fail_fast parameter default is True."""
+    import inspect
+
+    sig = inspect.signature(run_plan)
+    assert sig.parameters["fail_fast"].default is True

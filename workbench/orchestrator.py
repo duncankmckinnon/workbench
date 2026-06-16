@@ -167,7 +167,7 @@ async def run_plan(
     session_name: str | None = None,
     keep_branches: bool = False,
     retry_failed: bool = False,
-    fail_fast: bool = False,
+    fail_fast: bool = True,
     only_incomplete: bool = False,
     task_filter: set[str] | None = None,
     push: bool = False,
@@ -344,8 +344,7 @@ async def run_plan(
                     prior_record = prior.tasks.get(state.task.id) if prior else None
                     resume_stages = list(prior_record.completed_stages) if prior_record else []
                     can_resume = (
-                        retry_failed
-                        and bool(resume_stages)
+                        bool(resume_stages)
                         and prior_record is not None
                         and prior_record.status == "failed"
                         and prior_record.branch is not None
