@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .adapters import AgentAdapter, get_adapter
+from .headroom import HeadroomConfig, apply_headroom_env
 from .plan_parser import Task
 from .session_metadata import SessionMetadata, merge_trace_env, with_session_metadata
 from .tmux import run_in_tmux
@@ -113,6 +114,7 @@ async def run_agent(
     trace_env: bool = True,
     trace_prompt: bool = False,
     model: str | None = None,
+    headroom: HeadroomConfig | None = None,
 ) -> AgentResult:
     """Spawn an agent in a worktree to run a single pipeline stage."""
     if adapter is None:
@@ -132,6 +134,9 @@ async def run_agent(
     env: dict[str, str] | None = None
     if trace_env and meta is not None and adapter.config.inject_env:
         env = merge_trace_env(os.environ, meta)
+    if headroom is not None and headroom.enabled:
+        base = env if env is not None else dict(os.environ)
+        env = apply_headroom_env(base, agent_cmd, headroom)
 
     try:
         cmd = adapter.build_command(prompt, ctx.worktree.path, model)
@@ -199,6 +204,7 @@ async def run_pipeline(
     trace_prompt: bool = False,
     cli_models: dict[str, str] | None = None,
     plan_models: dict[str, str] | None = None,
+    headroom: HeadroomConfig | None = None,
 ) -> list[AgentResult]:
     """Run the implement → test → review pipeline with retry loops.
 
@@ -308,6 +314,7 @@ async def run_pipeline(
             trace_env=trace_env,
             trace_prompt=trace_prompt,
             model=_model_for(Role.TESTER),
+            headroom=headroom,
         )
         _record(test_write_result)
 
@@ -331,6 +338,7 @@ async def run_pipeline(
             trace_env=trace_env,
             trace_prompt=trace_prompt,
             model=_model_for(Role.IMPLEMENTOR),
+            headroom=headroom,
         )
         _record(impl_result)
 
@@ -360,6 +368,7 @@ async def run_pipeline(
             trace_env=trace_env,
             trace_prompt=trace_prompt,
             model=_model_for(Role.IMPLEMENTOR),
+            headroom=headroom,
         )
         _record(impl_result)
 
@@ -385,6 +394,7 @@ async def run_pipeline(
                 trace_env=trace_env,
                 trace_prompt=trace_prompt,
                 model=_model_for(Role.TESTER),
+                headroom=headroom,
             )
             test_result.attempt = attempt
             _record(test_result)
@@ -418,6 +428,7 @@ async def run_pipeline(
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
                     model=_model_for(Role.FIXER),
+                    headroom=headroom,
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -468,6 +479,7 @@ async def run_pipeline(
                 trace_env=trace_env,
                 trace_prompt=trace_prompt,
                 model=_model_for(Role.REVIEWER),
+                headroom=headroom,
             )
             review_result.attempt = attempt
             _record(review_result)
@@ -503,6 +515,7 @@ async def run_pipeline(
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
                     model=_model_for(Role.FIXER),
+                    headroom=headroom,
                 )
                 fix_result.attempt = attempt
                 _record(fix_result)
@@ -534,6 +547,7 @@ async def run_merge_resolver(
     trace_env: bool = True,
     trace_prompt: bool = False,
     model: str | None = None,
+    headroom: HeadroomConfig | None = None,
 ) -> AgentResult:
     """Run a merge conflict resolution agent in the merge worktree.
 
@@ -569,6 +583,9 @@ async def run_merge_resolver(
     env: dict[str, str] | None = None
     if trace_env and adapter.config.inject_env:
         env = merge_trace_env(os.environ, meta)
+    if headroom is not None and headroom.enabled:
+        base = env if env is not None else dict(os.environ)
+        env = apply_headroom_env(base, agent_cmd, headroom)
 
     try:
         cmd = adapter.build_command(prompt, merge_dir, model)
@@ -632,6 +649,7 @@ async def run_planner(
     trace_env: bool = True,
     trace_prompt: bool = False,
     model: str | None = None,
+    headroom: HeadroomConfig | None = None,
 ) -> AgentResult:
     """Spawn a planner agent to generate a workbench plan.
 
@@ -672,6 +690,9 @@ async def run_planner(
     env: dict[str, str] | None = None
     if trace_env and adapter.config.inject_env:
         env = merge_trace_env(os.environ, meta)
+    if headroom is not None and headroom.enabled:
+        base = env if env is not None else dict(os.environ)
+        env = apply_headroom_env(base, agent_cmd, headroom)
 
     try:
         cmd = adapter.build_command(prompt, repo, model)

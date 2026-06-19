@@ -19,6 +19,7 @@ from workbench.agents import (
     run_planner,
 )
 from workbench.directives import FixerDirective, ImplementorDirective, PromptContext
+from workbench.headroom import HeadroomConfig
 from workbench.plan_parser import Task
 from workbench.worktree import Worktree
 
@@ -755,6 +756,58 @@ class TestSessionMetadataWiring:
                     use_tmux=True,
                     meta=meta,
                     trace_env=False,
+                )
+            )
+
+        _args, kwargs = mock_tmux.call_args
+        assert kwargs["env"] is None
+
+    def test_run_agent_headroom_applies_when_trace_env_false(self, sample_ctx, tmp_path):
+        """headroom env overlay applies independently of trace env injection."""
+        directive = ImplementorDirective()
+        meta = SessionMetadata(plan="p", task="task-1")
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+        ) as mock_tmux:
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    meta=meta,
+                    trace_env=False,
+                    headroom=HeadroomConfig(enabled=True, port=9999),
+                )
+            )
+
+        _args, kwargs = mock_tmux.call_args
+        env = kwargs["env"]
+        assert env is not None
+        assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
+
+    def test_run_agent_headroom_none_keeps_existing_env_behavior(self, sample_ctx, tmp_path):
+        """headroom=None leaves env unchanged from the existing trace_env=False path."""
+        directive = ImplementorDirective()
+
+        with patch(
+            "workbench.agents.run_in_tmux",
+            new_callable=AsyncMock,
+            return_value=(0, json.dumps({"result": "ok", "cost_usd": {}})),
+        ) as mock_tmux:
+            asyncio.run(
+                run_agent(
+                    directive,
+                    sample_ctx,
+                    repo=tmp_path,
+                    agent_cmd="claude",
+                    use_tmux=True,
+                    trace_env=False,
+                    headroom=None,
                 )
             )
 

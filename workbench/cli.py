@@ -662,6 +662,13 @@ def main():
     "stop (default: on; use --no-fail-fast to disable).",
 )
 @click.option(
+    "--headroom/--no-headroom",
+    "headroom",
+    default=None,
+    help="Route agents through a local headroom proxy to cut token costs "
+    "(default: use the headroom: config block; --headroom forces on).",
+)
+@click.option(
     "--only-incomplete",
     "only_incomplete",
     is_flag=True,
@@ -781,6 +788,7 @@ def run(
     session_name: str | None,
     retry_failed: bool,
     fail_fast: bool,
+    headroom: bool | None,
     only_incomplete: bool,
     task_ids: tuple[str, ...],
     implementor_directive: str | None,
@@ -971,6 +979,7 @@ def run(
             trace_env=effective_trace_env,
             trace_prompt=effective_trace_prompt,
             cli_models=cli_models,
+            headroom=headroom,
         )
     )
 
@@ -1138,6 +1147,7 @@ def resume(
         session_name=None,
         retry_failed=False,
         fail_fast=fail_fast,
+        headroom=None,
         only_incomplete=True,
         task_ids=(),
         implementor_directive=None,

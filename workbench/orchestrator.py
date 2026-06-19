@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 from rich.console import Console
@@ -13,6 +13,7 @@ from rich.table import Table
 from rich.text import Text
 
 from .agents import AgentResult, Role, TaskStatus, resolve_model, run_merge_resolver, run_pipeline
+from .headroom import HeadroomProxy, resolve_headroom_config
 from .path_resolver import resolve_agents_config_paths, resolve_profile_paths
 from .plan_parser import Plan, Task, normalize_model_config
 from .profile import Profile
@@ -175,6 +176,7 @@ async def run_plan(
     trace_env: bool = True,
     trace_prompt: bool = False,
     cli_models: dict[str, str] | None = None,
+    headroom: bool | None = None,
 ) -> list[TaskState]:
     """Execute a plan with parallel agent workers."""
     console = Console()
@@ -187,6 +189,7 @@ async def run_plan(
     profile = Profile.from_layered_yaml(list(reversed(profile_paths)))
     if agents_config_paths is None:
         agents_config_paths = resolve_agents_config_paths(repo, plan_slug=plan.folder_id)
+    headroom_config = resolve_headroom_config(agents_config_paths, cli_override=headroom)
     plan_models = normalize_model_config(plan.run_config.get("model"))
     waves = plan.independent_groups
     all_states: list[TaskState] = []
@@ -297,7 +300,13 @@ async def run_plan(
                 pass
         live.update(_status_table(all_states))
 
-    with Live(_status_table(all_states), console=console, refresh_per_second=1) as live:
+    with (
+        HeadroomProxy(headroom_config) as headroom_proxy,
+        Live(_status_table(all_states), console=console, refresh_per_second=1) as live,
+    ):
+        if headroom_config.enabled and headroom_proxy.active:
+            console.print(f"[bold]Headroom:[/bold] active on port {headroom_config.port}")
+        agent_headroom_config = replace(headroom_config, enabled=headroom_proxy.active)
         refresh_task = asyncio.create_task(_refresh(live))
         try:
             for wave_idx, wave in enumerate(waves):
@@ -544,6 +553,7 @@ async def run_plan(
                             trace_prompt=trace_prompt,
                             cli_models=cli_models,
                             plan_models=plan_models,
+                            headroom=agent_headroom_config,
                         )
 
                         state.results = results
@@ -628,6 +638,7 @@ async def run_plan(
                             trace_env=trace_env,
                             trace_prompt=trace_prompt,
                             model=merger_model,
+                            headroom=agent_headroom_config,
                         )
                         state.results.append(resolver_result)
 
