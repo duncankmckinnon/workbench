@@ -105,6 +105,50 @@ When `wb run --agent <name>` is used:
 
 This means you can override a built-in adapter's behavior by adding an entry with the same name to `agents.yaml`.
 
+## Headroom (cost savings)
+
+Route dispatched agents through a local headroom proxy to cut token costs (`CLI -> localhost proxy -> provider API`). Off by default.
+
+Headroom is user-provided (not a workbench dependency). Install it yourself:
+
+```bash
+pipx install "headroom-ai[all]"    # requires Python 3.10+
+```
+
+### Config
+
+Add a top-level `headroom:` block (sibling of `agents:`) to `.workbench/agents.yaml`:
+
+```yaml
+headroom:
+  enabled: false        # off by default; set true to route agents through the proxy
+  port: 8787            # local port the proxy listens on
+  autostart: true       # start the proxy if nothing is listening on `port`
+  command: headroom     # binary to invoke (default: `headroom`)
+
+agents:
+  # ... your agent adapters
+```
+
+### CLI override
+
+Override the config's `enabled` for a single run:
+
+```bash
+wb run plan.md --headroom         # force on
+wb run plan.md --no-headroom      # force off
+wb run plan.md                    # use the config value (default behavior)
+```
+
+### How it runs
+
+- **One shared proxy per `wb run`** — not one per agent.
+- **Auto-start** if nothing is listening on `port`; **reuse** an existing listener if there is one.
+- **Teardown** only what workbench started — an existing proxy keeps running.
+- **Wired today:** `claude` (overlays `ANTHROPIC_BASE_URL`) and `codex` (overlays `OPENAI_BASE_URL`).
+- **Other adapters** (gemini, cursor, copilot) are no-ops with a one-time warning until their base-URL overrides are verified.
+- **Missing binary?** wb logs a warning with the install hint (`pipx install "headroom-ai[all]"`) and continues — a run never fails over a cost optimization.
+
 ## Profiles
 
 Profiles control which agent and instructions are used for each pipeline role (implementor, tester, reviewer, fixer, merger).
