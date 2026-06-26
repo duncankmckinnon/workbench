@@ -9,7 +9,7 @@ How to write effective plans for the `wb` CLI to execute with parallel AI agents
 
 ## Overview
 
-Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Gemini CLI, Codex, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
+Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, Codex, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
 
 Each task becomes a standalone agent session — the agent only sees its own task description, not the rest of the plan. This means the plan must be thorough enough that each task is self-sufficient.
 
@@ -409,7 +409,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `gemini`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `antigravity`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 
@@ -420,7 +420,7 @@ Create or edit `.workbench/profile.yaml`:
 ```yaml
 roles:
   reviewer:
-    agent: gemini
+    agent: antigravity
     directive: "Focus on security and correctness."
   tester:
     directive_extend: "Also check edge cases for null inputs."
@@ -435,7 +435,7 @@ Only include roles and fields you want to override — everything else uses buil
 Store multiple configurations as `profile.<name>.yaml`:
 
 ```bash
-wb profile init --name fast --set reviewer.agent=gemini --set implementor.agent=codex
+wb profile init --name fast --set reviewer.agent=antigravity --set implementor.agent=codex
 wb run plan.md --profile-name fast
 ```
 
@@ -444,11 +444,11 @@ wb run plan.md --profile-name fast
 ```bash
 wb profile init                                        # create profile.yaml from defaults
 wb profile init --global                               # create in ~/.workbench/
-wb profile init --set reviewer.agent=gemini            # create with inline overrides
-wb profile init --name fast --set reviewer.agent=gemini  # create a named profile
+wb profile init --set reviewer.agent=antigravity       # create with inline overrides
+wb profile init --name fast --set reviewer.agent=antigravity  # create a named profile
 wb profile show                                        # print resolved profile
 wb profile show --name fast                            # show a named profile
-wb profile set reviewer.agent gemini                   # update a field
+wb profile set reviewer.agent antigravity              # update a field
 wb profile set reviewer.agent codex --name fast        # update a named profile
 wb profile diff                                        # show differences from defaults
 wb profile diff --name fast                            # diff a named profile
@@ -509,18 +509,18 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb conventions init [--generate]` — create `.workbench/conventions.md` from a template (or from a codebase scan with `--generate`)
 - `wb conventions edit` / `wb conventions show` / `wb conventions delete` — manage the conventions file
 - `wb setup` — create .workbench/, install skills locally, prepare repo
-- `wb setup --agent gemini` — install skills for Gemini CLI
+- `wb setup --agent antigravity` — install skills for Google Antigravity CLI
 - `wb setup --profile` — also create a profile.yaml with the detected agent
 - `wb setup --update` — force-update skills to the latest version
 - `wb setup --global` — install skills to user-level paths (no .workbench/ creation)
 - `wb setup --global --agent claude` — install to ~/.claude/skills/
-- `wb setup --global --agent gemini` — install to ~/.agents/skills/
+- `wb setup --global --agent antigravity` — install to ~/.agents/skills/
 - `wb agents init` — create agents.yaml with built-in adapter configs
 - `wb agents list` — show built-in and custom agents
 - `wb agents add <name> --command <cmd>` — add a custom agent
 - `wb agents remove <name>` — remove a custom agent
 - `wb profile init` — create profile.yaml from defaults
-- `wb profile init --name fast --set reviewer.agent=gemini` — create a named profile with overrides
+- `wb profile init --name fast --set reviewer.agent=antigravity` — create a named profile with overrides
 - `wb profile show` — print resolved profile
 - `wb profile set <key> <value>` — update a profile field
 - `wb profile diff` — show differences from defaults

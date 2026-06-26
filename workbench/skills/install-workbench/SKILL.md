@@ -90,7 +90,7 @@ At least one of:
 | Agent | Check | Install |
 |-------|-------|---------|
 | Claude Code | `claude --version` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
-| Gemini CLI | `gemini --version` | [github.com/google-gemini/gemini-cli](https://github.com/google-gemini/gemini-cli) |
+| Antigravity CLI | `agy --version` | [github.com/google/agy](https://github.com/google/agy) |
 | Codex | `codex --version` | [github.com/openai/codex](https://github.com/openai/codex) |
 | Cursor CLI | `agent --version` | [cursor.com/docs/cli](https://cursor.com/docs/cli/overview) |
 | Copilot CLI | `copilot --version` | [github.com/features/copilot/cli](https://github.com/features/copilot/cli) |
@@ -145,7 +145,7 @@ This creates `.workbench/`, installs bundled skill files for your agent platform
 ```bash
 wb setup                           # auto-detect agent, install skills locally
 wb setup --agent claude            # install skills for Claude Code
-wb setup --agent gemini            # install skills for Gemini CLI
+wb setup --agent antigravity       # install skills for Antigravity CLI
 wb setup --agent cursor            # install skills for Cursor CLI
 wb setup --profile                 # also create a profile.yaml
 wb setup --global                  # install skills to user-level paths only
@@ -167,7 +167,7 @@ This is optional — built-in adapters work without a config file. Use this if y
 
 ```bash
 wb profile init                                        # defaults
-wb profile init --set reviewer.agent=gemini            # customize
+wb profile init --set reviewer.agent=antigravity       # customize
 wb profile init --name fast --set implementor.agent=codex
 ```
 

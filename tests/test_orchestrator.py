@@ -135,7 +135,7 @@ async def test_run_plan_with_profile_path(tmp_path):
 
     # Create a dummy profile YAML file
     profile_path = tmp_path / "custom_profile.yaml"
-    profile_path.write_text("roles:\n  reviewer:\n    agent: gemini\n")
+    profile_path.write_text("roles:\n  reviewer:\n    agent: antigravity\n")
 
     captured_kwargs = {}
 
@@ -162,7 +162,7 @@ async def test_run_plan_with_profile_path(tmp_path):
     # The explicit profile should be layered into the resolved profile passed to run_pipeline
     resolved_profile = captured_kwargs.get("profile")
     assert resolved_profile is not None
-    assert resolved_profile.reviewer.agent == "gemini"
+    assert resolved_profile.reviewer.agent == "antigravity"
 
 
 @pytest.mark.asyncio

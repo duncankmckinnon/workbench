@@ -2,7 +2,7 @@
 
 These tests verify that required sections, commands, and examples
 are present and accurate in the project documentation after the
-profile system and Gemini support were added.
+profile system and Antigravity support were added.
 """
 
 from __future__ import annotations
@@ -74,7 +74,7 @@ class TestReadmeProfilesSection:
 
     def test_profile_set_agent_example(self):
         content = _read(README)
-        assert "wb profile set reviewer.agent gemini" in content
+        assert "wb profile set reviewer.agent antigravity" in content
 
     def test_profile_set_directive_extend_example(self):
         content = _read(README)
@@ -134,9 +134,12 @@ class TestReadmeInstallSection:
         content = _read(README)
         assert "--global" in content
 
-    def test_setup_gemini_documented(self):
+    def test_setup_antigravity_documented(self):
         content = _read(README)
-        assert "wb setup --agent gemini" in content or "setup --global --agent gemini" in content
+        assert (
+            "wb setup --agent antigravity" in content
+            or "setup --global --agent antigravity" in content
+        )
 
     def test_setup_claude_documented(self):
         content = _read(README)
@@ -153,14 +156,13 @@ class TestReadmeInstallSection:
 
 
 class TestReadmeRequirements:
-    """Requirements section must list Gemini as a supported agent CLI."""
+    """Requirements section must list Antigravity as a supported agent CLI."""
 
-    def test_gemini_in_requirements(self):
+    def test_antigravity_in_requirements(self):
         content = _read(README)
-        # Find the requirements section and check gemini is mentioned
         assert (
-            "gemini" in content.lower()
-        ), "README.md requirements should mention Gemini as a supported agent"
+            "antigravity" in content.lower()
+        ), "README.md requirements should mention Antigravity as a supported agent"
 
 
 # ---------------------------------------------------------------------------
@@ -218,12 +220,14 @@ class TestSkillProfilesSection:
 # ---------------------------------------------------------------------------
 
 
-class TestSkillGeminiSupport:
-    """SKILL.md must mention Gemini as a supported agent."""
+class TestSkillAntigravitySupport:
+    """SKILL.md must mention Antigravity as a supported agent."""
 
-    def test_gemini_mentioned(self):
+    def test_antigravity_mentioned(self):
         content = _read(SKILL_MD)
-        assert "gemini" in content.lower(), "SKILL.md should mention Gemini as a supported agent"
+        assert (
+            "antigravity" in content.lower()
+        ), "SKILL.md should mention Antigravity as a supported agent"
 
 
 # ---------------------------------------------------------------------------
@@ -242,9 +246,12 @@ class TestSkillInstallSection:
         content = _read(SKILL_MD)
         assert ".agents/skills/" in content or ".agents/skills" in content
 
-    def test_setup_gemini_documented(self):
+    def test_setup_antigravity_documented(self):
         content = _read(SKILL_MD)
-        assert "wb setup --agent gemini" in content or "setup --global --agent gemini" in content
+        assert (
+            "wb setup --agent antigravity" in content
+            or "setup --global --agent antigravity" in content
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -289,11 +296,11 @@ class TestDocConsistency:
         assert "profile.yaml" in readme
         assert "profile.yaml" in skill
 
-    def test_both_mention_gemini(self):
+    def test_both_mention_antigravity(self):
         readme = _read(README)
         skill = _read(SKILL_MD)
-        assert "gemini" in readme.lower()
-        assert "gemini" in skill.lower()
+        assert "antigravity" in readme.lower()
+        assert "antigravity" in skill.lower()
 
     def test_both_document_profile_commands(self):
         readme = _read(README)

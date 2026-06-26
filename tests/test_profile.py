@@ -100,13 +100,13 @@ class TestDefaultProfile:
 
 class TestFromYamlAgent:
     def test_override_single_role_agent(self, tmp_path):
-        """YAML with reviewer.agent: gemini overrides only that role."""
+        """YAML with reviewer.agent: antigravity overrides only that role."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"reviewer": {"agent": "gemini"}}},
+            {"roles": {"reviewer": {"agent": "antigravity"}}},
         )
         profile = Profile.from_yaml(yaml_path)
-        assert profile.reviewer.agent == "gemini"
+        assert profile.reviewer.agent == "antigravity"
         # All others unchanged
         for role_name in [
             "implementor",
@@ -127,13 +127,13 @@ class TestFromYamlAgent:
             {
                 "roles": {
                     "implementor": {"agent": "codex"},
-                    "tester": {"agent": "gemini"},
+                    "tester": {"agent": "antigravity"},
                 }
             },
         )
         profile = Profile.from_yaml(yaml_path)
         assert profile.implementor.agent == "codex"
-        assert profile.tester.agent == "gemini"
+        assert profile.tester.agent == "antigravity"
         assert profile.reviewer.agent == "claude"
 
 
@@ -191,17 +191,17 @@ class TestFromYamlPlanner:
         """Planner role parses from YAML."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"planner": {"agent": "gemini", "directive": "Custom"}}},
+            {"roles": {"planner": {"agent": "antigravity", "directive": "Custom"}}},
         )
         profile = Profile.from_yaml(yaml_path)
-        assert profile.planner.agent == "gemini"
+        assert profile.planner.agent == "antigravity"
         assert profile.planner.directive == "Custom"
 
     def test_planner_absent_uses_default(self, tmp_path):
         """When planner is absent from YAML, default is used."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"tester": {"agent": "gemini"}}},
+            {"roles": {"tester": {"agent": "antigravity"}}},
         )
         profile = Profile.from_yaml(yaml_path)
         assert profile.planner.agent == "claude"
@@ -218,10 +218,10 @@ class TestFromYamlNewRoles:
         """Summarizer role parses from YAML."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"summarizer": {"agent": "gemini", "directive": "Summarize reqs"}}},
+            {"roles": {"summarizer": {"agent": "antigravity", "directive": "Summarize reqs"}}},
         )
         profile = Profile.from_yaml(yaml_path)
-        assert profile.summarizer.agent == "gemini"
+        assert profile.summarizer.agent == "antigravity"
         assert profile.summarizer.directive == "Summarize reqs"
 
     def test_branch_reviewer_parses(self, tmp_path):
@@ -258,7 +258,7 @@ class TestFromYamlNewRoles:
         """YAML with neither new role still produces valid defaults."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"tester": {"agent": "gemini"}}},
+            {"roles": {"tester": {"agent": "antigravity"}}},
         )
         profile = Profile.from_yaml(yaml_path)
         assert profile.summarizer.agent == "claude"
@@ -293,7 +293,7 @@ class TestFromYamlNewRoles:
         """YAML without pr_writer still produces a valid profile (defaults applied)."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"tester": {"agent": "gemini"}}},
+            {"roles": {"tester": {"agent": "antigravity"}}},
         )
         profile = Profile.from_yaml(yaml_path)
         assert profile.pr_writer.agent == "claude"
@@ -433,10 +433,10 @@ class TestFromYamlEdgeCases:
         """YAML with an unknown field on a known role does not raise."""
         yaml_path = _write_yaml(
             tmp_path / "profile.yaml",
-            {"roles": {"tester": {"agent": "gemini", "bogus_field": 42}}},
+            {"roles": {"tester": {"agent": "antigravity", "bogus_field": 42}}},
         )
         profile = Profile.from_yaml(yaml_path)
-        assert profile.tester.agent == "gemini"
+        assert profile.tester.agent == "antigravity"
 
     def test_empty_roles_section(self, tmp_path):
         """YAML with empty roles: produces pure defaults."""
@@ -516,7 +516,7 @@ class TestSave:
             tmp_path / "input.yaml",
             {
                 "roles": {
-                    "reviewer": {"agent": "gemini"},
+                    "reviewer": {"agent": "antigravity"},
                     "tester": {"directive": "Custom."},
                 }
             },
@@ -525,7 +525,7 @@ class TestSave:
         out = tmp_path / "roundtrip.yaml"
         profile.save(out)
         reloaded = Profile.from_yaml(out)
-        assert reloaded.reviewer.agent == "gemini"
+        assert reloaded.reviewer.agent == "antigravity"
         assert reloaded.tester.directive == "Custom."
 
     def test_save_roundtrip_with_sub_modes(self, tmp_path):
@@ -603,15 +603,15 @@ class TestResolve:
             home / ".workbench" / "profile.yaml",
             {"roles": {"implementor": {"agent": "codex"}}},
         )
-        # Local sets implementor to gemini
+        # Local sets implementor to antigravity
         _write_yaml(
             repo / ".workbench" / "profile.yaml",
-            {"roles": {"implementor": {"agent": "gemini"}}},
+            {"roles": {"implementor": {"agent": "antigravity"}}},
         )
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(Path, "home", classmethod(lambda cls: home))
             profile = Profile.resolve(repo=repo)
-        assert profile.implementor.agent == "gemini"
+        assert profile.implementor.agent == "antigravity"
 
     def test_resolve_explicit_path_wins(self, tmp_path):
         """Explicit profile_path overrides both global and local."""
@@ -623,10 +623,10 @@ class TestResolve:
             home / ".workbench" / "profile.yaml",
             {"roles": {"implementor": {"agent": "codex"}}},
         )
-        # Local sets implementor to gemini
+        # Local sets implementor to antigravity
         _write_yaml(
             repo / ".workbench" / "profile.yaml",
-            {"roles": {"implementor": {"agent": "gemini"}}},
+            {"roles": {"implementor": {"agent": "antigravity"}}},
         )
         # Explicit sets implementor to custom-agent
         explicit = _write_yaml(
@@ -643,12 +643,12 @@ class TestResolve:
         home = tmp_path / "home"
         repo = tmp_path / "repo"
         repo.mkdir()
-        # Global sets reviewer agent to gemini AND tester agent to codex
+        # Global sets reviewer agent to antigravity AND tester agent to codex
         _write_yaml(
             home / ".workbench" / "profile.yaml",
             {
                 "roles": {
-                    "reviewer": {"agent": "gemini"},
+                    "reviewer": {"agent": "antigravity"},
                     "tester": {"agent": "codex"},
                 }
             },
@@ -693,7 +693,7 @@ class TestResolve:
         repo.mkdir()
         _write_yaml(
             repo / ".workbench" / "profile.yaml",
-            {"roles": {"fixer": {"agent": "gemini"}}},
+            {"roles": {"fixer": {"agent": "antigravity"}}},
         )
         # Use a fake home with no global profile
         home = tmp_path / "home"
@@ -701,7 +701,7 @@ class TestResolve:
         with pytest.MonkeyPatch.context() as mp:
             mp.setattr(Path, "home", classmethod(lambda cls: home))
             profile = Profile.resolve(repo=repo, profile_path=None)
-        assert profile.fixer.agent == "gemini"
+        assert profile.fixer.agent == "antigravity"
 
     def test_resolve_nonexistent_explicit_path_ignored(self, tmp_path):
         """An explicit profile_path that doesn't exist is silently skipped."""
@@ -737,8 +737,8 @@ class TestRoleConfig:
 
     def test_custom_values(self):
         """RoleConfig accepts custom agent and directive."""
-        rc = RoleConfig(agent="gemini", directive="Do things.")
-        assert rc.agent == "gemini"
+        rc = RoleConfig(agent="antigravity", directive="Do things.")
+        assert rc.agent == "antigravity"
         assert rc.directive == "Do things."
 
 
