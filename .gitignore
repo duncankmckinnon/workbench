@@ -27,4 +27,5 @@ workbench/_version.py
 .claude/
 docs/superpowers/*
 docs/design/*
+!docs/design/model-selection.md
 .serena/

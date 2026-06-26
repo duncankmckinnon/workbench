@@ -9,7 +9,13 @@ from unittest.mock import patch
 import yaml
 from click.testing import CliRunner
 
-from workbench.cli import _discover_skills, _ensure_workbench_dir, _get_skills_dir, main
+from workbench.cli import (
+    _detect_agent,
+    _discover_skills,
+    _ensure_workbench_dir,
+    _get_skills_dir,
+    main,
+)
 
 # ---------------------------------------------------------------------------
 # _ensure_workbench_dir
@@ -26,6 +32,27 @@ def test_ensure_workbench_dir_idempotent(tmp_path):
     (tmp_path / ".workbench").mkdir()
     wb = _ensure_workbench_dir(tmp_path)
     assert wb.is_dir()
+
+
+# ---------------------------------------------------------------------------
+# _detect_agent
+# ---------------------------------------------------------------------------
+
+
+def test_detect_agent_finds_agy_as_antigravity():
+    """_detect_agent returns 'antigravity' when agy is on PATH."""
+    with patch(
+        "workbench.cli.shutil.which", side_effect=lambda b: "/usr/bin/agy" if b == "agy" else None
+    ):
+        result = _detect_agent()
+    assert result == "antigravity"
+
+
+def test_detect_agent_ignores_unregistered_google_cli():
+    """_detect_agent returns 'manual' when no registered agent binary is on PATH."""
+    with patch("workbench.cli.shutil.which", return_value=None):
+        result = _detect_agent()
+    assert result == "manual"
 
 
 # ---------------------------------------------------------------------------
@@ -402,14 +429,14 @@ def test_setup_global_cursor_copies_to_project(tmp_path, monkeypatch):
     assert (rules_dir / "use-workbench.md").exists()
 
 
-def test_setup_global_gemini_copies_skills(tmp_path):
-    """wb setup --global --agent gemini should copy skill folders to ~/.agents/skills/."""
+def test_setup_global_antigravity_copies_skills(tmp_path):
+    """wb setup --global --agent antigravity should copy skill folders to ~/.agents/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini"])
+        result = runner.invoke(main, ["setup", "--global", "--agent", "antigravity"])
 
     assert result.exit_code == 0
     skills_dir = fake_home / ".agents" / "skills"
@@ -418,14 +445,14 @@ def test_setup_global_gemini_copies_skills(tmp_path):
     assert "Copied" in result.output
 
 
-def test_setup_global_gemini_symlinks(tmp_path):
-    """wb setup --global --agent gemini --symlink should create symlink at ~/.agents/skills/."""
+def test_setup_global_antigravity_symlinks(tmp_path):
+    """wb setup --global --agent antigravity --symlink should create symlink at ~/.agents/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
 
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini", "--symlink"])
+        result = runner.invoke(main, ["setup", "--global", "--agent", "antigravity", "--symlink"])
 
     assert result.exit_code == 0
     dest = fake_home / ".agents" / "skills" / "use-workbench"
@@ -433,12 +460,12 @@ def test_setup_global_gemini_symlinks(tmp_path):
     assert "Linked" in result.output
 
 
-def test_setup_agent_choice_includes_gemini():
-    """The --agent option should accept 'gemini' as a valid choice."""
+def test_setup_agent_choice_includes_antigravity():
+    """The --agent option should accept 'antigravity' as a valid choice."""
     runner = CliRunner()
-    fake_home = Path("/tmp/test_gemini_choice")
+    fake_home = Path("/tmp/test_antigravity_choice")
     with patch("workbench.cli.Path.home", return_value=fake_home):
-        result = runner.invoke(main, ["setup", "--global", "--agent", "gemini"])
+        result = runner.invoke(main, ["setup", "--global", "--agent", "antigravity"])
 
     assert "Invalid value" not in (result.output or "")
 
@@ -486,12 +513,12 @@ def test_setup_claude_local(tmp_path, git_repo):
     assert "cross-client" in result.output.lower()
 
 
-def test_setup_gemini_local(tmp_path, git_repo):
-    """wb setup --agent gemini installs to <repo>/.agents/skills/."""
+def test_setup_antigravity_local(tmp_path, git_repo):
+    """wb setup --agent antigravity installs to <repo>/.agents/skills/."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["setup", "--agent", "gemini"])
+        result = runner.invoke(main, ["setup", "--agent", "antigravity"])
 
     assert result.exit_code == 0
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
@@ -542,12 +569,12 @@ def test_setup_claude_local_symlinks(git_repo):
     assert agents_dest.exists()
 
 
-def test_setup_gemini_local_symlinks(git_repo):
-    """wb setup --agent gemini --symlink should symlink at repo level."""
+def test_setup_antigravity_local_symlinks(git_repo):
+    """wb setup --agent antigravity --symlink should symlink at repo level."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
-        result = runner.invoke(main, ["setup", "--agent", "gemini", "--symlink"])
+        result = runner.invoke(main, ["setup", "--agent", "antigravity", "--symlink"])
 
     assert result.exit_code == 0
     dest = git_repo / ".agents" / "skills" / "use-workbench"
@@ -1190,7 +1217,7 @@ class TestProfileInit:
         assert "profile.yaml" in result.output.replace("\n", "")
 
     def test_profile_init_set_two_part_agent(self, tmp_path):
-        """wb profile init --set reviewer.agent=gemini writes that agent."""
+        """wb profile init --set reviewer.agent=antigravity writes that agent."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".workbench").mkdir()
@@ -1198,12 +1225,12 @@ class TestProfileInit:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["profile", "init", "--repo", str(repo), "--set", "reviewer.agent=gemini"],
+            ["profile", "init", "--repo", str(repo), "--set", "reviewer.agent=antigravity"],
         )
 
         assert result.exit_code == 0
         data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
-        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        assert data["roles"]["reviewer"]["agent"] == "antigravity"
 
     def test_profile_init_set_two_part_directive(self, tmp_path):
         """wb profile init --set reviewer.directive=Custom replaces the directive."""
@@ -1420,7 +1447,7 @@ class TestProfileInit:
         assert "merger does not support a 'tdd' sub-mode" in result.output
 
     def test_profile_init_set_invalid_submode_field(self, tmp_path):
-        """wb profile init --set tester.tdd.agent=gemini errors: sub-modes have no agent."""
+        """wb profile init --set tester.tdd.agent=antigravity errors: sub-modes have no agent."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".workbench").mkdir()
@@ -1428,7 +1455,7 @@ class TestProfileInit:
         runner = CliRunner()
         result = runner.invoke(
             main,
-            ["profile", "init", "--repo", str(repo), "--set", "tester.tdd.agent=gemini"],
+            ["profile", "init", "--repo", str(repo), "--set", "tester.tdd.agent=antigravity"],
         )
 
         assert result.exit_code != 0
@@ -1449,7 +1476,7 @@ class TestProfileInit:
                 "--repo",
                 str(repo),
                 "--set",
-                "reviewer.agent=gemini",
+                "reviewer.agent=antigravity",
                 "--set",
                 "tester.tdd.directive=Custom TDD",
                 "--set",
@@ -1459,7 +1486,7 @@ class TestProfileInit:
 
         assert result.exit_code == 0
         data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
-        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        assert data["roles"]["reviewer"]["agent"] == "antigravity"
         assert data["roles"]["tester"]["tdd"]["directive"].strip() == "Custom TDD"
         assert data["roles"]["reviewer"]["followup"]["directive"].strip() == "Custom FU"
 
@@ -1632,7 +1659,7 @@ class TestProfileShow:
         """wb profile show --profile <path> uses the explicit profile."""
 
         profile_path = tmp_path / "custom.yaml"
-        profile_path.write_text(yaml.dump({"roles": {"reviewer": {"agent": "gemini"}}}))
+        profile_path.write_text(yaml.dump({"roles": {"reviewer": {"agent": "antigravity"}}}))
         repo = tmp_path / "repo"
         repo.mkdir()
 
@@ -1643,7 +1670,7 @@ class TestProfileShow:
             )
 
         assert result.exit_code == 0
-        assert "gemini" in result.output
+        assert "antigravity" in result.output
 
     def test_profile_show_truncates_directive(self, tmp_path):
         """wb profile show truncates directive to first line."""
@@ -1671,7 +1698,7 @@ class TestProfileShow:
 
 class TestProfileSet:
     def test_profile_set_agent(self, tmp_path):
-        """wb profile set reviewer.agent gemini updates the YAML."""
+        """wb profile set reviewer.agent antigravity updates the YAML."""
 
         repo = tmp_path / "repo"
         repo.mkdir()
@@ -1680,14 +1707,14 @@ class TestProfileSet:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["profile", "set", "reviewer.agent", "gemini", "--repo", str(repo)]
+            main, ["profile", "set", "reviewer.agent", "antigravity", "--repo", str(repo)]
         )
 
         assert result.exit_code == 0
         profile_path = wb_dir / "profile.yaml"
         assert profile_path.exists()
         data = yaml.safe_load(profile_path.read_text())
-        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        assert data["roles"]["reviewer"]["agent"] == "antigravity"
 
     def test_profile_set_directive_extend(self, tmp_path):
         """wb profile set tester.directive_extend 'Extra' sets the extend field."""
@@ -1736,7 +1763,7 @@ class TestProfileSet:
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["profile", "set", "nonexistent.agent", "gemini", "--repo", str(repo)]
+            main, ["profile", "set", "nonexistent.agent", "antigravity", "--repo", str(repo)]
         )
 
         assert result.exit_code != 0
@@ -1763,19 +1790,21 @@ class TestProfileSet:
         wb_dir.mkdir()
         profile_path = wb_dir / "profile.yaml"
         profile_path.write_text(
-            yaml.dump({"roles": {"reviewer": {"agent": "codex"}, "tester": {"agent": "gemini"}}})
+            yaml.dump(
+                {"roles": {"reviewer": {"agent": "codex"}, "tester": {"agent": "antigravity"}}}
+            )
         )
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["profile", "set", "reviewer.agent", "gemini", "--repo", str(repo)]
+            main, ["profile", "set", "reviewer.agent", "antigravity", "--repo", str(repo)]
         )
 
         assert result.exit_code == 0
         data = yaml.safe_load(profile_path.read_text())
-        assert data["roles"]["reviewer"]["agent"] == "gemini"
+        assert data["roles"]["reviewer"]["agent"] == "antigravity"
         # tester should be unchanged
-        assert data["roles"]["tester"]["agent"] == "gemini"
+        assert data["roles"]["tester"]["agent"] == "antigravity"
 
     def test_profile_set_global(self, tmp_path):
         """wb profile set --global writes to ~/.workbench/profile.yaml."""
@@ -1820,7 +1849,7 @@ class TestProfileDiff:
             yaml.dump(
                 {
                     "roles": {
-                        "reviewer": {"agent": "gemini"},
+                        "reviewer": {"agent": "antigravity"},
                         "tester": {"directive": "Custom directive."},
                     }
                 }
@@ -1833,7 +1862,7 @@ class TestProfileDiff:
 
         assert result.exit_code == 0
         assert "reviewer" in result.output
-        assert "gemini" in result.output
+        assert "antigravity" in result.output
         # Directive diff should show [changed], not the full text
         assert "tester" in result.output
         assert "[changed]" in result.output.lower() or "changed" in result.output.lower()
@@ -1923,19 +1952,19 @@ class TestProfileSetDottedPaths:
         assert data["roles"]["planner"]["directive"] == "Custom"
 
     def test_profile_set_planner_agent(self, tmp_path):
-        """wb profile set planner.agent gemini writes to YAML."""
+        """wb profile set planner.agent antigravity writes to YAML."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".workbench").mkdir()
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["profile", "set", "planner.agent", "gemini", "--repo", str(repo)]
+            main, ["profile", "set", "planner.agent", "antigravity", "--repo", str(repo)]
         )
 
         assert result.exit_code == 0
         data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
-        assert data["roles"]["planner"]["agent"] == "gemini"
+        assert data["roles"]["planner"]["agent"] == "antigravity"
 
     def test_profile_set_invalid_submode(self, tmp_path):
         """wb profile set merger.tdd.directive 'X' errors: merger doesn't support tdd."""
@@ -1952,14 +1981,14 @@ class TestProfileSetDottedPaths:
         assert "merger does not support a 'tdd' sub-mode" in result.output
 
     def test_profile_set_invalid_submode_field(self, tmp_path):
-        """wb profile set tester.tdd.agent gemini errors: sub-modes don't have agent."""
+        """wb profile set tester.tdd.agent antigravity errors: sub-modes don't have agent."""
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".workbench").mkdir()
 
         runner = CliRunner()
         result = runner.invoke(
-            main, ["profile", "set", "tester.tdd.agent", "gemini", "--repo", str(repo)]
+            main, ["profile", "set", "tester.tdd.agent", "antigravity", "--repo", str(repo)]
         )
 
         assert result.exit_code != 0
@@ -2170,7 +2199,7 @@ class TestProfileSetDottedPaths:
         repo = tmp_path / "repo"
         repo.mkdir()
         (repo / ".workbench").mkdir()
-        existing = {"roles": {"tester": {"agent": "gemini", "directive": "existing"}}}
+        existing = {"roles": {"tester": {"agent": "antigravity", "directive": "existing"}}}
         (repo / ".workbench" / "profile.yaml").write_text(yaml.dump(existing))
 
         runner = CliRunner()
@@ -2181,7 +2210,7 @@ class TestProfileSetDottedPaths:
 
         assert result.exit_code == 0
         data = yaml.safe_load((repo / ".workbench" / "profile.yaml").read_text())
-        assert data["roles"]["tester"]["agent"] == "gemini"
+        assert data["roles"]["tester"]["agent"] == "antigravity"
         assert data["roles"]["tester"]["directive"] == "existing"
         assert data["roles"]["tester"]["tdd"]["directive"] == "New TDD"
 
@@ -2198,7 +2227,7 @@ class TestRunWithProfile:
         plan = tmp_path / "plan.md"
         plan.write_text("# Plan\n## Task: hello\nDo something\n")
         profile_path = tmp_path / "custom.yaml"
-        profile_path.write_text(yaml.dump({"roles": {"implementor": {"agent": "gemini"}}}))
+        profile_path.write_text(yaml.dump({"roles": {"implementor": {"agent": "antigravity"}}}))
 
         runner = CliRunner()
         with (
@@ -2728,7 +2757,7 @@ def test_agents_init_creates_yaml(git_repo):
 
     config = yaml.safe_load((git_repo / ".workbench" / "agents.yaml").read_text())
     assert "claude" in config["agents"]
-    assert "gemini" in config["agents"]
+    assert "antigravity" in config["agents"]
     assert "codex" in config["agents"]
     assert "cursor" in config["agents"]
     # Verify structure of one entry
@@ -2777,7 +2806,7 @@ def test_agents_list_shows_builtins(git_repo):
 
     assert result.exit_code == 0
     assert "claude" in result.output
-    assert "gemini" in result.output
+    assert "antigravity" in result.output
     assert "codex" in result.output
 
 
@@ -3092,8 +3121,8 @@ class TestRunConfigFrontmatter:
         assert "--tdd and --skip-test are mutually exclusive" in result.output
 
     def test_cli_overrides_frontmatter_string(self, git_repo, tmp_path):
-        """Plan with agent: gemini, CLI --agent claude → agent == 'claude'."""
-        plan_text = "---\nagent: gemini\n---\n# Plan\n## Task: hello\nDo something\n"
+        """Plan with agent: antigravity, CLI --agent claude → agent == 'claude'."""
+        plan_text = "---\nagent: antigravity\n---\n# Plan\n## Task: hello\nDo something\n"
         result, captured = _run_cli_with_frontmatter(
             git_repo, tmp_path, plan_text, ["--agent", "claude"]
         )
@@ -4062,7 +4091,7 @@ def test_plan_copy_settings_creates_profile_yaml(git_repo):
 
     project_profile = git_repo / ".workbench" / "profile.yaml"
     project_profile.write_text(
-        "roles:\n  implementor:\n    agent: gemini\n    directive: project-impl\n"
+        "roles:\n  implementor:\n    agent: antigravity\n    directive: project-impl\n"
     )
 
     runner = CliRunner()
@@ -4075,7 +4104,7 @@ def test_plan_copy_settings_creates_profile_yaml(git_repo):
     text = target.read_text()
     assert text.startswith("# Frozen by `wb plan --copy-settings` on ")
     data = yaml.safe_load(text)
-    assert data["roles"]["implementor"]["agent"] == "gemini"
+    assert data["roles"]["implementor"]["agent"] == "antigravity"
     assert data["roles"]["implementor"]["directive"] == "project-impl"
 
 
@@ -4145,7 +4174,7 @@ def test_plan_with_copy_settings_flag(git_repo):
 
     project_profile = git_repo / ".workbench" / "profile.yaml"
     project_profile.parent.mkdir(parents=True, exist_ok=True)
-    project_profile.write_text("roles:\n  implementor:\n    agent: gemini\n")
+    project_profile.write_text("roles:\n  implementor:\n    agent: antigravity\n")
 
     fake_result = AgentResult(
         task_id="planner",

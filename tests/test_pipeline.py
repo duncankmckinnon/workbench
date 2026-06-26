@@ -315,9 +315,9 @@ class TestTDDVerificationFailsThenFixes:
 
 class TestPipelineUsesProfileAgent:
     def test_pipeline_uses_profile_agent(self, sample_task, sample_worktree, tmp_path):
-        """Profile with reviewer.agent='gemini' should pass that agent to run_agent for the reviewer role."""
+        """Profile with reviewer.agent='antigravity' should pass that agent to run_agent for the reviewer role."""
         profile = Profile.default()
-        profile.reviewer.agent = "gemini"
+        profile.reviewer.agent = "antigravity"
 
         captured_calls: list[dict] = []
 
@@ -344,7 +344,7 @@ class TestPipelineUsesProfileAgent:
         reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
         assert len(reviewer_calls) == 1
         # The reviewer should use the profile's agent
-        assert reviewer_calls[0]["agent_cmd"] == "gemini"
+        assert reviewer_calls[0]["agent_cmd"] == "antigravity"
 
         # Other roles should still use default "claude"
         impl_calls = [c for c in captured_calls if c["role"] == Role.IMPLEMENTOR]
@@ -502,7 +502,7 @@ class TestPipelineExplicitAgentCmdOverridesProfile:
     def test_explicit_agent_cmd_overrides_profile(self, sample_task, sample_worktree, tmp_path):
         """When agent_cmd != 'claude' (explicit override), it should win over profile."""
         profile = Profile.default()
-        profile.implementor.agent = "gemini"
+        profile.implementor.agent = "antigravity"
 
         captured_calls: list[dict] = []
 
@@ -535,9 +535,9 @@ class TestPipelineProfileMultipleRolesCustomized:
     def test_multiple_roles_customized(self, sample_task, sample_worktree, tmp_path):
         """Profile with different agents for different roles should dispatch correctly."""
         profile = Profile.default()
-        profile.implementor.agent = "gemini"
+        profile.implementor.agent = "antigravity"
         profile.tester.agent = "codex"
-        profile.reviewer.agent = "gemini"
+        profile.reviewer.agent = "antigravity"
 
         captured_calls: list[dict] = []
 
@@ -564,9 +564,9 @@ class TestPipelineProfileMultipleRolesCustomized:
         tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
         reviewer_calls = [c for c in captured_calls if c["role"] == Role.REVIEWER]
 
-        assert impl_calls[0]["agent_cmd"] == "gemini"
+        assert impl_calls[0]["agent_cmd"] == "antigravity"
         assert tester_calls[0]["agent_cmd"] == "codex"
-        assert reviewer_calls[0]["agent_cmd"] == "gemini"
+        assert reviewer_calls[0]["agent_cmd"] == "antigravity"
 
 
 class TestRunAgentDirective:
@@ -866,7 +866,7 @@ class TestTDDPipelineUsesProfileAgent:
     def test_tdd_pipeline_uses_profile_agent(self, sample_task, sample_worktree, tmp_path):
         """In TDD mode, profile agent should be used for TDD phases."""
         profile = Profile.default()
-        profile.tester.agent = "gemini"
+        profile.tester.agent = "antigravity"
         profile.implementor.agent = "codex"
 
         captured_calls: list[dict] = []
@@ -891,10 +891,10 @@ class TestTDDPipelineUsesProfileAgent:
                 )
             )
 
-        # TDD Phase 1 tester should use profile's "gemini"
+        # TDD Phase 1 tester should use profile's "antigravity"
         tester_calls = [c for c in captured_calls if c["role"] == Role.TESTER]
         assert len(tester_calls) >= 1
-        assert tester_calls[0]["agent_cmd"] == "gemini"
+        assert tester_calls[0]["agent_cmd"] == "antigravity"
 
         # TDD Phase 2 implementor should use profile's "codex"
         impl_calls = [c for c in captured_calls if c["role"] == Role.IMPLEMENTOR]

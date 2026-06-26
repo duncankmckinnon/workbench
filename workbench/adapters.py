@@ -274,18 +274,17 @@ class CopilotAdapter(AgentAdapter):
         return (last_message or raw.strip(), {})
 
 
-class GeminiAdapter(AgentAdapter):
-    """Adapter for the Gemini CLI."""
+class AntigravityAdapter(AgentAdapter):
+    """Adapter for the Google Antigravity CLI (agy)."""
 
-    name = "gemini"
+    name = "antigravity"
 
     def __init__(self) -> None:
         self.config = AgentConfig(
-            command="gemini",
-            args=["-p", "{prompt}", "--output-format", "json", "--approval-mode", "yolo"],
-            output_format=OutputFormat.JSON,
-            json_result_key="response",
-            json_cost_key="stats",
+            command="agy",
+            args=["-p", "{prompt}", "--dangerously-skip-permissions"],
+            output_format=OutputFormat.TEXT,
+            inject_env=True,
             model_flag="--model",
         )
 
@@ -301,7 +300,7 @@ class GenericAdapter(AgentAdapter):
 BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
     "claude": ClaudeAdapter,
     "codex": CodexAdapter,
-    "gemini": GeminiAdapter,
+    "antigravity": AntigravityAdapter,
     "cursor": CursorAdapter,
     "copilot": CopilotAdapter,
 }
@@ -343,7 +342,7 @@ def get_adapter(
     1. Iterate config_paths (highest precedence first). For each path that
        exists and parses, check if it defines agent_cmd. Return that
        ConfigAdapter if so.
-    2. Built-in adapters (claude, codex, gemini, cursor, copilot).
+    2. Built-in adapters (claude, codex, antigravity, cursor, copilot).
     3. GenericAdapter fallback.
 
     Per-agent precedence: the highest-precedence file containing agent_cmd wins

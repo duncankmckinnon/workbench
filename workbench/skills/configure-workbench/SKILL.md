@@ -14,14 +14,14 @@ How to set up the `wb` CLI, configure agent adapters, and manage profiles for mu
 - Creating or editing `.workbench/agents.yaml` for custom agent adapters
 - Creating or editing `.workbench/profile.yaml` to control agent behavior per role
 - Troubleshooting agent dispatch, connection, or output parsing issues
-- Switching between agent platforms (Claude, Gemini, Codex, Cursor, Copilot)
+- Switching between agent platforms (Claude, Antigravity, Codex, Cursor, Copilot)
 
 ## Initial Setup
 
 ```bash
 wb setup                           # auto-detect agent, install skills, create .workbench/
 wb setup --agent claude            # install skills for Claude Code
-wb setup --agent gemini            # install skills for Gemini CLI
+wb setup --agent antigravity       # install skills for Antigravity CLI
 wb setup --profile                 # also create a profile.yaml
 wb setup --global                  # install skills to user-level paths only
 ```
@@ -37,7 +37,7 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 | Name | CLI Command | Mode | Output |
 |------|-------------|------|--------|
 | `claude` | `claude -p <prompt>` | Print mode, JSON output | Parses `result` and `cost_usd` from JSON |
-| `gemini` | `gemini -p <prompt>` | Print mode, JSON output, yolo approval | Parses `response` and `stats` from JSON |
+| `antigravity` | `agy -p <prompt>` | Print mode, text output, dangerously-skip-permissions | Raw text |
 | `codex` | `codex exec <prompt>` | Full-auto, JSON events | Extracts last assistant message from NDJSON |
 | `cursor` | `agent -p <prompt>` | Print mode, text output | Raw text |
 | `copilot` | `copilot -p <prompt>` | Print mode, JSON output, no-ask-user | Extracts last assistant message from JSONL |
@@ -45,7 +45,7 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 Use `--agent <name>` on `wb run` or `wb merge` to select one:
 
 ```bash
-wb run plan.md --agent gemini
+wb run plan.md --agent antigravity
 wb run plan.md --agent cursor
 ```
 
@@ -100,7 +100,7 @@ wb agents remove my-agent         # remove a custom agent
 
 When `wb run --agent <name>` is used:
 1. If `.workbench/agents.yaml` contains the name, use that config
-2. If it's a built-in name (`claude`, `gemini`, `codex`, `cursor`, `copilot`), use the built-in adapter
+2. If it's a built-in name (`claude`, `antigravity`, `codex`, `cursor`, `copilot`), use the built-in adapter
 3. Otherwise, fall back to a generic adapter that passes the prompt as the sole argument
 
 This means you can override a built-in adapter's behavior by adding an entry with the same name to `agents.yaml`.
@@ -114,8 +114,8 @@ Profiles control which agent and instructions are used for each pipeline role (i
 ```bash
 wb profile init                                        # create .workbench/profile.yaml
 wb profile init --global                               # create ~/.workbench/profile.yaml
-wb profile init --set reviewer.agent=gemini            # with inline overrides
-wb profile init --name fast --set reviewer.agent=gemini  # named profile
+wb profile init --set reviewer.agent=antigravity       # with inline overrides
+wb profile init --name fast --set reviewer.agent=antigravity  # named profile
 ```
 
 ### profile.yaml Format
@@ -123,7 +123,7 @@ wb profile init --name fast --set reviewer.agent=gemini  # named profile
 ```yaml
 roles:
   reviewer:
-    agent: gemini
+    agent: antigravity
     directive: "Focus on security and correctness."
   tester:
     directive_extend: "Also check edge cases for null inputs."
@@ -164,7 +164,7 @@ Profiles merge in order (later overrides earlier):
 ```bash
 wb profile show                    # print resolved profile
 wb profile show --name fast        # show a named profile
-wb profile set reviewer.agent gemini  # update a field
+wb profile set reviewer.agent antigravity  # update a field
 wb profile diff                    # show differences from defaults
 ```
 
@@ -181,7 +181,7 @@ roles:
   tester:
     agent: claude
   reviewer:
-    agent: gemini
+    agent: antigravity
   fixer:
     agent: claude
 ```
@@ -189,7 +189,7 @@ roles:
 Or via CLI:
 
 ```bash
-wb profile init --set implementor.agent=claude --set reviewer.agent=gemini
+wb profile init --set implementor.agent=claude --set reviewer.agent=antigravity
 ```
 
 ### Custom Instructions Per Role

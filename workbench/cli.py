@@ -310,9 +310,16 @@ def _discover_skills(skills_dir: Path) -> list[tuple[str, Path]]:
 
 def _detect_agent() -> str:
     """Auto-detect the agent platform from PATH."""
+    _BINARY_TO_NAME: dict[str, str] = {
+        "claude": "claude",
+        "agy": "antigravity",
+        "codex": "codex",
+        "agent": "cursor",
+        "copilot": "copilot",
+    }
     found = []
-    for name in ("claude", "gemini", "codex", "cursor", "copilot"):
-        if shutil.which(name):
+    for binary, name in _BINARY_TO_NAME.items():
+        if shutil.which(binary):
             found.append(name)
 
     if len(found) == 1:
@@ -327,7 +334,7 @@ def _detect_agent() -> str:
 
 _PLATFORM_LABEL = {
     "claude": "command",
-    "gemini": "skill",
+    "antigravity": "skill",
     "cursor": "rule",
     "codex": "instruction",
     "copilot": "skill",
@@ -430,7 +437,7 @@ def _install_skills(
         if local:
             _install_to_agents_skills(skills, repo, symlink)
 
-    elif agent == "gemini":
+    elif agent == "antigravity":
         if local:
             target_dir = repo / ".agents" / "skills"
         else:
@@ -568,7 +575,7 @@ def main():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, gemini, codex, cursor, copilot, or custom).",
+    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
@@ -807,7 +814,7 @@ def run(
     Example:
       wb run plan.md
       wb run plan.md -j 6 --skip-review
-      wb run plan.md --agent gemini
+      wb run plan.md --agent antigravity
       wb run plan.md --no-tmux
     """
     if not no_tmux and not check_tmux_available():
@@ -1240,7 +1247,7 @@ def plan():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, gemini, codex, cursor, copilot, or custom).",
+    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
@@ -2033,7 +2040,7 @@ def stop(cleanup: bool, repo: Path | None):
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI for merge conflict resolution (claude, gemini, codex, cursor, or custom).",
+    help="Agent CLI for merge conflict resolution (claude, antigravity, codex, cursor, or custom).",
 )
 @click.option(
     "--repo",
@@ -2146,7 +2153,7 @@ def merge(
     Example:
       wb merge -b workbench-1
       wb merge -b workbench-1 --plan plan.md
-      wb merge -b workbench-1 --agent gemini
+      wb merge -b workbench-1 --agent antigravity
     """
     if not no_tmux and not check_tmux_available():
         raise click.ClickException(
@@ -2681,7 +2688,7 @@ def pull_request_cmd(
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "gemini", "cursor", "codex", "copilot", "manual"]),
+    type=click.Choice(["claude", "antigravity", "cursor", "codex", "copilot", "manual"]),
     default=None,
     help="Target agent platform.",
 )
@@ -2767,7 +2774,9 @@ def setup(
 
 @main.command(deprecated=True, hidden=True)
 @click.option(
-    "--agent", type=click.Choice(["claude", "gemini", "cursor", "codex", "manual"]), default=None
+    "--agent",
+    type=click.Choice(["claude", "antigravity", "cursor", "codex", "manual"]),
+    default=None,
 )
 @click.option("--symlink", is_flag=True)
 @click.option("--local", is_flag=True)
@@ -2810,7 +2819,7 @@ def profile():
     "--set",
     "overrides",
     multiple=True,
-    help="Set role fields inline (e.g. --set reviewer.agent=gemini).",
+    help="Set role fields inline (e.g. --set reviewer.agent=antigravity).",
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def profile_init(
@@ -2971,7 +2980,7 @@ def _indent(text: str, prefix: str) -> str:
 @click.option("--name", default=None, help="Named profile to update.")
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 def profile_set(key: str, value: str, use_global: bool, name: str | None, repo: Path | None):
-    """Set a profile field (e.g. reviewer.agent gemini, tester.tdd.directive 'text')."""
+    """Set a profile field (e.g. reviewer.agent antigravity, tester.tdd.directive 'text')."""
     parts = key.split(".")
     if len(parts) == 2:
         role_name, field_name = parts
@@ -3086,7 +3095,7 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
 
 BUILTIN_AGENTS = {
     "claude": "Claude Code CLI (default)",
-    "gemini": "Gemini CLI",
+    "antigravity": "Google Antigravity (agy)",
     "codex": "Codex CLI (OpenAI)",
     "cursor": "Cursor CLI (agent command)",
 }
