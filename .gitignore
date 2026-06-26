@@ -27,3 +27,4 @@ workbench/_version.py
 .claude/
 docs/superpowers/*
 docs/design/*
+.serena/
