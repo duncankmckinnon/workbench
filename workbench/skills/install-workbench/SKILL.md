@@ -97,6 +97,10 @@ At least one of:
 
 You can also use a custom agent CLI via `.workbench/agents.yaml` — see `wb agents add`.
 
+### 7. headroom (optional, for cost savings)
+
+Optional local proxy that routes supported agents (claude, codex) through a local endpoint to cut token costs. Install with `pipx install "headroom-ai[all]"` (Python 3.10+). See the `configure-workbench` skill for the `headroom:` config block and the `--headroom` / `--no-headroom` flag.
+
 ## Install workbench
 
 ### Standard install

@@ -11,6 +11,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from workbench.agents import AgentResult, Role, TaskStatus
+from workbench.headroom import HeadroomConfig
 from workbench.orchestrator import TaskState, merge_unmerged, run_plan
 from workbench.plan_parser import Plan, Task, parse_plan
 from workbench.profile import Profile
@@ -2582,6 +2583,48 @@ async def test_run_plan_passes_trace_metadata_to_pipeline(tmp_path):
     assert captured_kwargs.get("wave_num") == 1
     assert captured_kwargs.get("trace_env") is True
     assert captured_kwargs.get("trace_prompt") is True
+
+
+@pytest.mark.asyncio
+async def test_run_plan_constructs_headroom_proxy_and_forwards_config(tmp_path):
+    """run_plan should resolve headroom once and forward that config to pipelines."""
+    plan = _make_plan(title="My Feature")
+    repo = tmp_path
+    headroom_config = HeadroomConfig(enabled=True, port=9999)
+
+    captured_kwargs: dict = {}
+
+    async def fake_pipeline(**kwargs):
+        captured_kwargs.update(kwargs)
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+        patch(
+            "workbench.orchestrator.resolve_headroom_config",
+            return_value=headroom_config,
+        ) as mock_resolve,
+        patch("workbench.orchestrator.HeadroomProxy") as mock_proxy,
+    ):
+        mock_wt.return_value = MagicMock(branch="wb/test-task", path=tmp_path / "wt")
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+        mock_proxy.return_value.__enter__.return_value = MagicMock(active=True)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            headroom=True,
+        )
+
+    mock_resolve.assert_called_once()
+    assert mock_resolve.call_args.kwargs["cli_override"] is True
+    mock_proxy.assert_called_once_with(headroom_config)
+    assert captured_kwargs.get("headroom") == headroom_config
 
 
 # ---------------------------------------------------------------------------

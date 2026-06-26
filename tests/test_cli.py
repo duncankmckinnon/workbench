@@ -2320,6 +2320,27 @@ def test_run_no_fail_fast_flag(git_repo, tmp_path):
     assert captured.get("fail_fast") is False
 
 
+def test_run_headroom_flag(git_repo, tmp_path):
+    """--headroom should pass headroom=True to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--headroom"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("headroom") is True
+
+
+def test_run_no_headroom_flag(git_repo, tmp_path):
+    """--no-headroom should pass headroom=False to run_plan."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, ["--no-headroom"])
+    assert result.exit_code == 0, result.output
+    assert captured.get("headroom") is False
+
+
+def test_run_headroom_omitted_passes_none(git_repo, tmp_path):
+    """Omitting headroom flags should let run_plan use config."""
+    result, captured = _run_cli_with_capture(git_repo, tmp_path, [])
+    assert result.exit_code == 0, result.output
+    assert captured.get("headroom") is None
+
+
 def test_run_fail_fast_frontmatter_precedence(git_repo, tmp_path):
     """Frontmatter should override default, and CLI should override frontmatter."""
     # 1. Frontmatter 'fail_fast: false' overrides the default True -> False

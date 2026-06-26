@@ -488,6 +488,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--end-wave N` | Stop after wave N (default: last wave) |
 | `--retry-failed` | Auto-retry tasks that crashed (not those that exhausted fix retries) |
 | `--fail-fast` | Stop after the first wave with any failed tasks |
+| `--headroom` / `--no-headroom` | Route supported agents through a local Headroom proxy to reduce token costs |
 | `--only-incomplete` | Skip completed tasks from a prior run (requires `-b`) |
 | `--task ID` | Run only specific tasks by ID or slug (repeatable) |
 | `--cleanup` | Remove worktrees after completion |
@@ -504,6 +505,8 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--profile PATH` | Use a specific profile.yaml |
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
+
+Headroom is off by default. Enable it with `--headroom` or a top-level `headroom:` config block in `agents.yaml`; Workbench manages one shared local proxy per run. Claude and Codex are wired first, while other agents run normally.
 
 #### Frontmatter-readable flags
 
