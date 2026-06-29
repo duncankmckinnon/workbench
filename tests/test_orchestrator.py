@@ -1862,8 +1862,8 @@ async def test_retry_failed_no_resume_when_completed_stages_empty(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_tdd_disables_resume(tmp_path):
-    """TDD mode skips the resume path even when prior stages exist."""
+async def test_tdd_resumes_from_completed_stages(tmp_path):
+    """TDD mode resumes from prior completed stages, same as the normal pipeline."""
     plan = _make_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir(parents=True, exist_ok=True)
@@ -1873,7 +1873,7 @@ async def test_tdd_disables_resume(tmp_path):
         "task-1",
         status="failed",
         branch="wb/test-task",
-        completed_stages=["implementor", "tester"],
+        completed_stages=["tdd-test", "tdd-implement"],
     )
     prior.save(repo)
 
@@ -1889,7 +1889,7 @@ async def test_tdd_disables_resume(tmp_path):
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
     ):
-        mock_create.return_value = MagicMock(
+        mock_attach.return_value = MagicMock(
             branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
         )
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
@@ -1903,8 +1903,8 @@ async def test_tdd_disables_resume(tmp_path):
             tdd=True,
         )
 
-    mock_attach.assert_not_called()
-    assert mock_create.called
+    assert mock_attach.called
+    mock_create.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

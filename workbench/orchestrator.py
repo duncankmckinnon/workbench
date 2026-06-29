@@ -12,7 +12,16 @@ from rich.live import Live
 from rich.table import Table
 from rich.text import Text
 
-from .agents import AgentResult, Role, TaskStatus, resolve_model, run_merge_resolver, run_pipeline
+from .agents import (
+    TDD_IMPLEMENT_STAGE,
+    TDD_TEST_STAGE,
+    AgentResult,
+    Role,
+    TaskStatus,
+    resolve_model,
+    run_merge_resolver,
+    run_pipeline,
+)
 from .headroom import HeadroomProxy, resolve_headroom_config
 from .path_resolver import resolve_agents_config_paths, resolve_profile_paths
 from .plan_parser import Plan, Task, normalize_model_config
@@ -358,7 +367,6 @@ async def run_plan(
                         and prior_record.status == "failed"
                         and prior_record.branch is not None
                         and branch_exists(repo, prior_record.branch)
-                        and not tdd
                     )
                     if can_resume:
                         try:
@@ -440,7 +448,11 @@ async def run_plan(
                     """
                     trusted: set[str] = set(resume_stages or [])
                     for r in results:
-                        if r.role == Role.IMPLEMENTOR and r.status != TaskStatus.FAILED:
+                        if r.step == TDD_TEST_STAGE and r.status != TaskStatus.FAILED:
+                            trusted.add(TDD_TEST_STAGE)
+                        elif r.step == TDD_IMPLEMENT_STAGE and r.status != TaskStatus.FAILED:
+                            trusted.add(TDD_IMPLEMENT_STAGE)
+                        elif r.role == Role.IMPLEMENTOR and r.status != TaskStatus.FAILED:
                             trusted.add(Role.IMPLEMENTOR.value)
                         elif r.role == Role.TESTER and r.passed:
                             trusted.add(Role.TESTER.value)
@@ -449,7 +461,13 @@ async def run_plan(
                         elif r.role == Role.FIXER:
                             trusted.discard(Role.TESTER.value)
                             trusted.discard(Role.REVIEWER.value)
-                    order = [Role.IMPLEMENTOR.value, Role.TESTER.value, Role.REVIEWER.value]
+                    order = [
+                        TDD_TEST_STAGE,
+                        TDD_IMPLEMENT_STAGE,
+                        Role.IMPLEMENTOR.value,
+                        Role.TESTER.value,
+                        Role.REVIEWER.value,
+                    ]
                     return [v for v in order if v in trusted]
 
                 def _persist_stages(state: TaskState) -> list[str] | None:
@@ -716,7 +734,6 @@ async def run_plan(
                                 and prior_record is not None
                                 and prior_record.branch is not None
                                 and branch_exists(repo, prior_record.branch)
-                                and not tdd
                             )
 
                             if can_resume:

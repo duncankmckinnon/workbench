@@ -3315,6 +3315,45 @@ def test_run_final_review_flag_invokes_orchestration(git_repo, tmp_path):
     assert "PASS" in result.output
 
 
+def test_run_final_review_skipped_on_failed_wave(git_repo, tmp_path):
+    """--final-review must not run if any task in the run failed."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "failed",
+                "branch": "wb/feat",
+                "merged": False,
+                "last_agent": "tester",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli.run_final_review") as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert not mock_final_review.called
+    assert "Skipping final review" in result.output
+
+
 def test_run_final_review_skipped_when_no_tasks_merge(git_repo, tmp_path):
     """--final-review with 0 merged tasks should not invoke run_final_review."""
     plan = _make_plan_in_dir(tmp_path, "my-plan")
