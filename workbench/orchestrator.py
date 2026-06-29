@@ -361,12 +361,20 @@ async def run_plan(
                     # branch, reuse the on-disk worktree instead of wiping it.
                     prior_record = prior.tasks.get(state.task.id) if prior else None
                     resume_stages = list(prior_record.completed_stages) if prior_record else []
+                    # For TDD tasks, only reuse the existing branch when both TDD
+                    # phases completed. A partial tdd-implement run may have left
+                    # broken commits on the branch; falling back to create_worktree
+                    # guarantees a clean slate.
+                    tdd_safe = not tdd or (
+                        TDD_TEST_STAGE in resume_stages and TDD_IMPLEMENT_STAGE in resume_stages
+                    )
                     can_resume = (
                         bool(resume_stages)
                         and prior_record is not None
                         and prior_record.status == "failed"
                         and prior_record.branch is not None
                         and branch_exists(repo, prior_record.branch)
+                        and tdd_safe
                     )
                     if can_resume:
                         try:
@@ -729,11 +737,16 @@ async def run_plan(
                             resume_stages = (
                                 list(prior_record.completed_stages) if prior_record else []
                             )
+                            tdd_safe = not tdd or (
+                                TDD_TEST_STAGE in resume_stages
+                                and TDD_IMPLEMENT_STAGE in resume_stages
+                            )
                             can_resume = (
                                 bool(resume_stages)
                                 and prior_record is not None
                                 and prior_record.branch is not None
                                 and branch_exists(repo, prior_record.branch)
+                                and tdd_safe
                             )
 
                             if can_resume:

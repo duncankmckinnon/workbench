@@ -1008,7 +1008,18 @@ def run(
                     break
 
         if status:
-            any_failed = any(rec.status == "failed" for rec in status.tasks.values())
+            # Scope the failure check to tasks targeted in this run only —
+            # carried-forward records from prior runs must not suppress review.
+            if task_ids:
+                task_id_set = set(task_ids)
+                targeted_ids = {
+                    t.id for t in plan.tasks if t.id in task_id_set or t.slug in task_id_set
+                }
+            else:
+                targeted_ids = {t.id for t in plan.tasks}
+            any_failed = any(
+                rec.status == "failed" for tid, rec in status.tasks.items() if tid in targeted_ids
+            )
             if any_failed:
                 console.print(
                     "[yellow]Skipping final review: one or more tasks failed this run.[/yellow]"

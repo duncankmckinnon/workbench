@@ -1907,6 +1907,56 @@ async def test_tdd_resumes_from_completed_stages(tmp_path):
     mock_create.assert_not_called()
 
 
+@pytest.mark.asyncio
+async def test_tdd_partial_tdd_test_only_falls_back_to_create(tmp_path):
+    """TDD resume falls back to create_worktree when only tdd-test completed.
+
+    A branch with a partial tdd-implement run may have broken commits; reusing
+    it would give the TDD implementor a dirty starting point.
+    """
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    prior = SessionStatus(plan_slug="test-plan", session_branch="workbench-1")
+    prior.record_task(
+        "task-1",
+        status="failed",
+        branch="wb/test-task",
+        completed_stages=["tdd-test"],  # tdd-implement never finished
+    )
+    prior.save(repo)
+
+    async def fake_pipeline(**kwargs):
+        return []
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree") as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_create.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            retry_failed=True,
+            tdd=True,
+        )
+
+    mock_attach.assert_not_called()
+    assert mock_create.called
+
+
 # ---------------------------------------------------------------------------
 # _completed_stages derivation
 # ---------------------------------------------------------------------------
