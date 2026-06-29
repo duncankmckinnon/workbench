@@ -3315,6 +3315,119 @@ def test_run_final_review_flag_invokes_orchestration(git_repo, tmp_path):
     assert "PASS" in result.output
 
 
+def test_run_final_review_skipped_on_failed_wave(git_repo, tmp_path):
+    """--final-review must not run if any task in the run failed."""
+    plan = _make_plan_in_dir(tmp_path, "my-plan")
+
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "failed",
+                "branch": "wb/feat",
+                "merged": False,
+                "last_agent": "tester",
+            }
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli.run_final_review") as mock_final_review,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            ["run", str(plan), "--no-tmux", "--final-review", "-b", "workbench-1"],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert not mock_final_review.called
+    assert "Skipping final review" in result.output
+
+
+def test_run_final_review_not_suppressed_by_carryforward_failure(git_repo, tmp_path):
+    """--final-review must run when a --task-filtered run succeeds even if prior runs
+    left a failed record for a non-targeted task in the status file."""
+    from workbench.session_status import FinalReviewRecord
+
+    # Two-task plan so task-2 can be targeted while task-1 is carry-forward.
+    plan_dir = tmp_path / "my-plan"
+    plan_dir.mkdir(parents=True, exist_ok=True)
+    plan = plan_dir / "plan.md"
+    plan.write_text("# Plan\n## Task: Task One\nDo one\n\n## Task: Task Two\nDo two\n")
+
+    # Status: task-1 failed in a prior run (carry-forward), task-2 merged this run.
+    _write_status_file(
+        git_repo,
+        "my-plan",
+        "workbench-1",
+        {
+            "task-1": {
+                "status": "failed",
+                "branch": "wb/task-one",
+                "merged": False,
+                "last_agent": "tester",
+            },
+            "task-2": {
+                "status": "done",
+                "branch": "wb/task-two",
+                "merged": True,
+                "last_agent": "reviewer",
+            },
+        },
+        plan_source=str(plan),
+    )
+
+    runner = CliRunner()
+
+    mock_record = FinalReviewRecord(
+        timestamp="2026-05-10T00:00:00Z",
+        verdict="pass",
+        review_path=".workbench/my-plan/wrap-up/workbench-1/review.md",
+        requirements_path=".workbench/my-plan/wrap-up/workbench-1/requirements.md",
+        summarizer_agent="claude",
+        reviewer_agent="claude",
+    )
+
+    async def fake_run_plan(**kwargs):
+        return []
+
+    async def fake_final_review(**kwargs):
+        return mock_record
+
+    with (
+        patch("workbench.cli.run_plan", side_effect=fake_run_plan),
+        patch("workbench.cli.run_final_review", side_effect=fake_final_review) as mock_fr,
+        patch("workbench.cli._find_repo_root", return_value=git_repo),
+    ):
+        result = runner.invoke(
+            main,
+            [
+                "run",
+                str(plan),
+                "--no-tmux",
+                "--final-review",
+                "-b",
+                "workbench-1",
+                "--task",
+                "task-2",
+            ],
+        )
+
+    assert result.exit_code == 0, result.output
+    assert mock_fr.called, "final review must run when targeted task succeeded"
+    assert "Skipping final review" not in result.output
+
+
 def test_run_final_review_skipped_when_no_tasks_merge(git_repo, tmp_path):
     """--final-review with 0 merged tasks should not invoke run_final_review."""
     plan = _make_plan_in_dir(tmp_path, "my-plan")

@@ -560,8 +560,13 @@ class TestPipelineResume:
         assert calls.get(Role.REVIEWER) == 1
         assert len(results) == 3
 
-    def test_resume_tdd_dropped(self, pipeline_task, pipeline_worktree, tmp_path):
-        from workbench.directives import TddTesterDirective
+    def test_resume_tdd_skips_completed_phases(self, pipeline_task, pipeline_worktree, tmp_path):
+        from workbench.directives import (
+            ReviewerDirective,
+            TddImplementorDirective,
+            TddTesterDirective,
+            TesterDirective,
+        )
 
         seen_directive_types: list[type] = []
 
@@ -569,13 +574,21 @@ class TestPipelineResume:
             seen_directive_types.append(type(directive))
             return _result(directive.role, passed=True)
 
-        # Distinguish the prior result from a freshly-produced one. AgentResult
-        # is a value-equality dataclass, so `in` would match any equal result.
-        prior_impl = AgentResult(
+        # Distinguish prior results from freshly-produced ones. AgentResult is
+        # a value-equality dataclass, so `in` would match any equal result.
+        prior_tdd_test = AgentResult(
+            task_id="task-1",
+            role=Role.TESTER,
+            status=TaskStatus.DONE,
+            output="PRIOR_TDD_TEST",
+            step="tdd-test",
+        )
+        prior_tdd_impl = AgentResult(
             task_id="task-1",
             role=Role.IMPLEMENTOR,
             status=TaskStatus.DONE,
-            output="PRIOR_SENTINEL",
+            output="PRIOR_TDD_IMPLEMENT",
+            step="tdd-implement",
         )
 
         with (
@@ -590,15 +603,19 @@ class TestPipelineResume:
                     repo=tmp_path,
                     use_tmux=False,
                     tdd=True,
-                    resume_completed_stages=["implementor"],
-                    prior_results=[prior_impl],
+                    resume_completed_stages=["tdd-test", "tdd-implement"],
+                    prior_results=[prior_tdd_test, prior_tdd_impl],
                 )
             )
 
-        assert TddTesterDirective in seen_directive_types
-        assert not any(r is prior_impl for r in results)
-        assert not any(r.output == "PRIOR_SENTINEL" for r in results)
-        assert len(results) > 0
+        # Both TDD phases were already completed on a prior run — they must
+        # not be re-run, and verification test/review must still happen.
+        assert TddTesterDirective not in seen_directive_types
+        assert TddImplementorDirective not in seen_directive_types
+        assert TesterDirective in seen_directive_types
+        assert ReviewerDirective in seen_directive_types
+        assert any(r is prior_tdd_test for r in results)
+        assert any(r is prior_tdd_impl for r in results)
 
     def test_resume_skip_test_and_completed_test_both_skip(
         self, pipeline_task, pipeline_worktree, tmp_path

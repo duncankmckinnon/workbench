@@ -73,6 +73,14 @@ class TaskStatus(StrEnum):
     FAILED = "failed"
 
 
+# Stage names for the TDD-specific pipeline phases (write-failing-tests,
+# make-tests-pass). Distinct from Role.TESTER/Role.IMPLEMENTOR so resume
+# tracking can tell a TDD phase apart from the regular implement/verify
+# stages that share the same Role.
+TDD_TEST_STAGE = "tdd-test"
+TDD_IMPLEMENT_STAGE = "tdd-implement"
+
+
 @dataclass
 class AgentResult:
     task_id: str
@@ -81,6 +89,7 @@ class AgentResult:
     output: str
     attempt: int = 1
     cost: dict[str, Any] = field(default_factory=dict)
+    step: str = ""
 
     @property
     def passed(self) -> bool:
@@ -167,6 +176,7 @@ async def run_agent(
             status=status,
             output=output_text if isinstance(output_text, str) else str(output_text),
             cost=cost_data,
+            step=meta.step if meta else "",
         )
 
     except Exception as e:
@@ -175,6 +185,7 @@ async def run_agent(
             role=directive.role,
             status=TaskStatus.FAILED,
             output=f"Agent error: {e}",
+            step=meta.step if meta else "",
         )
 
 
@@ -235,9 +246,6 @@ async def run_pipeline(
     # `on_result`; the caller already has them on disk.
     results: list[AgentResult] = list(prior_results or [])
     completed: set[str] = set(resume_completed_stages or [])
-    if tdd:
-        completed = set()
-        results = []
     base = session_branch or get_main_branch(repo)
     ctx = PromptContext(
         task=task,
@@ -299,52 +307,54 @@ async def run_pipeline(
     if tdd:
         # TDD Phase 1: Write failing tests
         # Directive priority for TDD: CLI > profile.tester.tdd > TddTesterDirective.DEFAULT_TEXT
-        _notify(TaskStatus.TESTING)
-        tdd_test_directive = TddTesterDirective(
-            directive_text=_text_for(Role.TESTER, "tdd"),
-        )
-        test_write_result = await run_agent(
-            tdd_test_directive,
-            ctx,
-            repo,
-            agent_cmd=_agent_for(Role.TESTER),
-            use_tmux=use_tmux,
-            agents_config_paths=agents_config_paths,
-            meta=replace(base_meta, step="tdd-test"),
-            trace_env=trace_env,
-            trace_prompt=trace_prompt,
-            model=_model_for(Role.TESTER),
-            headroom=headroom,
-        )
-        _record(test_write_result)
+        if TDD_TEST_STAGE not in completed:
+            _notify(TaskStatus.TESTING)
+            tdd_test_directive = TddTesterDirective(
+                directive_text=_text_for(Role.TESTER, "tdd"),
+            )
+            test_write_result = await run_agent(
+                tdd_test_directive,
+                ctx,
+                repo,
+                agent_cmd=_agent_for(Role.TESTER),
+                use_tmux=use_tmux,
+                agents_config_paths=agents_config_paths,
+                meta=replace(base_meta, step=TDD_TEST_STAGE),
+                trace_env=trace_env,
+                trace_prompt=trace_prompt,
+                model=_model_for(Role.TESTER),
+                headroom=headroom,
+            )
+            _record(test_write_result)
 
-        if test_write_result.status == TaskStatus.FAILED:
-            _notify(TaskStatus.FAILED)
-            return results
+            if test_write_result.status == TaskStatus.FAILED:
+                _notify(TaskStatus.FAILED)
+                return results
 
         # TDD Phase 2: Implement to make tests pass
-        _notify(TaskStatus.IMPLEMENTING)
-        tdd_impl_directive = TddImplementorDirective(
-            directive_text=_text_for(Role.IMPLEMENTOR, "tdd"),
-        )
-        impl_result = await run_agent(
-            tdd_impl_directive,
-            ctx,
-            repo,
-            agent_cmd=_agent_for(Role.IMPLEMENTOR),
-            use_tmux=use_tmux,
-            agents_config_paths=agents_config_paths,
-            meta=replace(base_meta, step="tdd-implement"),
-            trace_env=trace_env,
-            trace_prompt=trace_prompt,
-            model=_model_for(Role.IMPLEMENTOR),
-            headroom=headroom,
-        )
-        _record(impl_result)
+        if TDD_IMPLEMENT_STAGE not in completed:
+            _notify(TaskStatus.IMPLEMENTING)
+            tdd_impl_directive = TddImplementorDirective(
+                directive_text=_text_for(Role.IMPLEMENTOR, "tdd"),
+            )
+            impl_result = await run_agent(
+                tdd_impl_directive,
+                ctx,
+                repo,
+                agent_cmd=_agent_for(Role.IMPLEMENTOR),
+                use_tmux=use_tmux,
+                agents_config_paths=agents_config_paths,
+                meta=replace(base_meta, step=TDD_IMPLEMENT_STAGE),
+                trace_env=trace_env,
+                trace_prompt=trace_prompt,
+                model=_model_for(Role.IMPLEMENTOR),
+                headroom=headroom,
+            )
+            _record(impl_result)
 
-        if impl_result.status == TaskStatus.FAILED:
-            _notify(TaskStatus.FAILED)
-            return results
+            if impl_result.status == TaskStatus.FAILED:
+                _notify(TaskStatus.FAILED)
+                return results
 
         # Continue to normal test verification (phase 2) and review (phase 3)
         # regardless of the TDD implementor's self-reported verdict — the
