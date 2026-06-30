@@ -2474,6 +2474,7 @@ class TestResume:
         kwargs = mock_run_plan.call_args.kwargs
         assert kwargs["session_branch"] == "workbench-1"
         assert kwargs["only_incomplete"] is True
+        assert kwargs["retry_failed"] is True
         assert kwargs["fail_fast"] is True
         # Plan path passed through
         assert Path(str(kwargs["plan"].source)).name == "demo.md"

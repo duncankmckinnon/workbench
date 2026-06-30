@@ -1168,7 +1168,7 @@ def resume(
         profile_path=profile_path,
         profile_name=profile_name,
         session_name=None,
-        retry_failed=False,
+        retry_failed=True,
         fail_fast=fail_fast,
         headroom=None,
         only_incomplete=True,
