@@ -1704,7 +1704,8 @@ def _list_wb_branches(repo: Path) -> list[str]:
         capture_output=True,
         text=True,
     )
-    return [line.strip().lstrip("* ") for line in result.stdout.splitlines() if line.strip()]
+    # strip leading "*" (current branch), "+" (active in another worktree), and spaces
+    return [line.strip().lstrip("*+ ") for line in result.stdout.splitlines() if line.strip()]
 
 
 def _resolve_plan_source(plan_source: str, repo: Path) -> Path | None:
@@ -1752,6 +1753,16 @@ def _resolve_plan_source(plan_source: str, repo: Path) -> Path | None:
     is_flag=True,
     help="Print what would be removed without removing anything.",
 )
+@click.option(
+    "--purge",
+    is_flag=True,
+    help=(
+        "Delete the entire plan folder (or all plan folders when no PROJECT is given), "
+        "plus all associated worktrees and branches. "
+        "Preserves root-level config files (conventions.md, agents.yaml, profile.yaml). "
+        "Implies --force."
+    ),
+)
 def clean(
     project: str | None,
     repo: Path | None,
@@ -1759,6 +1770,7 @@ def clean(
     completed: bool,
     remove_plans: bool,
     dry_run: bool,
+    purge: bool,
 ):
     """Remove workbench worktrees, branches, and completed-plan status files.
 
@@ -1772,11 +1784,24 @@ def clean(
     agent worktrees, and (when empty after cleanup) the .workbench/<project>/
     directory itself are removed. The same --force / --completed / --remove-plans
     / --dry-run semantics apply, scoped to the project.
+
+    --purge deletes the entire .workbench/<project>/ directory tree (or all plan
+    subdirectories when no PROJECT is given), plus all associated git artifacts.
+    Root-level config files (conventions.md, agents.yaml, profile.yaml) are
+    preserved. Implies --force. Combine with --dry-run to preview.
     """
     from .session_status import iter_status_files, status_file_branches, status_file_is_complete
 
     if force and completed:
         raise click.ClickException("--force and --completed are mutually exclusive")
+    if purge and force:
+        raise click.ClickException(
+            "--purge and --force are mutually exclusive (--purge implies --force)"
+        )
+    if purge and completed:
+        raise click.ClickException("--purge and --completed are mutually exclusive")
+
+    effective_force = force or purge
 
     repo = repo or _find_repo_root()
     _ensure_workbench_dir(repo)
@@ -1828,7 +1853,7 @@ def clean(
     inflight_wb_branches = [b for b in branches if b not in completed_branches]
 
     # 4. Default mode: refuse if anything is in-flight.
-    if not force and not completed:
+    if not effective_force and not completed:
         blockers: list[str] = []
         for path, _ in incomplete_files:
             blockers.append(f"  status file: {path.relative_to(repo)}")
@@ -1845,11 +1870,11 @@ def clean(
             )
 
     # 5. Decide the removal set.
-    if force:
+    if effective_force:
         wt_to_remove = worktrees
         br_to_remove = branches
         sf_to_remove = [p for p, _ in completed_files]
-        plan_files: list[Path] = []  # --remove-plans is ignored under --force
+        plan_files: list[Path] = []  # --remove-plans is ignored under --force / --purge
     else:
         wt_to_remove = completed_worktrees
         br_to_remove = completed_wb_branches
@@ -1967,12 +1992,44 @@ def clean(
     else:
         console.print(f"\n[green]Cleaned up:[/green] {summary}")
 
-    # 9. When scoped to a single project, drop the now-empty plan folder.
-    if project is not None and not dry_run:
+    # 9. When scoped to a single project, drop the plan folder.
+    if project is not None:
         project_dir = repo / ".workbench" / project
-        if project_dir.is_dir() and not any(project_dir.iterdir()):
-            project_dir.rmdir()
-            console.print(f"{style} project folder {project_dir.relative_to(repo)}")
+        if purge:
+            if project_dir.is_dir():
+                if dry_run:
+                    console.print(
+                        f"[dim]would remove[/dim] project folder {project_dir.relative_to(repo)}/ (entire tree)"
+                    )
+                else:
+                    shutil.rmtree(project_dir)
+                    console.print(
+                        f"[green]✓[/green] purged project folder {project_dir.relative_to(repo)}/"
+                    )
+        elif not dry_run:
+            if project_dir.is_dir() and not any(project_dir.iterdir()):
+                project_dir.rmdir()
+                console.print(f"{style} project folder {project_dir.relative_to(repo)}")
+
+    # 10. When purging globally (no project), remove all plan subdirectories.
+    # Root-level files (conventions.md, agents.yaml, profile.yaml, etc.) are
+    # preserved automatically because we only iterate over directories here.
+    if purge and project is None:
+        wb_dir = repo / ".workbench"
+        dirs_to_purge = sorted(
+            e
+            for e in wb_dir.iterdir()
+            if e.is_dir() and e.name != "_merge"  # _merge cleaned by ephemeral step
+        )
+        if dirs_to_purge:
+            console.print("\n[bold]Purging plan directories:[/bold]")
+            for plan_dir in dirs_to_purge:
+                rel = plan_dir.relative_to(repo)
+                if dry_run:
+                    console.print(f"  [dim]would remove[/dim] {rel}/")
+                else:
+                    shutil.rmtree(plan_dir)
+                    console.print(f"  [green]✓[/green] purged {rel}/")
 
 
 def _status_file_slug(path: Path) -> str:
