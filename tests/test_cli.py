@@ -5232,6 +5232,195 @@ def test_clean_reports_per_path_failure_without_aborting(git_repo):
     assert wt_bad.exists()
 
 
+class TestCleanPurge:
+    """Tests for `wb clean --purge [PROJECT]`."""
+
+    def test_purge_rejects_force(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--purge", "--force"])
+        assert result.exit_code != 0
+        assert "--purge and --force are mutually exclusive" in result.output
+
+    def test_purge_rejects_completed(self, git_repo):
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--purge", "--completed"])
+        assert result.exit_code != 0
+        assert "--purge and --completed are mutually exclusive" in result.output
+
+    def test_purge_project_removes_entire_directory_tree(self, git_repo):
+        """--purge removes the whole plan folder including plan.md, not just empty dirs."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+        (git_repo / ".workbench" / "alpha" / "extra.txt").write_text("notes\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()
+        assert "purged" in result.output
+
+    def test_purge_project_removes_worktrees_and_branches(self, git_repo):
+        """--purge removes git artifacts for the plan alongside the directory tree."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/alpha-t1", "merged": True}},
+        )
+        wt = _make_real_worktree(git_repo, ".workbench/alpha/t1", "wb/alpha-t1")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        assert not wt.exists()
+        assert not (git_repo / ".workbench" / "alpha").exists()
+        branches = subprocess.run(
+            ["git", "branch", "--list", "wb/*"],
+            cwd=git_repo,
+            capture_output=True,
+            text=True,
+        ).stdout
+        assert "wb/alpha-t1" not in branches
+
+    def test_purge_project_removes_inflight_artifacts(self, git_repo):
+        """--purge implies --force so it removes in-flight tasks too."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "running", "branch": "wb/alpha-t1", "merged": False}},
+        )
+        wt = _make_real_worktree(git_repo, ".workbench/alpha/t1", "wb/alpha-t1")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        assert not wt.exists()
+        assert not (git_repo / ".workbench" / "alpha").exists()
+
+    def test_purge_global_removes_all_plan_dirs(self, git_repo):
+        """--purge without a plan name removes all plan subdirectories."""
+        for slug in ("alpha", "beta", "gamma"):
+            _write_status_file(
+                git_repo,
+                slug,
+                "workbench-1",
+                {"t1": {"status": "done", "branch": f"wb/{slug}", "merged": True}},
+            )
+            (git_repo / ".workbench" / slug / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        for slug in ("alpha", "beta", "gamma"):
+            assert not (git_repo / ".workbench" / slug).exists()
+        assert "purged" in result.output
+
+    def test_purge_global_preserves_root_config_files(self, git_repo):
+        """--purge leaves conventions.md, agents.yaml, and profile.yaml intact."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        wb = git_repo / ".workbench"
+        (wb / "conventions.md").write_text("# Conventions\n")
+        (wb / "agents.yaml").write_text("agents: {}\n")
+        (wb / "profile.yaml").write_text("roles: {}\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        assert not (wb / "alpha").exists()
+        assert (wb / "conventions.md").exists()
+        assert (wb / "agents.yaml").exists()
+        assert (wb / "profile.yaml").exists()
+
+    def test_purge_dry_run_project_does_not_delete(self, git_repo):
+        """--purge --dry-run previews the project folder removal without deleting."""
+        _write_status_file(
+            git_repo,
+            "alpha",
+            "workbench-1",
+            {"t1": {"status": "done", "branch": "wb/a", "merged": True}},
+        )
+        (git_repo / ".workbench" / "alpha" / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--purge", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha").is_dir()
+        assert "would remove" in result.output
+        assert "alpha" in result.output
+
+    def test_purge_dry_run_global_does_not_delete(self, git_repo):
+        """--purge --dry-run previews all plan directories without deleting."""
+        for slug in ("alpha", "beta"):
+            _write_status_file(
+                git_repo,
+                slug,
+                "workbench-1",
+                {"t1": {"status": "done", "branch": f"wb/{slug}", "merged": True}},
+            )
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "--purge", "--dry-run"])
+
+        assert result.exit_code == 0, result.output
+        assert (git_repo / ".workbench" / "alpha").is_dir()
+        assert (git_repo / ".workbench" / "beta").is_dir()
+        assert "alpha" in result.output
+        assert "beta" in result.output
+
+    def test_purge_project_errors_when_folder_missing(self, git_repo):
+        """--purge with a nonexistent plan name gives a clear error."""
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "nonexistent", "--purge"])
+        assert result.exit_code != 0
+        assert "No project folder" in result.output
+
+    def test_purge_project_scoped_leaves_other_plans_intact(self, git_repo):
+        """--purge alpha doesn't touch beta."""
+        for slug in ("alpha", "beta"):
+            _write_status_file(
+                git_repo,
+                slug,
+                "workbench-1",
+                {"t1": {"status": "done", "branch": f"wb/{slug}", "merged": True}},
+            )
+            (git_repo / ".workbench" / slug / "plan.md").write_text("# Plan\n")
+
+        runner = CliRunner()
+        with patch("workbench.cli._find_repo_root", return_value=git_repo):
+            result = runner.invoke(main, ["clean", "alpha", "--purge"])
+
+        assert result.exit_code == 0, result.output
+        assert not (git_repo / ".workbench" / "alpha").exists()
+        assert (git_repo / ".workbench" / "beta" / "plan.md").exists()
+
+
 class TestConventionsCli:
     def test_init_writes_template(self, git_repo):
         runner = CliRunner()
