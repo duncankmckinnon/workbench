@@ -217,7 +217,7 @@ def attach_worktree(
     Used on resume: the worktree directory and branch still exist from the
     prior run; we need a Worktree dataclass to pass to the orchestrator
     without re-creating either. Raises RuntimeError if path or branch is
-    missing — the caller should fall back to create_worktree.
+    missing, or if the path is a plain directory rather than a git worktree.
     """
     if plan_slug:
         worktree_dir = repo / ".workbench" / plan_slug / task_id
@@ -226,7 +226,51 @@ def attach_worktree(
 
     if not worktree_dir.is_dir() or not branch_exists(repo, branch):
         raise RuntimeError(f"Cannot attach worktree for {task_id}: path or branch missing")
+    if not is_workbench_worktree(worktree_dir):
+        raise RuntimeError(f"Cannot attach worktree for {task_id}: path is not a worktree")
 
+    return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
+
+
+def restore_worktree(
+    repo: Path,
+    task_id: str,
+    task_slug: str,
+    plan_slug: str | None,
+    branch: str,
+) -> Worktree:
+    """Check out an existing task branch into its worktree path.
+
+    If a stale plain directory is occupying the path, rename it aside instead
+    of deleting it, then create a git worktree for ``branch`` at the expected
+    path. This preserves generated artifacts while allowing interrupted runs
+    to resume from the branch.
+    """
+    if plan_slug:
+        worktree_dir = repo / ".workbench" / plan_slug / task_id
+    else:
+        worktree_dir = repo / ".workbench" / task_slug
+
+    if not branch_exists(repo, branch):
+        raise RuntimeError(f"Cannot restore worktree for {task_id}: branch missing")
+    if is_workbench_worktree(worktree_dir):
+        return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
+    if worktree_dir.exists():
+        backup = worktree_dir.with_name(f"{worktree_dir.name}.stale")
+        suffix = 1
+        while backup.exists():
+            suffix += 1
+            backup = worktree_dir.with_name(f"{worktree_dir.name}.stale-{suffix}")
+        worktree_dir.rename(backup)
+
+    worktree_dir.parent.mkdir(parents=True, exist_ok=True)
+    subprocess.run(
+        ["git", "worktree", "add", str(worktree_dir), branch],
+        cwd=repo,
+        capture_output=True,
+        text=True,
+        check=True,
+    )
     return Worktree(path=worktree_dir, branch=branch, task_id=task_id)
 
 

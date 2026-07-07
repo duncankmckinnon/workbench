@@ -1816,8 +1816,8 @@ async def test_retry_failed_falls_back_when_worktree_dir_missing(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_retry_failed_no_resume_when_completed_stages_empty(tmp_path):
-    """Prior failed record with empty completed_stages → full rerun (no resume)."""
+async def test_retry_failed_reuses_branch_when_completed_stages_empty(tmp_path):
+    """Prior failed record with empty completed_stages reuses the branch but skips nothing."""
     plan = _make_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir(parents=True, exist_ok=True)
@@ -1842,9 +1842,9 @@ async def test_retry_failed_no_resume_when_completed_stages_empty(tmp_path):
         patch("workbench.orchestrator.merge_into_session") as mock_merge,
         patch("workbench.orchestrator.delete_branch"),
     ):
-        mock_create.return_value = MagicMock(
-            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
-        )
+        fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+        mock_attach.return_value = fake_wt
+        mock_create.return_value = fake_wt
         mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
 
         await run_plan(
@@ -1857,8 +1857,8 @@ async def test_retry_failed_no_resume_when_completed_stages_empty(tmp_path):
 
     assert captured["resume_completed_stages"] is None
     assert captured["prior_results"] is None
-    mock_attach.assert_not_called()
-    assert mock_create.called
+    mock_attach.assert_called_once()
+    mock_create.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -2846,6 +2846,52 @@ async def test_resume_reuses_stages_regression(tmp_path):
         assert call.args[1] != "wb/test-task"
 
     assert captured["resume_completed_stages"] == ["implementor"]
+
+
+@pytest.mark.asyncio
+async def test_resume_infers_conventional_branch_when_status_branch_missing(tmp_path):
+    """A pending status with branch=null should still reuse wb/<task-slug> if it exists."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir(parents=True, exist_ok=True)
+
+    prior = SessionStatus(plan_slug="test-plan", session_branch="workbench-1")
+    prior.record_task("task-1", status="pending", branch=None, completed_stages=[])
+    prior.save(repo)
+
+    captured = {}
+
+    async def fake_pipeline(**kwargs):
+        captured["resume_completed_stages"] = kwargs.get("resume_completed_stages")
+        return []
+
+    fake_wt = MagicMock(branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock())
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.branch_exists", return_value=True),
+        patch("workbench.orchestrator.attach_worktree", return_value=fake_wt) as mock_attach,
+        patch("workbench.orchestrator.create_worktree") as mock_create,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch") as mock_delete,
+    ):
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(
+            plan=plan,
+            repo=repo,
+            use_tmux=False,
+            session_branch="workbench-1",
+            keep_branches=True,
+        )
+
+    mock_attach.assert_called_once()
+    assert mock_attach.call_args.kwargs["branch"] == "wb/test-task"
+    mock_create.assert_not_called()
+    for call in mock_delete.call_args_list:
+        assert call.args[1] != "wb/test-task"
+    assert captured["resume_completed_stages"] is None
 
 
 @pytest.mark.asyncio
