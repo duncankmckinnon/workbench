@@ -456,7 +456,7 @@ def test_setup_global_antigravity_copies_skills(tmp_path):
 
 
 def test_setup_global_opencode_copies_skills(tmp_path):
-    """wb setup --global --agent opencode should copy skill folders to ~/.agents/skills/."""
+    """wb setup --global --agent opencode should copy skill folders to ~/.config/opencode/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -465,7 +465,7 @@ def test_setup_global_opencode_copies_skills(tmp_path):
         result = runner.invoke(main, ["setup", "--global", "--agent", "opencode"])
 
     assert result.exit_code == 0
-    skills_dir = fake_home / ".agents" / "skills"
+    skills_dir = fake_home / ".config" / "opencode" / "skills"
     assert skills_dir.is_dir()
     assert (skills_dir / "use-workbench" / "SKILL.md").exists()
     assert "Copied" in result.output
@@ -487,7 +487,7 @@ def test_setup_global_antigravity_symlinks(tmp_path):
 
 
 def test_setup_global_opencode_symlinks(tmp_path):
-    """wb setup --global --agent opencode --symlink should create symlink at ~/.agents/skills/."""
+    """wb setup --global --agent opencode --symlink should create symlink at ~/.config/opencode/skills/."""
     runner = CliRunner()
     fake_home = tmp_path / "home"
     fake_home.mkdir()
@@ -496,7 +496,7 @@ def test_setup_global_opencode_symlinks(tmp_path):
         result = runner.invoke(main, ["setup", "--global", "--agent", "opencode", "--symlink"])
 
     assert result.exit_code == 0
-    dest = fake_home / ".agents" / "skills" / "use-workbench"
+    dest = fake_home / ".config" / "opencode" / "skills" / "use-workbench"
     assert dest.is_symlink()
     assert "Linked" in result.output
 
@@ -579,15 +579,18 @@ def test_setup_antigravity_local(tmp_path, git_repo):
 
 
 def test_setup_opencode_local(tmp_path, git_repo):
-    """wb setup --agent opencode installs to <repo>/.agents/skills/."""
+    """wb setup --agent opencode installs to <repo>/.opencode/skills/ and <repo>/.agents/skills/."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
         result = runner.invoke(main, ["setup", "--agent", "opencode"])
 
     assert result.exit_code == 0
+    opencode_skill = git_repo / ".opencode" / "skills" / "use-workbench" / "SKILL.md"
+    assert opencode_skill.exists()
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
+    assert "cross-client" in result.output.lower()
 
 
 def test_setup_cursor_local(tmp_path, monkeypatch, git_repo):
@@ -647,14 +650,14 @@ def test_setup_antigravity_local_symlinks(git_repo):
 
 
 def test_setup_opencode_local_symlinks(git_repo):
-    """wb setup --agent opencode --symlink should symlink at repo level."""
+    """wb setup --agent opencode --symlink should symlink to <repo>/.opencode/skills/."""
     runner = CliRunner()
 
     with patch("workbench.cli._find_repo_root", return_value=git_repo):
         result = runner.invoke(main, ["setup", "--agent", "opencode", "--symlink"])
 
     assert result.exit_code == 0
-    dest = git_repo / ".agents" / "skills" / "use-workbench"
+    dest = git_repo / ".opencode" / "skills" / "use-workbench"
     assert dest.is_symlink()
 
 
@@ -2938,6 +2941,17 @@ def test_agents_show_builtin(git_repo):
 
     assert result.exit_code == 0
     assert "built-in" in result.output
+
+
+def test_agents_show_opencode(git_repo):
+    """wb agents show opencode should show built-in details."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "show", "opencode"])
+
+    assert result.exit_code == 0
+    assert "built-in" in result.output
+    assert "opencode" in result.output.lower()
 
 
 def test_agents_show_custom(git_repo):

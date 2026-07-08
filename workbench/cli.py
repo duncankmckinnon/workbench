@@ -439,7 +439,7 @@ def _install_skills(
         if local:
             _install_to_agents_skills(skills, repo, symlink)
 
-    elif agent in {"antigravity", "opencode"}:
+    elif agent == "antigravity":
         if local:
             target_dir = repo / ".agents" / "skills"
         else:
@@ -467,6 +467,37 @@ def _install_skills(
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                 console.print(f"  Copied {name} → {dest_dir}")
+
+    elif agent == "opencode":
+        if local:
+            target_dir = repo / ".opencode" / "skills"
+        else:
+            target_dir = Path.home() / ".config" / "opencode" / "skills"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            src_dir = src.parent
+            dest_dir = target_dir / name
+            dest = dest_dir / "SKILL.md"
+            if dest.exists() and not symlink and not update:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing {name}?", default=True):
+                    console.print(f"  [yellow]Skipped {name}[/yellow]")
+                    continue
+            if symlink:
+                if dest_dir.is_symlink():
+                    dest_dir.unlink()
+                elif dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.symlink_to(src_dir.resolve())
+                console.print(f"  Linked {name} → {dest_dir}")
+            else:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                console.print(f"  Copied {name} → {dest_dir}")
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
 
     elif agent == "copilot":
         if local:
