@@ -15,7 +15,7 @@ from .headroom import HeadroomConfig, apply_headroom_env
 from .plan_parser import Task
 from .session_metadata import SessionMetadata, merge_trace_env, with_session_metadata
 from .tmux import run_in_tmux
-from .worktree import Worktree, get_head_sha, get_main_branch
+from .worktree import Worktree, commit_worktree_changes, get_head_sha, get_main_branch
 
 if TYPE_CHECKING:
     from .directives import PipelineDirective, PromptContext
@@ -270,6 +270,22 @@ async def run_pipeline(
         if on_result:
             on_result(result)
 
+    def _commit_stage(role: Role, step: str) -> bool:
+        commit = commit_worktree_changes(worktree, f"wb: {task.id} {step}")
+        if commit.success:
+            return True
+        _record(
+            AgentResult(
+                task_id=task.id,
+                role=role,
+                status=TaskStatus.FAILED,
+                output=f"Commit failed after {step}: {commit.message}",
+                step=step,
+            )
+        )
+        _notify(TaskStatus.FAILED)
+        return False
+
     def _agent_for(role: Role) -> str:
         """Resolve effective agent_cmd for a role."""
         if profile and agent_cmd == "claude":
@@ -330,6 +346,8 @@ async def run_pipeline(
             if test_write_result.status == TaskStatus.FAILED:
                 _notify(TaskStatus.FAILED)
                 return results
+            if not _commit_stage(Role.TESTER, TDD_TEST_STAGE):
+                return results
 
         # TDD Phase 2: Implement to make tests pass
         if TDD_IMPLEMENT_STAGE not in completed:
@@ -354,6 +372,8 @@ async def run_pipeline(
 
             if impl_result.status == TaskStatus.FAILED:
                 _notify(TaskStatus.FAILED)
+                return results
+            if not _commit_stage(Role.IMPLEMENTOR, TDD_IMPLEMENT_STAGE):
                 return results
 
         # Continue to normal test verification (phase 2) and review (phase 3)
@@ -385,6 +405,8 @@ async def run_pipeline(
         if impl_result.status == TaskStatus.FAILED:
             _notify(TaskStatus.FAILED)
             return results
+        if not _commit_stage(Role.IMPLEMENTOR, "implement"):
+            return results
 
     # 2. Test (with retry loop)
     if not skip_test and Role.TESTER.value not in completed:
@@ -412,6 +434,8 @@ async def run_pipeline(
             if test_result.status == TaskStatus.FAILED:
                 # Agent itself crashed — don't retry
                 _notify(TaskStatus.FAILED)
+                return results
+            if not _commit_stage(Role.TESTER, f"test#{attempt}"):
                 return results
 
             if test_result.passed:
@@ -445,6 +469,8 @@ async def run_pipeline(
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)
+                    return results
+                if not _commit_stage(Role.FIXER, f"test-fix#{attempt}"):
                     return results
             else:
                 # Out of retries
@@ -532,6 +558,8 @@ async def run_pipeline(
 
                 if fix_result.status == TaskStatus.FAILED:
                     _notify(TaskStatus.FAILED)
+                    return results
+                if not _commit_stage(Role.FIXER, f"review-fix#{attempt}"):
                     return results
             else:
                 _notify(TaskStatus.FAILED)

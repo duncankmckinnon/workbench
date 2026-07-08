@@ -46,6 +46,72 @@ class Worktree:
         )
 
 
+@dataclass
+class CommitResult:
+    """Result of committing pending changes in a worktree."""
+
+    success: bool
+    committed: bool
+    message: str
+
+
+def commit_worktree_changes(worktree: Worktree, message: str) -> CommitResult:
+    """Stage and commit pending changes in a task worktree.
+
+    Agents often edit files without committing them. The review pipeline uses
+    commit SHAs to calculate follow-up diffs, so each successful mutating stage
+    must advance the task branch when it changed files.
+    """
+    git_marker = worktree.path / ".git"
+    if not git_marker.exists():
+        # Unit tests often use lightweight fake worktrees. Real task worktrees
+        # always have a .git file or directory.
+        return CommitResult(success=True, committed=False, message="not a git worktree")
+
+    status = subprocess.run(
+        ["git", "status", "--porcelain"],
+        cwd=worktree.path,
+        capture_output=True,
+        text=True,
+    )
+    if status.returncode != 0:
+        return CommitResult(
+            success=False,
+            committed=False,
+            message=status.stderr.strip() or "git status failed",
+        )
+    if not status.stdout.strip():
+        return CommitResult(success=True, committed=False, message="no changes")
+
+    add = subprocess.run(
+        ["git", "add", "-A"],
+        cwd=worktree.path,
+        capture_output=True,
+        text=True,
+    )
+    if add.returncode != 0:
+        return CommitResult(
+            success=False,
+            committed=False,
+            message=add.stderr.strip() or "git add failed",
+        )
+
+    commit = subprocess.run(
+        ["git", "commit", "-m", message],
+        cwd=worktree.path,
+        capture_output=True,
+        text=True,
+    )
+    if commit.returncode != 0:
+        return CommitResult(
+            success=False,
+            committed=False,
+            message=commit.stderr.strip() or commit.stdout.strip() or "git commit failed",
+        )
+
+    return CommitResult(success=True, committed=True, message=commit.stdout.strip())
+
+
 def delete_branch(repo: Path, branch: str) -> None:
     """Delete a local branch. Silently ignores errors (e.g. branch doesn't exist)."""
     subprocess.run(

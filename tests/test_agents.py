@@ -21,7 +21,7 @@ from workbench.agents import (
 from workbench.directives import FixerDirective, ImplementorDirective, PromptContext
 from workbench.headroom import HeadroomConfig
 from workbench.plan_parser import Task
-from workbench.worktree import Worktree
+from workbench.worktree import CommitResult, Worktree
 
 
 @pytest.fixture
@@ -416,6 +416,86 @@ class TestOnResultStreaming:
             )
 
         assert [r.role for r in collected] == [Role.IMPLEMENTOR]
+
+    def test_pipeline_commits_mutating_stages_before_followup_review(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        review_calls = {"n": 0}
+
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            if directive.role == Role.REVIEWER:
+                review_calls["n"] += 1
+                return _result(Role.REVIEWER, passed=review_calls["n"] >= 2)
+            if directive.role == Role.FIXER:
+                return _done(Role.FIXER)
+            return _result(directive.role, passed=True)
+
+        commits: list[str] = []
+
+        def mock_commit(worktree, message):
+            commits.append(message)
+            return CommitResult(success=True, committed=True, message="committed")
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch("workbench.agents.commit_worktree_changes", side_effect=mock_commit),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                    max_retries=1,
+                )
+            )
+
+        assert [r.role for r in results] == [
+            Role.IMPLEMENTOR,
+            Role.TESTER,
+            Role.REVIEWER,
+            Role.FIXER,
+            Role.REVIEWER,
+        ]
+        assert commits == [
+            "wb: task-1 implement",
+            "wb: task-1 test#1",
+            "wb: task-1 review-fix#1",
+        ]
+
+    def test_pipeline_fails_when_mutating_stage_commit_fails(
+        self, pipeline_task, pipeline_worktree, tmp_path
+    ):
+        async def mock_run_agent(directive, ctx, *args, **kwargs):
+            return _result(directive.role, passed=True)
+
+        with (
+            patch("workbench.agents.run_agent", side_effect=mock_run_agent),
+            patch(
+                "workbench.agents.commit_worktree_changes",
+                return_value=CommitResult(
+                    success=False,
+                    committed=False,
+                    message="nothing added to commit",
+                ),
+            ),
+            patch("workbench.agents.get_main_branch", return_value="main"),
+            patch("workbench.agents.get_head_sha", return_value="abc"),
+        ):
+            results = asyncio.run(
+                run_pipeline(
+                    task=pipeline_task,
+                    worktree=pipeline_worktree,
+                    repo=tmp_path,
+                    use_tmux=False,
+                )
+            )
+
+        assert [r.role for r in results] == [Role.IMPLEMENTOR, Role.IMPLEMENTOR]
+        assert results[-1].status == TaskStatus.FAILED
+        assert "Commit failed after implement" in results[-1].output
 
     def test_pipeline_works_without_on_result_callback(
         self, pipeline_task, pipeline_worktree, tmp_path

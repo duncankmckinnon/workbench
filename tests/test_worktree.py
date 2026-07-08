@@ -5,8 +5,10 @@ import subprocess
 import pytest
 
 from workbench.worktree import (
+    CommitResult,
     Worktree,
     attach_worktree,
+    commit_worktree_changes,
     create_session_branch,
     create_worktree,
     get_diff,
@@ -108,6 +110,54 @@ def test_get_diff(git_repo):
         diff = get_diff(wt, session)
         assert "new.txt" in diff
         assert "hello" in diff
+    finally:
+        wt.cleanup()
+
+
+def test_commit_worktree_changes_commits_dirty_worktree(git_repo):
+    session = create_session_branch(git_repo)
+    wt = create_worktree(
+        git_repo, "task-1", "commit-dirty", plan_slug="testplan", base_branch=session
+    )
+    try:
+        before = get_head_sha(wt)
+        (wt.path / "agent-change.txt").write_text("changed by agent")
+
+        result = commit_worktree_changes(wt, "wb: task-1 implement")
+
+        after = get_head_sha(wt)
+        assert isinstance(result, CommitResult)
+        assert result.success is True
+        assert result.committed is True
+        assert after != before
+
+        show = subprocess.run(
+            ["git", "show", "--stat", "--oneline", "HEAD"],
+            cwd=wt.path,
+            capture_output=True,
+            text=True,
+            check=True,
+        )
+        assert "wb: task-1 implement" in show.stdout
+        assert "agent-change.txt" in show.stdout
+    finally:
+        wt.cleanup()
+
+
+def test_commit_worktree_changes_noops_when_clean(git_repo):
+    session = create_session_branch(git_repo)
+    wt = create_worktree(
+        git_repo, "task-1", "commit-clean", plan_slug="testplan", base_branch=session
+    )
+    try:
+        before = get_head_sha(wt)
+
+        result = commit_worktree_changes(wt, "wb: task-1 implement")
+
+        assert result.success is True
+        assert result.committed is False
+        assert result.message == "no changes"
+        assert get_head_sha(wt) == before
     finally:
         wt.cleanup()
 
