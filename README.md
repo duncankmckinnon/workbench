@@ -37,6 +37,7 @@ Workbench dispatches to any agent CLI you wire up. Adapters live in `.workbench/
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
 - [Google Antigravity (`agy`)](https://github.com/google/agy)
+- [OpenCode](https://opencode.ai)
 - [Codex](https://github.com/openai/codex)
 - [Cursor CLI](https://cursor.com/docs/cli/overview)
 - [Copilot CLI](https://github.com/features/copilot/cli)
@@ -55,10 +56,12 @@ This creates a `.workbench/` directory in your repo and installs the bundled ski
 wb setup                           # auto-detect agent, install skills locally
 wb setup --agent claude            # install to <repo>/.claude/skills/ + .agents/skills/
 wb setup --agent antigravity       # install to <repo>/.agents/skills/
+wb setup --agent opencode          # install to <repo>/.agents/skills/
 wb setup --agent manual            # print paths for manual setup
 wb setup --global                  # install skills to user-level paths only (no .workbench/)
 wb setup --global --agent claude   # install to ~/.claude/skills/
 wb setup --global --agent antigravity # install to ~/.agents/skills/
+wb setup --global --agent opencode # install to ~/.agents/skills/
 wb setup --symlink                 # symlink instead of copy (stays in sync with updates)
 wb setup --update                  # force-update skills to the latest installed version
 wb setup --profile                 # also create a profile.yaml with the detected agent
@@ -371,11 +374,12 @@ The tester writes comprehensive failing tests first. The implementor writes code
 
 ## Agents
 
-Workbench ships with built-in adapters for Claude Code, Google Antigravity (`agy`), Codex, Cursor CLI, and Copilot CLI. Use `--agent` to select one:
+Workbench ships with built-in adapters for Claude Code, Google Antigravity (`agy`), OpenCode, Codex, Cursor CLI, and Copilot CLI. Use `--agent` to select one:
 
 ```bash
 wb run plan.md --agent claude        # default
 wb run plan.md --agent antigravity
+wb run plan.md --agent opencode
 wb run plan.md --agent codex
 wb run plan.md --agent cursor
 wb run plan.md --agent copilot
@@ -415,7 +419,7 @@ wb agents add my-agent --command new-cli   # update an existing agent
 wb agents remove my-agent         # remove a custom agent
 ```
 
-`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Antigravity, Codex, Cursor, Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
+`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Antigravity, OpenCode, Codex, Cursor, Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
 
 ## Directive overrides
 
@@ -560,7 +564,7 @@ For finer-grained control (waves, directive overrides, selective tasks), use `wb
 
 | Flag | Description |
 |---|---|
-| `--agent NAME` | Target platform: `claude`, `antigravity`, `cursor`, `codex`, `copilot`, `manual` (auto-detected if omitted) |
+| `--agent NAME` | Target platform: `claude`, `antigravity`, `opencode`, `cursor`, `codex`, `copilot`, `manual` (auto-detected if omitted) |
 | `--global` | Install skills to user-level paths only (skip `.workbench/` creation) |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |

@@ -156,13 +156,19 @@ class TestReadmeInstallSection:
 
 
 class TestReadmeRequirements:
-    """Requirements section must list Antigravity as a supported agent CLI."""
+    """Requirements section must list Antigravity and OpenCode as supported agent CLIs."""
 
     def test_antigravity_in_requirements(self):
         content = _read(README)
         assert (
             "antigravity" in content.lower()
         ), "README.md requirements should mention Antigravity as a supported agent"
+
+    def test_opencode_in_requirements(self):
+        content = _read(README)
+        assert (
+            "opencode" in content.lower()
+        ), "README.md requirements should mention OpenCode as a supported agent"
 
 
 # ---------------------------------------------------------------------------
@@ -221,13 +227,19 @@ class TestSkillProfilesSection:
 
 
 class TestSkillAntigravitySupport:
-    """SKILL.md must mention Antigravity as a supported agent."""
+    """SKILL.md must mention Antigravity and OpenCode as supported agents."""
 
     def test_antigravity_mentioned(self):
         content = _read(SKILL_MD)
         assert (
             "antigravity" in content.lower()
         ), "SKILL.md should mention Antigravity as a supported agent"
+
+    def test_opencode_mentioned(self):
+        content = _read(SKILL_MD)
+        assert (
+            "opencode" in content.lower()
+        ), "SKILL.md should mention OpenCode as a supported agent"
 
 
 # ---------------------------------------------------------------------------
@@ -301,6 +313,12 @@ class TestDocConsistency:
         skill = _read(SKILL_MD)
         assert "antigravity" in readme.lower()
         assert "antigravity" in skill.lower()
+
+    def test_both_mention_opencode(self):
+        readme = _read(README)
+        skill = _read(SKILL_MD)
+        assert "opencode" in readme.lower()
+        assert "opencode" in skill.lower()
 
     def test_both_document_profile_commands(self):
         readme = _read(README)

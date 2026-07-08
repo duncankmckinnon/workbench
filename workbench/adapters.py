@@ -289,6 +289,21 @@ class AntigravityAdapter(AgentAdapter):
         )
 
 
+class OpencodeAdapter(AgentAdapter):
+    """Adapter for the OpenCode CLI."""
+
+    name = "opencode"
+
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="opencode",
+            args=["run", "--auto", "{prompt}"],
+            output_format=OutputFormat.TEXT,
+            inject_env=True,
+            model_flag="--model",
+        )
+
+
 class GenericAdapter(AgentAdapter):
     """Fallback adapter for unknown agent commands."""
 
@@ -301,6 +316,7 @@ BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
     "claude": ClaudeAdapter,
     "codex": CodexAdapter,
     "antigravity": AntigravityAdapter,
+    "opencode": OpencodeAdapter,
     "cursor": CursorAdapter,
     "copilot": CopilotAdapter,
 }
@@ -342,7 +358,7 @@ def get_adapter(
     1. Iterate config_paths (highest precedence first). For each path that
        exists and parses, check if it defines agent_cmd. Return that
        ConfigAdapter if so.
-    2. Built-in adapters (claude, codex, antigravity, cursor, copilot).
+    2. Built-in adapters (claude, codex, antigravity, opencode, cursor, copilot).
     3. GenericAdapter fallback.
 
     Per-agent precedence: the highest-precedence file containing agent_cmd wins

@@ -313,6 +313,7 @@ def _detect_agent() -> str:
     _BINARY_TO_NAME: dict[str, str] = {
         "claude": "claude",
         "agy": "antigravity",
+        "opencode": "opencode",
         "codex": "codex",
         "agent": "cursor",
         "copilot": "copilot",
@@ -335,6 +336,7 @@ def _detect_agent() -> str:
 _PLATFORM_LABEL = {
     "claude": "command",
     "antigravity": "skill",
+    "opencode": "skill",
     "cursor": "rule",
     "codex": "instruction",
     "copilot": "skill",
@@ -466,6 +468,37 @@ def _install_skills(
                 shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
                 console.print(f"  Copied {name} → {dest_dir}")
 
+    elif agent == "opencode":
+        if local:
+            target_dir = repo / ".opencode" / "skills"
+        else:
+            target_dir = Path.home() / ".config" / "opencode" / "skills"
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for name, src in skills:
+            src_dir = src.parent
+            dest_dir = target_dir / name
+            dest = dest_dir / "SKILL.md"
+            if dest.exists() and not symlink and not update:
+                if dest.read_text() == src.read_text():
+                    console.print(f"  [dim]Skipping {name} (already up to date)[/dim]")
+                    continue
+                if not click.confirm(f"  Overwrite existing {name}?", default=True):
+                    console.print(f"  [yellow]Skipped {name}[/yellow]")
+                    continue
+            if symlink:
+                if dest_dir.is_symlink():
+                    dest_dir.unlink()
+                elif dest_dir.exists():
+                    shutil.rmtree(dest_dir)
+                dest_dir.symlink_to(src_dir.resolve())
+                console.print(f"  Linked {name} → {dest_dir}")
+            else:
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src_dir, dest_dir, dirs_exist_ok=True)
+                console.print(f"  Copied {name} → {dest_dir}")
+        if local:
+            _install_to_agents_skills(skills, repo, symlink)
+
     elif agent == "copilot":
         if local:
             target_dir = repo / ".github" / "skills"
@@ -575,7 +608,9 @@ def main():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
+    help=(
+        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
@@ -1273,7 +1308,9 @@ def plan():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
+    help=(
+        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
@@ -2123,7 +2160,10 @@ def stop(cleanup: bool, repo: Path | None):
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI for merge conflict resolution (claude, antigravity, codex, cursor, or custom).",
+    help=(
+        "Agent CLI for merge conflict resolution "
+        "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option(
     "--repo",
@@ -2771,7 +2811,9 @@ def pull_request_cmd(
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "antigravity", "cursor", "codex", "copilot", "manual"]),
+    type=click.Choice(
+        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+    ),
     default=None,
     help="Target agent platform.",
 )
@@ -2858,7 +2900,9 @@ def setup(
 @main.command(deprecated=True, hidden=True)
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "antigravity", "cursor", "codex", "manual"]),
+    type=click.Choice(
+        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+    ),
     default=None,
 )
 @click.option("--symlink", is_flag=True)
@@ -3179,8 +3223,10 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
 BUILTIN_AGENTS = {
     "claude": "Claude Code CLI (default)",
     "antigravity": "Google Antigravity (agy)",
+    "opencode": "OpenCode CLI",
     "codex": "Codex CLI (OpenAI)",
     "cursor": "Cursor CLI (agent command)",
+    "copilot": "GitHub Copilot CLI",
 }
 
 
