@@ -313,6 +313,7 @@ def _detect_agent() -> str:
     _BINARY_TO_NAME: dict[str, str] = {
         "claude": "claude",
         "agy": "antigravity",
+        "opencode": "opencode",
         "codex": "codex",
         "agent": "cursor",
         "copilot": "copilot",
@@ -335,6 +336,7 @@ def _detect_agent() -> str:
 _PLATFORM_LABEL = {
     "claude": "command",
     "antigravity": "skill",
+    "opencode": "skill",
     "cursor": "rule",
     "codex": "instruction",
     "copilot": "skill",
@@ -437,7 +439,7 @@ def _install_skills(
         if local:
             _install_to_agents_skills(skills, repo, symlink)
 
-    elif agent == "antigravity":
+    elif agent in {"antigravity", "opencode"}:
         if local:
             target_dir = repo / ".agents" / "skills"
         else:
@@ -575,7 +577,9 @@ def main():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
+    help=(
+        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
 @click.option(
@@ -1273,7 +1277,9 @@ def plan():
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI command (claude, antigravity, codex, cursor, copilot, or custom).",
+    help=(
+        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
 @click.option("--no-tmux", is_flag=True, help="Run without tmux.")
@@ -2123,7 +2129,10 @@ def stop(cleanup: bool, repo: Path | None):
 @click.option(
     "--agent",
     default="claude",
-    help="Agent CLI for merge conflict resolution (claude, antigravity, codex, cursor, or custom).",
+    help=(
+        "Agent CLI for merge conflict resolution "
+        "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+    ),
 )
 @click.option(
     "--repo",
@@ -2771,7 +2780,9 @@ def pull_request_cmd(
 @main.command()
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "antigravity", "cursor", "codex", "copilot", "manual"]),
+    type=click.Choice(
+        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+    ),
     default=None,
     help="Target agent platform.",
 )
@@ -2858,7 +2869,9 @@ def setup(
 @main.command(deprecated=True, hidden=True)
 @click.option(
     "--agent",
-    type=click.Choice(["claude", "antigravity", "cursor", "codex", "manual"]),
+    type=click.Choice(
+        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+    ),
     default=None,
 )
 @click.option("--symlink", is_flag=True)
@@ -3179,8 +3192,10 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
 BUILTIN_AGENTS = {
     "claude": "Claude Code CLI (default)",
     "antigravity": "Google Antigravity (agy)",
+    "opencode": "OpenCode CLI",
     "codex": "Codex CLI (OpenAI)",
     "cursor": "Cursor CLI (agent command)",
+    "copilot": "GitHub Copilot CLI",
 }
 
 

@@ -9,7 +9,7 @@ How to write effective plans for the `wb` CLI to execute with parallel AI agents
 
 ## Overview
 
-Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, Codex, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
+Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, OpenCode, Codex, Cursor CLI, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
 
 Each task becomes a standalone agent session — the agent only sees its own task description, not the rest of the plan. This means the plan must be thorough enough that each task is self-sufficient.
 
@@ -409,7 +409,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `antigravity`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 
@@ -510,11 +510,13 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb conventions edit` / `wb conventions show` / `wb conventions delete` — manage the conventions file
 - `wb setup` — create .workbench/, install skills locally, prepare repo
 - `wb setup --agent antigravity` — install skills for Google Antigravity CLI
+- `wb setup --agent opencode` — install skills for OpenCode CLI
 - `wb setup --profile` — also create a profile.yaml with the detected agent
 - `wb setup --update` — force-update skills to the latest version
 - `wb setup --global` — install skills to user-level paths (no .workbench/ creation)
 - `wb setup --global --agent claude` — install to ~/.claude/skills/
 - `wb setup --global --agent antigravity` — install to ~/.agents/skills/
+- `wb setup --global --agent opencode` — install to ~/.agents/skills/
 - `wb agents init` — create agents.yaml with built-in adapter configs
 - `wb agents list` — show built-in and custom agents
 - `wb agents add <name> --command <cmd>` — add a custom agent

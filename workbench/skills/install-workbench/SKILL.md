@@ -91,6 +91,7 @@ At least one of:
 |-------|-------|---------|
 | Claude Code | `claude --version` | [docs.anthropic.com](https://docs.anthropic.com/en/docs/claude-code) |
 | Antigravity CLI | `agy --version` | [github.com/google/agy](https://github.com/google/agy) |
+| OpenCode CLI | `opencode --version` | [opencode.ai](https://opencode.ai) |
 | Codex | `codex --version` | [github.com/openai/codex](https://github.com/openai/codex) |
 | Cursor CLI | `agent --version` | [cursor.com/docs/cli](https://cursor.com/docs/cli/overview) |
 | Copilot CLI | `copilot --version` | [github.com/features/copilot/cli](https://github.com/features/copilot/cli) |
@@ -150,6 +151,7 @@ This creates `.workbench/`, installs bundled skill files for your agent platform
 wb setup                           # auto-detect agent, install skills locally
 wb setup --agent claude            # install skills for Claude Code
 wb setup --agent antigravity       # install skills for Antigravity CLI
+wb setup --agent opencode          # install skills for OpenCode CLI
 wb setup --agent cursor            # install skills for Cursor CLI
 wb setup --profile                 # also create a profile.yaml
 wb setup --global                  # install skills to user-level paths only

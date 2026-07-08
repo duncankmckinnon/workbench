@@ -15,6 +15,7 @@ from workbench.adapters import (
     ConfigAdapter,
     CopilotAdapter,
     GenericAdapter,
+    OpencodeAdapter,
     OutputFormat,
     default_agents_config,
     get_adapter,
@@ -139,6 +140,67 @@ class TestAntigravityAdapter:
         assert cmd[0] == "agy"
         assert cmd[1] == "-p"
         assert cmd[2] == prompt  # prompt passed as-is, shell escaping is caller's job
+
+    def test_parse_output_plain_text(self):
+        text, cost = self.adapter.parse_output("  done successfully  \n")
+        assert text == "done successfully"
+        assert cost == {}
+
+    def test_parse_output_empty(self):
+        text, cost = self.adapter.parse_output("")
+        assert text == ""
+        assert cost == {}
+
+    def test_parse_output_multiline(self):
+        raw = "line one\nline two\nline three"
+        text, cost = self.adapter.parse_output(raw)
+        assert text == raw
+        assert cost == {}
+
+    def test_output_format_is_text(self):
+        assert self.adapter.config.output_format == OutputFormat.TEXT
+
+    def test_inject_env_true(self):
+        assert self.adapter.config.inject_env is True
+
+    def test_model_flag(self):
+        assert self.adapter.config.model_flag == "--model"
+
+    def test_is_agent_adapter(self):
+        assert isinstance(self.adapter, AgentAdapter)
+
+
+class TestOpencodeAdapter:
+    def setup_method(self):
+        self.adapter = OpencodeAdapter()
+
+    def test_name(self):
+        assert self.adapter.name == "opencode"
+
+    def test_build_command_no_model(self, tmp_path):
+        cmd = self.adapter.build_command("refactor module", tmp_path)
+        assert cmd == ["opencode", "run", "--auto", "refactor module"]
+
+    def test_build_command_with_model(self, tmp_path):
+        cmd = self.adapter.build_command(
+            "refactor module", tmp_path, model="anthropic/claude-sonnet-4"
+        )
+        assert cmd == [
+            "opencode",
+            "run",
+            "--auto",
+            "refactor module",
+            "--model",
+            "anthropic/claude-sonnet-4",
+        ]
+
+    def test_build_command_prompt_with_special_chars(self, tmp_path):
+        prompt = 'fix the "bug" in foo\'s module & run tests'
+        cmd = self.adapter.build_command(prompt, tmp_path)
+        assert cmd[0] == "opencode"
+        assert cmd[1] == "run"
+        assert cmd[2] == "--auto"
+        assert cmd[3] == prompt
 
     def test_parse_output_plain_text(self):
         text, cost = self.adapter.parse_output("  done successfully  \n")
@@ -524,19 +586,29 @@ class TestBuildCommandModel:
 
 class TestDefaultAgentsConfigModelFlag:
     def test_builtin_adapters_have_model_flag(self):
-        for name in ("claude", "codex", "antigravity", "cursor", "copilot"):
+        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
             adapter = BUILTIN_ADAPTERS[name]()
             assert adapter.config.model_flag == "--model", name
 
     def test_default_agents_config_surfaces_model_flag(self):
         cfg = default_agents_config()
-        for name in ("claude", "codex", "antigravity", "cursor", "copilot"):
+        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
             assert cfg[name].get("model_flag") == "--model", name
 
     def test_default_agents_config_omits_model_when_unset(self):
         cfg = default_agents_config()
-        for name in ("claude", "codex", "antigravity", "cursor", "copilot"):
+        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
             assert "model" not in cfg[name], name
+
+    def test_default_agents_config_includes_opencode(self):
+        cfg = default_agents_config()
+        assert cfg["opencode"] == {
+            "command": "opencode",
+            "args": ["run", "--auto", "{prompt}"],
+            "output_format": "text",
+            "inject_env": True,
+            "model_flag": "--model",
+        }
 
 
 class TestGetAdapter:
@@ -551,6 +623,10 @@ class TestGetAdapter:
     def test_returns_antigravity_adapter(self):
         adapter = get_adapter("antigravity")
         assert isinstance(adapter, AntigravityAdapter)
+
+    def test_returns_opencode_adapter(self):
+        adapter = get_adapter("opencode")
+        assert isinstance(adapter, OpencodeAdapter)
 
     def test_returns_copilot_adapter(self):
         adapter = get_adapter("copilot")
