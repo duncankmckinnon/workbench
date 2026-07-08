@@ -40,6 +40,7 @@ from .worktree import (
     get_merged_branches,
     merge_into_session,
     push_session_branch,
+    restore_worktree,
 )
 
 
@@ -153,6 +154,23 @@ def _status_table(states: list[TaskState]) -> Table:
         )
 
     return table
+
+
+def _resume_branch_for_task(
+    repo: Path,
+    task: Task,
+    prior_record: object | None,
+) -> str | None:
+    """Find an existing branch that should be reused for a task run."""
+    branch = getattr(prior_record, "branch", None)
+    if branch and branch_exists(repo, branch):
+        return branch
+
+    conventional = f"wb/{task.slug}"
+    if prior_record is not None and branch_exists(repo, conventional):
+        return conventional
+
+    return None
 
 
 async def run_plan(
@@ -356,46 +374,66 @@ async def run_plan(
                     if state.status == TaskStatus.DONE:
                         continue
 
-                    # Resume path: when retry_failed is set and the prior status
-                    # records a failed task with completed stages on an existing
-                    # branch, reuse the on-disk worktree instead of wiping it.
+                    # Resume path: if a prior run left a task branch behind,
+                    # keep using that branch. Completed stages only control
+                    # which pipeline stages can be skipped.
                     prior_record = prior.tasks.get(state.task.id) if prior else None
                     resume_stages = list(prior_record.completed_stages) if prior_record else []
-                    # For TDD tasks, only reuse the existing branch when both TDD
-                    # phases completed. A partial tdd-implement run may have left
-                    # broken commits on the branch; falling back to create_worktree
-                    # guarantees a clean slate.
-                    tdd_safe = not tdd or (
-                        TDD_TEST_STAGE in resume_stages and TDD_IMPLEMENT_STAGE in resume_stages
+                    tdd_safe = (
+                        not tdd
+                        or not resume_stages
+                        or (
+                            TDD_TEST_STAGE in resume_stages
+                            and TDD_IMPLEMENT_STAGE in resume_stages
+                        )
                     )
-                    can_resume = (
-                        bool(resume_stages)
-                        and prior_record is not None
-                        and prior_record.status == "failed"
-                        and prior_record.branch is not None
-                        and branch_exists(repo, prior_record.branch)
-                        and tdd_safe
+                    resume_branch = (
+                        _resume_branch_for_task(repo, state.task, prior_record)
+                        if tdd_safe
+                        else None
                     )
-                    if can_resume:
+                    if resume_branch is not None:
                         try:
-                            wt = attach_worktree(
-                                repo,
-                                state.task.id,
-                                state.task.slug,
-                                plan_slug=plan_slug,
-                                branch=prior_record.branch,
-                            )
+                            try:
+                                wt = attach_worktree(
+                                    repo,
+                                    state.task.id,
+                                    state.task.slug,
+                                    plan_slug=plan_slug,
+                                    branch=resume_branch,
+                                )
+                            except RuntimeError:
+                                wt = restore_worktree(
+                                    repo,
+                                    state.task.id,
+                                    state.task.slug,
+                                    plan_slug=plan_slug,
+                                    branch=resume_branch,
+                                )
                             state.worktree = wt
                             state.resume_stages = resume_stages
                             state.prior_results = []
-                            console.print(
-                                f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
-                                f"from after {resume_stages[-1]} "
-                                f"(skipping {len(resume_stages)} stage(s))"
+                            await session_status.update_task(
+                                repo,
+                                state.task.id,
+                                status=state.status.value,
+                                branch=wt.branch,
+                                last_agent=getattr(prior_record, "last_agent", ""),
+                                completed_stages=resume_stages,
                             )
+                            if resume_stages:
+                                console.print(
+                                    f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                    f"from after {resume_stages[-1]} "
+                                    f"(skipping {len(resume_stages)} stage(s))"
+                                )
+                            else:
+                                console.print(
+                                    f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                    f"on {wt.branch}"
+                                )
                             continue
-                        except RuntimeError:
-                            # Worktree dir was wiped between runs (e.g. `wb clean`).
+                        except Exception:
                             pass
 
                     # Clean up existing worktree/branch from a prior run (e.g. --task re-run)
@@ -417,6 +455,14 @@ async def run_plan(
                             base_branch=session_branch,
                         )
                         state.worktree = wt
+                        await session_status.update_task(
+                            repo,
+                            state.task.id,
+                            status=state.status.value,
+                            branch=wt.branch,
+                            last_agent="",
+                            completed_stages=[],
+                        )
                     except Exception as e:
                         state.status = TaskStatus.FAILED
                         state.results.append(
@@ -737,37 +783,62 @@ async def run_plan(
                             resume_stages = (
                                 list(prior_record.completed_stages) if prior_record else []
                             )
-                            tdd_safe = not tdd or (
-                                TDD_TEST_STAGE in resume_stages
-                                and TDD_IMPLEMENT_STAGE in resume_stages
+                            tdd_safe = (
+                                not tdd
+                                or not resume_stages
+                                or (
+                                    TDD_TEST_STAGE in resume_stages
+                                    and TDD_IMPLEMENT_STAGE in resume_stages
+                                )
                             )
-                            can_resume = (
-                                bool(resume_stages)
-                                and prior_record is not None
-                                and prior_record.branch is not None
-                                and branch_exists(repo, prior_record.branch)
-                                and tdd_safe
+                            resume_branch = (
+                                _resume_branch_for_task(repo, state.task, prior_record)
+                                if tdd_safe
+                                else None
                             )
 
-                            if can_resume:
+                            if resume_branch is not None:
                                 try:
-                                    wt = attach_worktree(
-                                        repo,
-                                        state.task.id,
-                                        state.task.slug,
-                                        plan_slug=plan_slug,
-                                        branch=prior_record.branch,
-                                    )
+                                    try:
+                                        wt = attach_worktree(
+                                            repo,
+                                            state.task.id,
+                                            state.task.slug,
+                                            plan_slug=plan_slug,
+                                            branch=resume_branch,
+                                        )
+                                    except RuntimeError:
+                                        wt = restore_worktree(
+                                            repo,
+                                            state.task.id,
+                                            state.task.slug,
+                                            plan_slug=plan_slug,
+                                            branch=resume_branch,
+                                        )
                                     state.worktree = wt
                                     state.resume_stages = resume_stages
                                     state.prior_results = []
-                                    console.print(
-                                        f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
-                                        f"from after {resume_stages[-1]} "
-                                        f"(skipping {len(resume_stages)} stage(s))"
+                                    await session_status.update_task(
+                                        repo,
+                                        state.task.id,
+                                        status=state.status.value,
+                                        branch=wt.branch,
+                                        last_agent=getattr(prior_record, "last_agent", ""),
+                                        completed_stages=resume_stages,
                                     )
+                                    if resume_stages:
+                                        console.print(
+                                            f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                            f"from after {resume_stages[-1]} "
+                                            f"(skipping {len(resume_stages)} stage(s))"
+                                        )
+                                    else:
+                                        console.print(
+                                            f"[bold cyan]Resuming {state.task.id}[/bold cyan] "
+                                            f"on {wt.branch}"
+                                        )
                                     continue
-                                except RuntimeError:
+                                except Exception:
                                     pass
 
                             # Fall back: wipe and recreate
@@ -785,6 +856,14 @@ async def run_plan(
                                     base_branch=session_branch,
                                 )
                                 state.worktree = wt
+                                await session_status.update_task(
+                                    repo,
+                                    state.task.id,
+                                    status=state.status.value,
+                                    branch=wt.branch,
+                                    last_agent="",
+                                    completed_stages=[],
+                                )
                             except Exception as e:
                                 state.status = TaskStatus.FAILED
                                 state.results.append(

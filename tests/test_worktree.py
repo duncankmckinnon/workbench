@@ -18,6 +18,7 @@ from workbench.worktree import (
     iter_worktree_dirs,
     merge_into_session,
     push_session_branch,
+    restore_worktree,
 )
 
 
@@ -609,6 +610,58 @@ def test_attach_worktree_raises_when_branch_missing(git_repo):
             plan_slug="myplan",
             branch="wb/lonely",
         )
+
+
+def test_attach_worktree_raises_when_path_is_plain_dir(git_repo):
+    """A stale plain directory must not be treated as an attached worktree."""
+    session = create_session_branch(git_repo)
+    subprocess.run(
+        ["git", "branch", "--no-track", "wb/plain", session],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    plan_dir = git_repo / ".workbench" / "myplan" / "task-1"
+    plan_dir.mkdir(parents=True)
+
+    with pytest.raises(RuntimeError, match="path is not a worktree"):
+        attach_worktree(
+            git_repo,
+            task_id="task-1",
+            task_slug="plain",
+            plan_slug="myplan",
+            branch="wb/plain",
+        )
+
+
+def test_restore_worktree_moves_stale_dir_and_checks_out_branch(git_repo):
+    """restore_worktree recovers when a stale plain directory blocks checkout."""
+    session = create_session_branch(git_repo)
+    subprocess.run(
+        ["git", "branch", "--no-track", "wb/restore", session],
+        cwd=git_repo,
+        capture_output=True,
+        check=True,
+    )
+    plan_dir = git_repo / ".workbench" / "myplan" / "task-1"
+    plan_dir.mkdir(parents=True)
+    (plan_dir / "note.txt").write_text("stale")
+
+    restored = restore_worktree(
+        git_repo,
+        task_id="task-1",
+        task_slug="restore",
+        plan_slug="myplan",
+        branch="wb/restore",
+    )
+
+    try:
+        assert restored.path == plan_dir
+        assert is_workbench_worktree(restored.path)
+        stale_note = git_repo / ".workbench" / "myplan" / "task-1.stale" / "note.txt"
+        assert stale_note.read_text() == "stale"
+    finally:
+        restored.cleanup()
 
 
 def test_attach_worktree_uses_plan_scoped_path(git_repo):
