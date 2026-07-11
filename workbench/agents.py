@@ -641,8 +641,16 @@ async def run_merge_resolver(
 
 
 def _load_plan_guide() -> str:
-    """Load the bundled plan-writing guide."""
-    return resources.files("workbench.directive_texts").joinpath("plan_guide.md").read_text()
+    """Load the plan-writing guide from the plan-workbench skill.
+
+    The skill is the single source of truth for plan-authoring conventions;
+    the planner prompt is built from the same text a human would read.
+    """
+    text = resources.files("workbench.skills").joinpath("plan-workbench", "SKILL.md").read_text()
+    if text.startswith("---"):
+        frontmatter_end = text.index("\n---", 3)
+        text = text[frontmatter_end + len("\n---") :].lstrip("\n")
+    return text
 
 
 async def run_planner(

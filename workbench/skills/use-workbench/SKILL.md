@@ -1,250 +1,25 @@
 ---
 name: use-workbench
-description: Use when writing or editing a workbench plan (.workbench/*.md), designing task graphs for parallel agent execution, or preparing work for the wb CLI to dispatch
+description: Use when running, resuming, or troubleshooting `wb` execution of a workbench plan — pipeline stages, failure recovery, wave control, branching strategy, profiles, and TDD mode. For writing or editing the plan file itself, use the plan-workbench skill.
 ---
 
-# Writing Workbench Plans
+# Running Workbench Plans
 
-How to write effective plans for the `wb` CLI to execute with parallel AI agents.
+How to run, resume, and troubleshoot the `wb` CLI once a plan already exists.
+
+**To write or edit a plan file (`.workbench/<name>/plan.md`), use the `plan-workbench` skill instead** — it covers plan structure, frontmatter, breaking directives into tasks, conventions handling, and testing directives. This skill picks up from there: executing that plan, handling failures, and configuring how agents run.
 
 ## Overview
 
 Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, OpenCode, Codex, Cursor CLI, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
 
-Each task becomes a standalone agent session — the agent only sees its own task description, not the rest of the plan. This means the plan must be thorough enough that each task is self-sufficient.
-
 ## When to Use
 
-- Writing a new `.workbench/*.md` plan file
-- Breaking a feature or refactor into parallel agent tasks
-- Reviewing whether a plan will execute correctly before running `wb run`
-- Debugging why agents produced incorrect output (usually a plan clarity issue)
-
-## Plan Format
-
-```markdown
-# Plan Title
-
-## Context
-
-<What is this project? What are we building? Why?>
-
-<Key architectural decisions and constraints>
-
-## Conventions
-
-<Project-specific patterns agents must follow:>
-- <Language/framework version>
-- <Import conventions>
-- <Error handling patterns>
-- <Naming conventions>
-- <Test patterns and test command>
-
-## Task: Short title
-Files: src/auth.py, src/middleware.py
-Depends: database-setup
-
-Detailed description of what to implement...
-
-### Expected behavior
-<Concrete specification of what the code should do>
-
-### Test plan
-<What tests to write, what command to run, what passing looks like>
-```
-
-## Plan run-config (frontmatter)
-
-Plans can declare run-time defaults in a `---`-delimited YAML block at the very top of the file, before `# Title`:
-
-```markdown
----
-session_branch: workbench-auth
-base: feature-auth
-tdd: true
-agent: claude
-max_concurrent: 6
-profile_name: fast
----
-# Auth refactor
-
-## Context
-...
-```
-
-### Schema
-
-| Key | CLI flag | Type |
-|---|---|---|
-| `session_branch` | `-b` / `--session-branch` | string (alias of `name`) |
-| `name` | `--name` | string (alias of `session_branch`) |
-| `base` | `--base` | string |
-| `local` | `--local` | bool |
-| `agent` | `--agent` | string |
-| `profile` | `--profile` | string (path) |
-| `profile_name` | `--profile-name` | string |
-| `max_concurrent` | `-j` / `--max-concurrent` | int (>= 1) |
-| `max_retries` | `--max-retries` | int (>= 0) |
-| `tdd` | `--tdd` | bool |
-| `skip_test` | `--skip-test` | bool |
-| `skip_review` | `--skip-review` | bool |
-| `retry_failed` | `--retry-failed` | bool |
-| `fail_fast` | `--fail-fast` | bool |
-| `cleanup` | `--cleanup` | bool |
-| `keep_branches` | `--keep-branches` | bool |
-| `push` | `--push` | bool |
-| `final_review` | `--final-review` | bool |
-
-### Precedence
-
-CLI flag > frontmatter > built-in default. Determined via `click.Context.get_parameter_source()`.
-
-### Session branch semantics
-
-`session_branch` and `name` are aliases — both declare the session branch identity for this plan. The orchestrator:
-
-- **Creates** the branch from `base` (default: `main`) if it doesn't exist yet — first run "just works".
-- **Reuses** the branch if it already exists — subsequent runs resume the same session.
-- Auto-numbers a new `workbench-<N>` branch when neither field is set.
-
-Set both `session_branch` and `name` only by mistake; if they differ, `session_branch` wins and a warning is printed.
-
-### Not allowed in frontmatter
-
-`--repo`, `--no-tmux`, `-w`/`--start-wave`/`--end-wave`, `--task`, `--only-incomplete`, and `*-directive` flags are per-invocation and not plan-shaped — they stay CLI-only.
-
-Unknown keys raise `ValueError` — typos are never silently ignored.
-
-### Plan Sections
-
-- `## Context` — Injected into every agent's prompt. Describe the project, what's being built, and why.
-- `## Conventions` — Injected into every agent's prompt. Specify language version, test framework, import style, naming conventions. If the plan omits this section but `.workbench/conventions.md` exists, workbench injects that file's content as the Conventions section at runtime (see [Project conventions](#project-conventions) below).
-- `## Task: <title>` — Each task becomes an independent agent session in its own git worktree.
-
-### Task Metadata
-
-- **Files:** — Comma-separated list of files the task creates or modifies. Prevents parallel tasks from conflicting.
-- **Depends:** — Comma-separated task slugs this task depends on. Tasks with unmet dependencies wait until earlier waves complete.
-- Aliases: `Scope:` works like `Files:`, `After:`/`Dependencies:` work like `Depends:`.
-
-### Dependency Slugs
-
-Dependencies reference other tasks by their title converted to a slug (lowercase, non-alphanumeric replaced with `-`). For example, `## Task: Database Setup` has slug `database-setup`.
-
-**Keep task titles short (2-4 words).** The title becomes the dependency slug, and long titles produce unwieldy slugs that are error-prone to type in `Depends:` lines. Compare:
-
-| Title | Slug | Verdict |
-|-------|------|---------|
-| Prompt builder | `prompt-builder` | Good |
-| Agent adapters | `agent-adapters` | Good |
-| Structured prompt builder with plan context injection | `structured-prompt-builder-with-plan-context-injection` | Too long |
-| Update agents to use adapters and tmux | `update-agents-to-use-adapters-and-tmux` | Too long |
-
-Treat the title as a label, not a description — the task body has all the detail.
-
-## Writing Good Task Descriptions
-
-Each task runs in an **isolated worktree** — the agent only sees its own task description, not other tasks. Every task description must contain:
-
-1. **What to build** — Concrete deliverables, not vague goals
-2. **Where it goes** — Exact file paths for new and modified files
-3. **How it works** — Function signatures, type definitions, behavior specs
-4. **How it fits** — Imports, interfaces with existing code, how other modules will use this
-5. **Patterns to follow** — "Use the same pattern as X" with enough detail to follow it
-6. **Test expectations** — What tests to write, what command to run, what passing looks like
-7. **Edge cases** — Error handling, boundary conditions, validation rules
-8. **What NOT to do** — Constraints, anti-patterns, things that seem obvious but are wrong in this codebase
-
-If the task depends on interfaces from an earlier wave, describe those interfaces in full — the agent cannot see the other task's output.
-
-### Example: Good vs Bad
-
-**Bad** (too vague, agent will guess):
-```markdown
-## Task: Add authentication
-Add auth to the app.
-```
-
-**Good** (self-contained, specific):
-```markdown
-## Task: JWT auth middleware
-Files: src/auth/middleware.py, src/auth/tokens.py, tests/test_auth.py
-
-Create JWT-based authentication middleware for the FastAPI app.
-
-### Implementation
-- `src/auth/tokens.py`: `create_token(user_id: str) -> str` and `verify_token(token: str) -> dict`
-  using PyJWT. Tokens expire after 24h. Secret from `AUTH_SECRET` env var.
-- `src/auth/middleware.py`: FastAPI dependency `require_auth(request: Request) -> User`
-  that extracts Bearer token from Authorization header, verifies it, and returns the user.
-- Follow the existing middleware pattern in `src/middleware/logging.py`.
-
-### Tests
-- `tests/test_auth.py`: test token creation, verification, expiry, and invalid tokens.
-- Run: `pytest tests/test_auth.py`
-```
-
-## Designing for Parallelism
-
-Tasks in the same wave run simultaneously in separate worktrees. They **cannot see each other's changes**, and modifying the same files causes merge conflicts.
-
-**Strategies:**
-- Group work by file ownership — each task owns distinct files
-- Push shared infrastructure (types, configs) to earlier waves using `Depends:`
-- If two tasks must touch the same file, make one depend on the other
-
-### Example: Parallel-Safe Plan
-
-```markdown
-## Task: User model
-Files: src/models/user.py, migrations/001_users.sql
-
-## Task: Product model
-Files: src/models/product.py, migrations/002_products.sql
-
-## Task: API endpoints
-Files: src/api/routes.py, src/api/handlers.py
-Depends: user-model, product-model
-```
-
-Wave 1 runs the two model tasks in parallel (different files). Wave 2 runs the API task after both complete.
-
-## Planning Process
-
-Creating a good plan is the most important step. Follow these phases:
-
-### Phase 1: Understand the Problem
-- What is the user trying to achieve? What's the end state?
-- What are the constraints (performance, compatibility, existing patterns)?
-- What's changing? What's staying the same?
-
-Ask clarifying questions if anything is ambiguous. It's better to ask now than to have 6 agents each make a different assumption.
-
-### Phase 2: Survey the Codebase
-Read the code before designing tasks:
-- Project structure, module organization, entry points
-- Existing patterns — how are similar things already done?
-- Dependencies and interfaces between modules
-- Test infrastructure — framework, location, test command
-- Build and config files
-
-### Phase 3: Design the Task Graph
-Break work into tasks with the execution model in mind:
-- Each task runs in an isolated worktree
-- File overlap between parallel tasks creates merge conflicts
-- Push shared infrastructure to earlier waves
-- Maximize parallelism by grouping work by file ownership
-
-### Phase 4: Write Detailed Descriptions
-Follow the checklist in "Writing Good Task Descriptions" above. Every task must include enough context for an agent that has never seen the rest of the plan.
-
-### Phase 5: Validate
-Before running:
-- [ ] Can each task be implemented knowing only its own description?
-- [ ] Are file sets disjoint within each wave?
-- [ ] Do dependent tasks describe the interfaces they depend on?
-- [ ] Is the test command specified and will it work in a fresh worktree?
-- [ ] Are there implicit assumptions that should be explicit?
+- Running a plan with `wb run`
+- Resuming a session, retrying failed tasks, or re-running specific tasks/waves
+- Configuring which agent CLI runs each pipeline role (profiles)
+- Understanding TDD mode, branching behavior, or merge/failure handling
+- Debugging why an agent session failed or produced incorrect output for reasons unrelated to plan clarity (see `plan-workbench` if the plan itself is the problem)
 
 ## Agent Pipeline
 
@@ -335,44 +110,6 @@ wb run plan.md --tester-directive "Run pytest with -x flag. Only test the new co
 ```
 
 This is useful when you want agents to focus on specific aspects without modifying the plan itself.
-
-## Common Mistakes
-
-| Mistake | Fix |
-|---------|-----|
-| Task says "add auth" with no details | Specify exact files, function signatures, error handling, test command |
-| Two parallel tasks edit the same file | Add `Depends:` to serialize them, or extract shared changes to an earlier task |
-| Task depends on another but doesn't describe the interface | Copy function signatures and types into the dependent task's description |
-| No `## Context` or `## Conventions` section | Agents follow their own defaults — specify language version, test framework, import style |
-| Test command missing or wrong | Agent may skip tests or run the wrong suite — always include `Run: <command>` |
-| Task title is a full sentence | Keep titles to 2-4 words — they become dependency slugs |
-| Line number references for code to change | Line numbers shift — describe code by content/pattern instead |
-
-## Project conventions
-
-A repo can ship a single canonical conventions file at `.workbench/conventions.md` so every plan inherits the same project-wide rules without copy-pasting them into each plan.
-
-**Resolution rule (fallback-only, runtime, no plan mutation):**
-
-| Plan has `## Conventions` section? | `.workbench/conventions.md` exists? | What agents see |
-|---|---|---|
-| Yes | either | The plan's own section. The file is ignored. |
-| No | Yes | The file's content is injected as a `## Conventions` section into in-memory plan text loaded by the orchestrator, summarizer, branch reviewer, and PR writer. |
-| No | No | No conventions section. Agents follow their own defaults. |
-
-The planner (`wb plan generate`) is conventions-aware: if the file exists, it receives the content as context and is told **not** to write a `## Conventions` section in the plan it generates. If the file doesn't exist, it's told to write its own section when the source material implies conventions worth capturing.
-
-### Managing the file
-
-```bash
-wb conventions init              # write a starter template
-wb conventions init --generate   # dispatch an agent (with the generate-conventions skill) to draft it from a codebase scan
-wb conventions edit              # open in $EDITOR (creates from template if missing)
-wb conventions show              # print to stdout
-wb conventions delete            # remove the file (prompts unless --yes)
-```
-
-`init` errors if the file already exists. "Redo from scratch" is `wb conventions delete && wb conventions init --generate`.
 
 ## Branching Strategy
 
