@@ -18,6 +18,9 @@ import pytest
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 README = PROJECT_ROOT / "README.md"
 SKILL_MD = PROJECT_ROOT / "workbench" / "skills" / "use-workbench" / "SKILL.md"
+# Plan-authoring content (format, frontmatter, conventions handling) lives in
+# plan-workbench; use-workbench (SKILL_MD) covers running/executing a plan.
+PLAN_SKILL_MD = PROJECT_ROOT / "workbench" / "skills" / "plan-workbench" / "SKILL.md"
 
 
 def _read(path: Path) -> str:
@@ -471,28 +474,28 @@ class TestReadmeResumesFrontmatterNote:
 
 
 class TestSkillFrontmatterSection:
-    """SKILL.md must contain a Plan run-config (frontmatter) section."""
+    """plan-workbench SKILL.md must contain a Plan run-config (frontmatter) section."""
 
     def test_frontmatter_heading_exists(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         assert "## Plan run-config (frontmatter)" in content
 
     def test_frontmatter_between_plan_format_and_plan_sections(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         plan_format_pos = content.index("## Plan Format")
         fm_pos = content.index("## Plan run-config (frontmatter)")
         plan_sections_pos = content.index("### Plan Sections")
         assert plan_format_pos < fm_pos < plan_sections_pos
 
     def test_frontmatter_shows_yaml_example(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         rest = content[fm_pos : fm_pos + 2000]
         assert "session_branch:" in rest
         assert "tdd:" in rest
 
     def test_schema_table_has_all_17_keys(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         # Use "### Plan Sections" as the boundary (next sibling subsection)
         end_pos = content.index("### Plan Sections")
@@ -501,7 +504,7 @@ class TestSkillFrontmatterSection:
             assert f"`{key}`" in section, f"SKILL.md frontmatter table missing key: {key}"
 
     def test_schema_table_row_count(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         end_pos = content.index("### Plan Sections")
         section = content[fm_pos:end_pos]
@@ -510,14 +513,14 @@ class TestSkillFrontmatterSection:
         assert len(data_rows) == expected, f"Expected {expected} data rows, got {len(data_rows)}"
 
     def test_precedence_documented(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         rest = content[fm_pos : fm_pos + 3000]
         assert "### Precedence" in rest
         assert "CLI flag > frontmatter > built-in default" in rest
 
     def test_not_allowed_keys_documented(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         rest = content[fm_pos : fm_pos + 3000]
         assert "### Not allowed in frontmatter" in rest
@@ -526,13 +529,13 @@ class TestSkillFrontmatterSection:
         assert "--only-incomplete" in rest
 
     def test_unknown_keys_raise_error(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         rest = content[fm_pos : fm_pos + 3000]
         assert "unknown keys" in rest.lower() or "Unknown keys" in rest
 
     def test_click_parameter_source_mentioned(self):
-        content = _read(SKILL_MD)
+        content = _read(PLAN_SKILL_MD)
         fm_pos = content.index("## Plan run-config (frontmatter)")
         rest = content[fm_pos : fm_pos + 3000]
         assert "get_parameter_source" in rest
@@ -558,32 +561,32 @@ class TestSkillKeyCommandsFrontmatter:
 
 
 class TestDocFrontmatterConsistency:
-    """README.md and SKILL.md must be consistent on frontmatter keys."""
+    """README.md and plan-workbench SKILL.md must be consistent on frontmatter keys."""
 
     def test_both_have_same_schema_keys(self):
         readme = _read(README)
-        skill = _read(SKILL_MD)
+        skill = _read(PLAN_SKILL_MD)
         for key in FRONTMATTER_KEYS:
             assert f"`{key}`" in readme, f"README missing frontmatter key: {key}"
-            assert f"`{key}`" in skill, f"SKILL.md missing frontmatter key: {key}"
+            assert f"`{key}`" in skill, f"plan-workbench SKILL.md missing frontmatter key: {key}"
 
     def test_both_mention_cli_overrides(self):
         readme = _read(README)
-        skill = _read(SKILL_MD)
+        skill = _read(PLAN_SKILL_MD)
         # Both should state CLI wins over frontmatter
         assert "cli flag" in readme.lower() or "CLI flags" in readme
         assert "cli flag" in skill.lower() or "CLI flag" in skill
 
     def test_both_show_frontmatter_example(self):
         readme = _read(README)
-        skill = _read(SKILL_MD)
+        skill = _read(PLAN_SKILL_MD)
         assert "session_branch:" in readme
         assert "session_branch:" in skill
 
     def test_readme_example_is_subset_of_skill_example(self):
         """README shows 3-4 representative fields; SKILL shows more."""
         readme = _read(README)
-        skill = _read(SKILL_MD)
+        skill = _read(PLAN_SKILL_MD)
         # Both should have tdd and session_branch in their examples
         assert "tdd: true" in readme
         assert "tdd: true" in skill
