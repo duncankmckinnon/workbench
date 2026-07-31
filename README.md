@@ -35,7 +35,8 @@ Requires Python 3.11+ and git on `$PATH`. Install tmux separately for live agent
 
 Workbench dispatches to any agent CLI you wire up. Adapters live in `.workbench/agents.yaml`, so you can swap providers per role (implementor, tester, reviewer, planner, ...) or point at a custom CLI — workbench just shells out and parses the output. Out of the box it knows:
 
-- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (default)
+- [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` by default,
+  plus the permission-bypassing `claude-yolo` adapter)
 - [Google Antigravity (`agy`)](https://github.com/google/agy)
 - [OpenCode](https://opencode.ai)
 - [Codex](https://github.com/openai/codex)
@@ -378,6 +379,7 @@ Workbench ships with built-in adapters for Claude Code, Google Antigravity (`agy
 
 ```bash
 wb run plan.md --agent claude        # default
+wb run plan.md --agent claude-yolo   # bypass all Claude permission checks
 wb run plan.md --agent antigravity
 wb run plan.md --agent opencode
 wb run plan.md --agent codex
@@ -419,7 +421,7 @@ wb agents add my-agent --command new-cli   # update an existing agent
 wb agents remove my-agent         # remove a custom agent
 ```
 
-`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (Claude, Antigravity, OpenCode, Codex, Cursor, Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents.
+`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (`claude`, `claude-yolo`, Antigravity, OpenCode, Codex, Cursor, and Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents. The `claude-yolo` adapter passes `--dangerously-skip-permissions`; use it only in an appropriately isolated environment.
 
 ## Directive overrides
 
@@ -510,7 +512,7 @@ The planner agent surveys the codebase (project structure, patterns, test infras
 | `--profile-name NAME` | Use a named profile (`profile.<name>.yaml`) |
 | `--*-directive TEXT` | Override instructions for a specific agent role |
 
-Headroom is off by default. Enable it with `--headroom` or a top-level `headroom:` config block in `agents.yaml`; Workbench manages one shared local proxy per run. Claude and Codex are wired first, while other agents run normally.
+Headroom is off by default. Enable it with `--headroom` or a top-level `headroom:` config block in `agents.yaml`; Workbench manages one shared local proxy per run. Both Claude adapters and Codex are wired first, while other agents run normally.
 
 #### Frontmatter-readable flags
 

@@ -609,7 +609,8 @@ def main():
     "--agent",
     default="claude",
     help=(
-        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "Agent CLI command "
+        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
@@ -1309,7 +1310,8 @@ def plan():
     "--agent",
     default="claude",
     help=(
-        "Agent CLI command " "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "Agent CLI command "
+        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
@@ -2162,7 +2164,7 @@ def stop(cleanup: bool, repo: Path | None):
     default="claude",
     help=(
         "Agent CLI for merge conflict resolution "
-        "(claude, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option(
@@ -3222,6 +3224,7 @@ def profile_diff(repo: Path | None, name: str | None, profile_path: Path | None)
 
 BUILTIN_AGENTS = {
     "claude": "Claude Code CLI (default)",
+    "claude-yolo": "Claude Code CLI (bypass permission checks)",
     "antigravity": "Google Antigravity (agy)",
     "opencode": "OpenCode CLI",
     "codex": "Codex CLI (OpenAI)",
