@@ -37,7 +37,8 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 
 | Name | CLI Command | Mode | Output |
 |------|-------------|------|--------|
-| `claude` | `claude -p <prompt>` | Print mode, JSON output | Parses `result` and `cost_usd` from JSON |
+| `claude` | `claude -p <prompt>` | Print mode, JSON output, restricted allow-list | Parses `result` and `cost_usd` from JSON |
+| `claude-yolo` | `claude -p <prompt>` | Print mode, JSON output, bypassed permissions | Parses `result` and `cost_usd` from JSON |
 | `antigravity` | `agy -p <prompt>` | Print mode, text output, dangerously-skip-permissions | Raw text |
 | `opencode` | `opencode run --auto <prompt>` | Run mode, text output, auto-approved permissions | Raw text |
 | `codex` | `codex exec <prompt>` | Full-auto, JSON events | Extracts last assistant message from NDJSON |
@@ -72,6 +73,12 @@ agents:
     output_format: json
     json_result_key: result
     json_cost_key: cost_usd
+  claude-yolo:
+    command: claude
+    args: ["-p", "{prompt}", "--output-format", "json", "--dangerously-skip-permissions"]
+    output_format: json
+    json_result_key: result
+    json_cost_key: cost_usd
   my-custom-agent:
     command: my-cli
     args: ["--headless", "{prompt}"]
@@ -103,7 +110,7 @@ wb agents remove my-agent         # remove a custom agent
 
 When `wb run --agent <name>` is used:
 1. If `.workbench/agents.yaml` contains the name, use that config
-2. If it's a built-in name (`claude`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`), use the built-in adapter
+2. If it's a built-in name (`claude`, `claude-yolo`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`), use the built-in adapter
 3. Otherwise, fall back to a generic adapter that passes the prompt as the sole argument
 
 This means you can override a built-in adapter's behavior by adding an entry with the same name to `agents.yaml`.
