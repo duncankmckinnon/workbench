@@ -75,12 +75,29 @@ class TestCodexAdapter:
         assert cmd == [
             "codex",
             "exec",
-            "--full-auto",
+            "--sandbox",
+            "workspace-write",
             "--json",
             "fix bug",
         ]
 
-    def test_parse_output_ndjson_assistant_message(self):
+    def test_parse_output_jsonl_agent_message(self):
+        lines = [
+            json.dumps({"type": "thread.started", "thread_id": "thread-1"}),
+            json.dumps(
+                {
+                    "type": "item.completed",
+                    "item": {"id": "item-1", "type": "agent_message", "text": "done"},
+                }
+            ),
+            json.dumps({"type": "turn.completed", "usage": {"input_tokens": 10}}),
+        ]
+        raw = "\n".join(lines)
+        text, cost = self.adapter.parse_output(raw)
+        assert text == "done"
+        assert cost == {}
+
+    def test_parse_output_legacy_ndjson_assistant_message(self):
         lines = [
             json.dumps({"type": "message", "role": "user", "content": "fix bug"}),
             json.dumps({"type": "message", "role": "assistant", "content": "done"}),
@@ -98,8 +115,12 @@ class TestCodexAdapter:
 
     def test_parse_output_multiple_assistant_messages_takes_last(self):
         lines = [
-            json.dumps({"type": "message", "role": "assistant", "content": "first"}),
-            json.dumps({"type": "message", "role": "assistant", "content": "second"}),
+            json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "first"}}
+            ),
+            json.dumps(
+                {"type": "item.completed", "item": {"type": "agent_message", "text": "second"}}
+            ),
         ]
         raw = "\n".join(lines)
         text, cost = self.adapter.parse_output(raw)
@@ -558,7 +579,14 @@ class TestBuildCommandModel:
 
     def test_codex_no_model_unchanged(self, tmp_path):
         cmd = CodexAdapter().build_command("p", tmp_path)
-        assert cmd == ["codex", "exec", "--full-auto", "--json", "p"]
+        assert cmd == [
+            "codex",
+            "exec",
+            "--sandbox",
+            "workspace-write",
+            "--json",
+            "p",
+        ]
 
     def test_codex_uses_config_default_model(self, tmp_path):
         adapter = CodexAdapter()

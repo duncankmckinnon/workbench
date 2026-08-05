@@ -40,7 +40,7 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 | `claude` | `claude -p <prompt>` | Print mode, JSON output | Parses `result` and `cost_usd` from JSON |
 | `antigravity` | `agy -p <prompt>` | Print mode, text output, dangerously-skip-permissions | Raw text |
 | `opencode` | `opencode run --auto <prompt>` | Run mode, text output, auto-approved permissions | Raw text |
-| `codex` | `codex exec <prompt>` | Full-auto, JSON events | Extracts last assistant message from NDJSON |
+| `codex` | `codex exec --sandbox workspace-write --json <prompt>` | Workspace-write sandbox, JSONL events | Extracts the last completed agent message |
 | `cursor` | `agent -p <prompt>` | Print mode, text output | Raw text |
 | `copilot` | `copilot -p <prompt>` | Print mode, JSON output, no-ask-user | Extracts last assistant message from JSONL |
 
