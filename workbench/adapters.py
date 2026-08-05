@@ -168,7 +168,7 @@ class CodexAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.config = AgentConfig(
             command="codex",
-            args=["exec", "--sandbox", "workspace-write", "--json", "{prompt}"],
+            args=["exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "{prompt}"],
             output_format=OutputFormat.JSON,
             json_result_key="result",
             json_cost_key="cost_usd",

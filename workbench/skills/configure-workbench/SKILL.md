@@ -40,7 +40,7 @@ Workbench dispatches work to AI coding agents via adapters. Each adapter knows h
 | `claude` | `claude -p <prompt>` | Print mode, JSON output | Parses `result` and `cost_usd` from JSON |
 | `antigravity` | `agy -p <prompt>` | Print mode, text output, dangerously-skip-permissions | Raw text |
 | `opencode` | `opencode run --auto <prompt>` | Run mode, text output, auto-approved permissions | Raw text |
-| `codex` | `codex exec --sandbox workspace-write --json <prompt>` | Workspace-write sandbox, JSONL events | Extracts the last completed agent message |
+| `codex` | `codex exec --dangerously-bypass-approvals-and-sandbox --json <prompt>` | Unrestricted non-interactive execution, JSONL events | Extracts the last completed agent message |
 | `cursor` | `agent -p <prompt>` | Print mode, text output | Raw text |
 | `copilot` | `copilot -p <prompt>` | Print mode, JSON output, no-ask-user | Extracts last assistant message from JSONL |
 
@@ -107,6 +107,10 @@ When `wb run --agent <name>` is used:
 3. Otherwise, fall back to a generic adapter that passes the prompt as the sole argument
 
 This means you can override a built-in adapter's behavior by adding an entry with the same name to `agents.yaml`.
+
+> **Warning:** the built-in `codex` adapter bypasses Codex approvals and sandboxing so task and
+> merger agents can stage and commit changes in isolated Git worktrees. Only use it in repositories
+> and environments where dispatched agents are trusted with full local access.
 
 ## Headroom (cost savings)
 

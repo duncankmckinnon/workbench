@@ -75,8 +75,7 @@ class TestCodexAdapter:
         assert cmd == [
             "codex",
             "exec",
-            "--sandbox",
-            "workspace-write",
+            "--dangerously-bypass-approvals-and-sandbox",
             "--json",
             "fix bug",
         ]
@@ -582,8 +581,7 @@ class TestBuildCommandModel:
         assert cmd == [
             "codex",
             "exec",
-            "--sandbox",
-            "workspace-write",
+            "--dangerously-bypass-approvals-and-sandbox",
             "--json",
             "p",
         ]
