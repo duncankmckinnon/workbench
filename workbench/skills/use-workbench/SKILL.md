@@ -146,7 +146,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `claude-yolo`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 

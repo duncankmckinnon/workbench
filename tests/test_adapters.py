@@ -11,6 +11,7 @@ from workbench.adapters import (
     AgentConfig,
     AntigravityAdapter,
     ClaudeAdapter,
+    ClaudeYoloAdapter,
     CodexAdapter,
     ConfigAdapter,
     CopilotAdapter,
@@ -58,6 +59,28 @@ class TestClaudeAdapter:
         text, cost = self.adapter.parse_output(raw)
         assert text == raw
         assert cost == {}
+
+    def test_is_agent_adapter(self):
+        assert isinstance(self.adapter, AgentAdapter)
+
+
+class TestClaudeYoloAdapter:
+    def setup_method(self):
+        self.adapter = ClaudeYoloAdapter()
+
+    def test_name(self):
+        assert self.adapter.name == "claude-yolo"
+
+    def test_build_command(self, tmp_path):
+        cmd = self.adapter.build_command("do something", tmp_path)
+        assert cmd == [
+            "claude",
+            "-p",
+            "do something",
+            "--output-format",
+            "json",
+            "--dangerously-skip-permissions",
+        ]
 
     def test_is_agent_adapter(self):
         assert isinstance(self.adapter, AgentAdapter)
@@ -612,18 +635,49 @@ class TestBuildCommandModel:
 
 class TestDefaultAgentsConfigModelFlag:
     def test_builtin_adapters_have_model_flag(self):
-        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
+        for name in (
+            "claude",
+            "claude-yolo",
+            "codex",
+            "antigravity",
+            "opencode",
+            "cursor",
+            "copilot",
+        ):
             adapter = BUILTIN_ADAPTERS[name]()
             assert adapter.config.model_flag == "--model", name
 
     def test_default_agents_config_surfaces_model_flag(self):
         cfg = default_agents_config()
-        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
+        for name in (
+            "claude",
+            "claude-yolo",
+            "codex",
+            "antigravity",
+            "opencode",
+            "cursor",
+            "copilot",
+        ):
             assert cfg[name].get("model_flag") == "--model", name
+
+    def test_default_agents_config_has_distinct_claude_permission_modes(self):
+        cfg = default_agents_config()
+        assert "--allowedTools" in cfg["claude"]["args"]
+        assert "--dangerously-skip-permissions" not in cfg["claude"]["args"]
+        assert "--dangerously-skip-permissions" in cfg["claude-yolo"]["args"]
+        assert "--allowedTools" not in cfg["claude-yolo"]["args"]
 
     def test_default_agents_config_omits_model_when_unset(self):
         cfg = default_agents_config()
-        for name in ("claude", "codex", "antigravity", "opencode", "cursor", "copilot"):
+        for name in (
+            "claude",
+            "claude-yolo",
+            "codex",
+            "antigravity",
+            "opencode",
+            "cursor",
+            "copilot",
+        ):
             assert "model" not in cfg[name], name
 
     def test_default_agents_config_includes_opencode(self):
@@ -641,6 +695,10 @@ class TestGetAdapter:
     def test_returns_claude_adapter(self):
         adapter = get_adapter("claude")
         assert isinstance(adapter, ClaudeAdapter)
+
+    def test_returns_claude_yolo_adapter(self):
+        adapter = get_adapter("claude-yolo")
+        assert isinstance(adapter, ClaudeYoloAdapter)
 
     def test_returns_codex_adapter(self):
         adapter = get_adapter("codex")

@@ -156,6 +156,28 @@ class ClaudeAdapter(AgentAdapter):
         )
 
 
+class ClaudeYoloAdapter(AgentAdapter):
+    """Claude Code adapter that bypasses all permission checks."""
+
+    name = "claude-yolo"
+
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="claude",
+            args=[
+                "-p",
+                "{prompt}",
+                "--output-format",
+                "json",
+                "--dangerously-skip-permissions",
+            ],
+            output_format=OutputFormat.JSON,
+            json_result_key="result",
+            json_cost_key="cost_usd",
+            model_flag="--model",
+        )
+
+
 class CodexAdapter(AgentAdapter):
     """Adapter for the Codex CLI (OpenAI).
 
@@ -320,6 +342,7 @@ class GenericAdapter(AgentAdapter):
 
 BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
     "claude": ClaudeAdapter,
+    "claude-yolo": ClaudeYoloAdapter,
     "codex": CodexAdapter,
     "antigravity": AntigravityAdapter,
     "opencode": OpencodeAdapter,
@@ -364,7 +387,8 @@ def get_adapter(
     1. Iterate config_paths (highest precedence first). For each path that
        exists and parses, check if it defines agent_cmd. Return that
        ConfigAdapter if so.
-    2. Built-in adapters (claude, codex, antigravity, opencode, cursor, copilot).
+    2. Built-in adapters (claude, claude-yolo, codex, antigravity, opencode,
+       cursor, copilot).
     3. GenericAdapter fallback.
 
     Per-agent precedence: the highest-precedence file containing agent_cmd wins

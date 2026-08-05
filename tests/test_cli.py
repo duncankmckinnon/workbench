@@ -2860,6 +2860,7 @@ def test_agents_init_creates_yaml(git_repo):
 
     config = yaml.safe_load((git_repo / ".workbench" / "agents.yaml").read_text())
     assert "claude" in config["agents"]
+    assert "claude-yolo" in config["agents"]
     assert "antigravity" in config["agents"]
     assert "opencode" in config["agents"]
     assert "codex" in config["agents"]
@@ -2868,6 +2869,11 @@ def test_agents_init_creates_yaml(git_repo):
     # Verify structure of one entry
     assert config["agents"]["claude"]["command"] == "claude"
     assert "{prompt}" in config["agents"]["claude"]["args"]
+    assert "--allowedTools" in config["agents"]["claude"]["args"]
+    assert "--dangerously-skip-permissions" not in config["agents"]["claude"]["args"]
+    assert config["agents"]["claude-yolo"]["command"] == "claude"
+    assert "--dangerously-skip-permissions" in config["agents"]["claude-yolo"]["args"]
+    assert "--allowedTools" not in config["agents"]["claude-yolo"]["args"]
 
 
 def test_agents_init_prompts_on_overwrite(git_repo):
@@ -2911,6 +2917,7 @@ def test_agents_list_shows_builtins(git_repo):
 
     assert result.exit_code == 0
     assert "claude" in result.output
+    assert "claude-yolo" in result.output
     assert "antigravity" in result.output
     assert "opencode" in result.output
     assert "codex" in result.output
@@ -2942,6 +2949,17 @@ def test_agents_show_builtin(git_repo):
 
     assert result.exit_code == 0
     assert "built-in" in result.output
+
+
+def test_agents_show_claude_yolo(git_repo):
+    """wb agents show claude-yolo should show built-in details."""
+    runner = CliRunner()
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["agents", "show", "claude-yolo"])
+
+    assert result.exit_code == 0
+    assert "built-in" in result.output
+    assert "bypass permission checks" in result.output
 
 
 def test_agents_show_opencode(git_repo):

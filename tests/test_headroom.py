@@ -83,6 +83,12 @@ def test_apply_headroom_env_sets_claude_base_url():
     assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
 
 
+def test_apply_headroom_env_sets_claude_yolo_base_url():
+    env = apply_headroom_env({}, "claude-yolo", HeadroomConfig(enabled=True, port=9999))
+
+    assert env["ANTHROPIC_BASE_URL"] == "http://127.0.0.1:9999"
+
+
 def test_apply_headroom_env_sets_codex_base_url():
     env = apply_headroom_env({}, "codex", HeadroomConfig(enabled=True, port=9998))
 

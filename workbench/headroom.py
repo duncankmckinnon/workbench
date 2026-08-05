@@ -19,6 +19,7 @@ HEADROOM_INSTALL_HINT = 'pipx install "headroom-ai[all]"'
 
 HEADROOM_BASE_URL_ENV: dict[str, str] = {
     "claude": "ANTHROPIC_BASE_URL",
+    "claude-yolo": "ANTHROPIC_BASE_URL",
     "codex": "OPENAI_BASE_URL",  # TODO: verify against headroom's codex docs before relying on it
 }
 
