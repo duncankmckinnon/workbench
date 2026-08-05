@@ -182,7 +182,7 @@ class CodexAdapter(AgentAdapter):
     """Adapter for the Codex CLI (OpenAI).
 
     Uses ``codex exec`` for non-interactive execution with JSON output.
-    Parses newline-delimited JSON events, extracting the last assistant message.
+    Parses newline-delimited JSON events, extracting the last agent message.
     """
 
     name = "codex"
@@ -190,7 +190,7 @@ class CodexAdapter(AgentAdapter):
     def __init__(self) -> None:
         self.config = AgentConfig(
             command="codex",
-            args=["exec", "--full-auto", "--json", "{prompt}"],
+            args=["exec", "--dangerously-bypass-approvals-and-sandbox", "--json", "{prompt}"],
             output_format=OutputFormat.JSON,
             json_result_key="result",
             json_cost_key="cost_usd",
@@ -216,12 +216,18 @@ class CodexAdapter(AgentAdapter):
 
     def parse_output(self, raw: str) -> tuple[str, dict]:
         # codex exec --json outputs newline-delimited JSON events
-        # The last message event contains the assistant's response
+        # The last completed agent_message item contains the final response.
+        # Retain support for the legacy message/assistant event shape so output
+        # from older Codex CLI versions remains readable.
         lines = raw.strip().split("\n")
         last_message = ""
         for line in reversed(lines):
             try:
                 data = json.loads(line)
+                item = data.get("item", {})
+                if data.get("type") == "item.completed" and item.get("type") == "agent_message":
+                    last_message = item.get("text", "")
+                    break
                 if data.get("type") == "message" and data.get("role") == "assistant":
                     last_message = data.get("content", "")
                     break
