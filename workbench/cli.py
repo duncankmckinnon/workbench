@@ -314,6 +314,7 @@ def _detect_agent() -> str:
         "claude": "claude",
         "agy": "antigravity",
         "opencode": "opencode",
+        "kimi": "kimi",
         "codex": "codex",
         "agent": "cursor",
         "copilot": "copilot",
@@ -337,6 +338,7 @@ _PLATFORM_LABEL = {
     "claude": "command",
     "antigravity": "skill",
     "opencode": "skill",
+    "kimi": "skill",
     "cursor": "rule",
     "codex": "instruction",
     "copilot": "skill",
@@ -439,7 +441,7 @@ def _install_skills(
         if local:
             _install_to_agents_skills(skills, repo, symlink)
 
-    elif agent == "antigravity":
+    elif agent in ("antigravity", "kimi"):
         if local:
             target_dir = repo / ".agents" / "skills"
         else:
@@ -610,7 +612,7 @@ def main():
     default="claude",
     help=(
         "Agent CLI command "
-        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "(claude, claude-yolo, antigravity, opencode, kimi, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option("--cleanup", is_flag=True, help="Remove worktrees after completion.")
@@ -1311,7 +1313,7 @@ def plan():
     default="claude",
     help=(
         "Agent CLI command "
-        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "(claude, claude-yolo, antigravity, opencode, kimi, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option("--repo", type=click.Path(exists=True, path_type=Path), default=None)
@@ -2164,7 +2166,7 @@ def stop(cleanup: bool, repo: Path | None):
     default="claude",
     help=(
         "Agent CLI for merge conflict resolution "
-        "(claude, claude-yolo, antigravity, opencode, codex, cursor, copilot, or custom)."
+        "(claude, claude-yolo, antigravity, opencode, kimi, codex, cursor, copilot, or custom)."
     ),
 )
 @click.option(
@@ -2814,7 +2816,7 @@ def pull_request_cmd(
 @click.option(
     "--agent",
     type=click.Choice(
-        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+        ["claude", "antigravity", "opencode", "kimi", "cursor", "codex", "copilot", "manual"]
     ),
     default=None,
     help="Target agent platform.",
@@ -2903,7 +2905,7 @@ def setup(
 @click.option(
     "--agent",
     type=click.Choice(
-        ["claude", "antigravity", "opencode", "cursor", "codex", "copilot", "manual"]
+        ["claude", "antigravity", "opencode", "kimi", "cursor", "codex", "copilot", "manual"]
     ),
     default=None,
 )
@@ -3227,6 +3229,7 @@ BUILTIN_AGENTS = {
     "claude-yolo": "Claude Code CLI (bypass permission checks)",
     "antigravity": "Google Antigravity (agy)",
     "opencode": "OpenCode CLI",
+    "kimi": "Kimi Code CLI",
     "codex": "Codex CLI (OpenAI)",
     "cursor": "Cursor CLI (agent command)",
     "copilot": "GitHub Copilot CLI",

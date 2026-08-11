@@ -332,6 +332,26 @@ class OpencodeAdapter(AgentAdapter):
         )
 
 
+class KimiAdapter(AgentAdapter):
+    """Adapter for Kimi Code CLI.
+
+    Uses ``kimi -p`` for non-interactive execution. Kimi's prompt mode uses
+    automatic permissions and writes Assistant output to stdout as plain text.
+    See https://www.kimi.com/code/docs/en/kimi-code-cli/reference/kimi-command.html
+    """
+
+    name = "kimi"
+
+    def __init__(self) -> None:
+        self.config = AgentConfig(
+            command="kimi",
+            args=["-p", "{prompt}"],
+            output_format=OutputFormat.TEXT,
+            inject_env=True,
+            model_flag="--model",
+        )
+
+
 class GenericAdapter(AgentAdapter):
     """Fallback adapter for unknown agent commands."""
 
@@ -346,6 +366,7 @@ BUILTIN_ADAPTERS: dict[str, type[AgentAdapter]] = {
     "codex": CodexAdapter,
     "antigravity": AntigravityAdapter,
     "opencode": OpencodeAdapter,
+    "kimi": KimiAdapter,
     "cursor": CursorAdapter,
     "copilot": CopilotAdapter,
 }
@@ -388,7 +409,7 @@ def get_adapter(
        exists and parses, check if it defines agent_cmd. Return that
        ConfigAdapter if so.
     2. Built-in adapters (claude, claude-yolo, codex, antigravity, opencode,
-       cursor, copilot).
+       kimi, cursor, copilot).
     3. GenericAdapter fallback.
 
     Per-agent precedence: the highest-precedence file containing agent_cmd wins

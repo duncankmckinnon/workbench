@@ -58,6 +58,16 @@ def test_detect_agent_finds_opencode():
     assert result == "opencode"
 
 
+def test_detect_agent_finds_kimi():
+    """_detect_agent returns 'kimi' when kimi is on PATH."""
+    with patch(
+        "workbench.cli.shutil.which",
+        side_effect=lambda b: "/usr/bin/kimi" if b == "kimi" else None,
+    ):
+        result = _detect_agent()
+    assert result == "kimi"
+
+
 def test_detect_agent_ignores_unregistered_google_cli():
     """_detect_agent returns 'manual' when no registered agent binary is on PATH."""
     with patch("workbench.cli.shutil.which", return_value=None):
@@ -523,6 +533,19 @@ def test_setup_agent_choice_includes_opencode(tmp_path):
     assert "Invalid value" not in (result.output or "")
 
 
+def test_setup_agent_choice_includes_kimi(tmp_path):
+    """The --agent option should accept 'kimi' as a valid choice."""
+    runner = CliRunner()
+    fake_home = tmp_path / "home"
+    fake_home.mkdir()
+    with patch("workbench.cli.Path.home", return_value=fake_home):
+        result = runner.invoke(main, ["setup", "--global", "--agent", "kimi"])
+
+    assert result.exit_code == 0
+    assert "Invalid value" not in (result.output or "")
+    assert (fake_home / ".agents" / "skills" / "use-workbench" / "SKILL.md").exists()
+
+
 # ---------------------------------------------------------------------------
 # wb setup — local (project-level, default)
 # ---------------------------------------------------------------------------
@@ -576,6 +599,18 @@ def test_setup_antigravity_local(tmp_path, git_repo):
     assert result.exit_code == 0
     agents_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
     assert agents_skill.exists()
+
+
+def test_setup_kimi_local(tmp_path, git_repo):
+    """wb setup --agent kimi installs to <repo>/.agents/skills/."""
+    runner = CliRunner()
+
+    with patch("workbench.cli._find_repo_root", return_value=git_repo):
+        result = runner.invoke(main, ["setup", "--agent", "kimi"])
+
+    assert result.exit_code == 0
+    kimi_skill = git_repo / ".agents" / "skills" / "use-workbench" / "SKILL.md"
+    assert kimi_skill.exists()
 
 
 def test_setup_opencode_local(tmp_path, git_repo):
@@ -2866,6 +2901,7 @@ def test_agents_init_creates_yaml(git_repo):
     assert "codex" in config["agents"]
     assert "cursor" in config["agents"]
     assert "copilot" in config["agents"]
+    assert "kimi" in config["agents"]
     # Verify structure of one entry
     assert config["agents"]["claude"]["command"] == "claude"
     assert "{prompt}" in config["agents"]["claude"]["args"]

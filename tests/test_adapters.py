@@ -16,6 +16,7 @@ from workbench.adapters import (
     ConfigAdapter,
     CopilotAdapter,
     GenericAdapter,
+    KimiAdapter,
     OpencodeAdapter,
     OutputFormat,
     default_agents_config,
@@ -269,6 +270,41 @@ class TestOpencodeAdapter:
 
     def test_model_flag(self):
         assert self.adapter.config.model_flag == "--model"
+
+    def test_is_agent_adapter(self):
+        assert isinstance(self.adapter, AgentAdapter)
+
+
+class TestKimiAdapter:
+    def setup_method(self):
+        self.adapter = KimiAdapter()
+
+    def test_name(self):
+        assert self.adapter.name == "kimi"
+
+    def test_build_command_no_model(self, tmp_path):
+        cmd = self.adapter.build_command("refactor module", tmp_path)
+        assert cmd == ["kimi", "-p", "refactor module"]
+
+    def test_build_command_with_model(self, tmp_path):
+        cmd = self.adapter.build_command(
+            "refactor module", tmp_path, model="kimi-code/kimi-for-coding"
+        )
+        assert cmd == [
+            "kimi",
+            "-p",
+            "refactor module",
+            "--model",
+            "kimi-code/kimi-for-coding",
+        ]
+
+    def test_parse_output_plain_text(self):
+        text, cost = self.adapter.parse_output("  done successfully  \n")
+        assert text == "done successfully"
+        assert cost == {}
+
+    def test_inject_env_true(self):
+        assert self.adapter.config.inject_env is True
 
     def test_is_agent_adapter(self):
         assert isinstance(self.adapter, AgentAdapter)
@@ -641,6 +677,7 @@ class TestDefaultAgentsConfigModelFlag:
             "codex",
             "antigravity",
             "opencode",
+            "kimi",
             "cursor",
             "copilot",
         ):
@@ -655,6 +692,7 @@ class TestDefaultAgentsConfigModelFlag:
             "codex",
             "antigravity",
             "opencode",
+            "kimi",
             "cursor",
             "copilot",
         ):
@@ -675,6 +713,7 @@ class TestDefaultAgentsConfigModelFlag:
             "codex",
             "antigravity",
             "opencode",
+            "kimi",
             "cursor",
             "copilot",
         ):
@@ -685,6 +724,16 @@ class TestDefaultAgentsConfigModelFlag:
         assert cfg["opencode"] == {
             "command": "opencode",
             "args": ["run", "--auto", "{prompt}"],
+            "output_format": "text",
+            "inject_env": True,
+            "model_flag": "--model",
+        }
+
+    def test_default_agents_config_includes_kimi(self):
+        cfg = default_agents_config()
+        assert cfg["kimi"] == {
+            "command": "kimi",
+            "args": ["-p", "{prompt}"],
             "output_format": "text",
             "inject_env": True,
             "model_flag": "--model",
@@ -711,6 +760,10 @@ class TestGetAdapter:
     def test_returns_opencode_adapter(self):
         adapter = get_adapter("opencode")
         assert isinstance(adapter, OpencodeAdapter)
+
+    def test_returns_kimi_adapter(self):
+        adapter = get_adapter("kimi")
+        assert isinstance(adapter, KimiAdapter)
 
     def test_returns_copilot_adapter(self):
         adapter = get_adapter("copilot")
