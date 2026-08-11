@@ -37,11 +37,12 @@ Workbench dispatches to any agent CLI you wire up. Adapters live in `.workbench/
 
 - [Claude Code](https://docs.anthropic.com/en/docs/claude-code) (`claude` by default,
   plus the permission-bypassing `claude-yolo` adapter)
-- [Google Antigravity (`agy`)](https://github.com/google/agy)
+- [Google Antigravity](https://github.com/google/agy)
 - [OpenCode](https://opencode.ai)
+- [Kimi Code](https://www.kimi.com/code/docs/en/kimi-code-cli/)
 - [Codex](https://github.com/openai/codex)
-- [Cursor CLI](https://cursor.com/docs/cli/overview)
-- [Copilot CLI](https://github.com/features/copilot/cli)
+- [Cursor](https://cursor.com/docs/cli/overview)
+- [Copilot](https://github.com/features/copilot/cli)
 
 ## Getting started
 
@@ -375,13 +376,14 @@ The tester writes comprehensive failing tests first. The implementor writes code
 
 ## Agents
 
-Workbench ships with built-in adapters for Claude Code, Google Antigravity (`agy`), OpenCode, Codex, Cursor CLI, and Copilot CLI. Use `--agent` to select one:
+Workbench ships with built-in adapters for Claude Code, Google Antigravity (`agy`), OpenCode, Kimi Code CLI, Codex, Cursor CLI, and Copilot CLI. Use `--agent` to select one:
 
 ```bash
 wb run plan.md --agent claude        # default
 wb run plan.md --agent claude-yolo   # bypass all Claude permission checks
 wb run plan.md --agent antigravity
 wb run plan.md --agent opencode
+wb run plan.md --agent kimi
 wb run plan.md --agent codex
 wb run plan.md --agent cursor
 wb run plan.md --agent copilot
@@ -421,7 +423,7 @@ wb agents add my-agent --command new-cli   # update an existing agent
 wb agents remove my-agent         # remove a custom agent
 ```
 
-`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (`claude`, `claude-yolo`, Antigravity, OpenCode, Codex, Cursor, and Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents. The `claude-yolo` adapter passes `--dangerously-skip-permissions`; use it only in an appropriately isolated environment.
+`wb agents init` creates `.workbench/agents.yaml` pre-populated with the configs for all built-in adapters (`claude`, `claude-yolo`, Antigravity, OpenCode, Kimi, Codex, Cursor, and Copilot). Use this as a starting point to customize command flags, output parsing, or to add your own agents. The `claude-yolo` adapter passes `--dangerously-skip-permissions`; use it only in an appropriately isolated environment.
 
 ## Directive overrides
 
@@ -566,7 +568,7 @@ For finer-grained control (waves, directive overrides, selective tasks), use `wb
 
 | Flag | Description |
 |---|---|
-| `--agent NAME` | Target platform: `claude`, `antigravity`, `opencode`, `cursor`, `codex`, `copilot`, `manual` (auto-detected if omitted) |
+| `--agent NAME` | Target platform: `claude`, `antigravity`, `opencode`, `kimi`, `cursor`, `codex`, `copilot`, `manual` (auto-detected if omitted) |
 | `--global` | Install skills to user-level paths only (skip `.workbench/` creation) |
 | `--symlink` | Symlink instead of copy (stays in sync with package updates) |
 | `--profile` | Also create a profile.yaml with the detected agent |

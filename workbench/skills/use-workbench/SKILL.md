@@ -11,7 +11,7 @@ How to run, resume, and troubleshoot the `wb` CLI once a plan already exists.
 
 ## Overview
 
-Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, OpenCode, Codex, Cursor CLI, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
+Workbench (`wb`) is a multi-agent orchestrator that takes a markdown plan, breaks it into independent tasks, and dispatches parallel AI coding agents (Claude Code, Google Antigravity, OpenCode, Kimi Code CLI, Codex, Cursor CLI, Copilot CLI, or custom) to implement, test, and review each task in isolated git worktrees.
 
 ## When to Use
 
@@ -146,7 +146,7 @@ Profiles configure which agent CLI and instructions are used for each pipeline r
 Roles: `implementor`, `tester`, `reviewer`, `fixer`, `merger`
 
 Each role supports:
-- `agent` — CLI command (default: `claude`). Supported: `claude`, `claude-yolo`, `antigravity`, `opencode`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
+- `agent` — CLI command (default: `claude`). Supported: `claude`, `claude-yolo`, `antigravity`, `opencode`, `kimi`, `codex`, `cursor`, `copilot`, or any custom CLI via `.workbench/agents.yaml`.
 - `directive` — Full replacement for the role's default instructions.
 - `directive_extend` — Text appended to the default instructions. Cannot be combined with `directive` on the same role.
 
@@ -248,6 +248,7 @@ If using `--symlink`, skill files stay in sync automatically — no `--update` n
 - `wb setup` — create .workbench/, install skills locally, prepare repo
 - `wb setup --agent antigravity` — install skills for Google Antigravity CLI
 - `wb setup --agent opencode` — install skills for OpenCode CLI
+- `wb setup --agent kimi` — install skills for Kimi Code CLI
 - `wb setup --profile` — also create a profile.yaml with the detected agent
 - `wb setup --update` — force-update skills to the latest version
 - `wb setup --global` — install skills to user-level paths (no .workbench/ creation)
