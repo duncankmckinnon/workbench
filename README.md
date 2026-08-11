@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/img/workbench-logo.png" alt="workbench" width="600">
+</p>
+
 # Workbench
 
 [![CI](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml/badge.svg)](https://github.com/duncankmckinnon/workbench/actions/workflows/ci.yml)
