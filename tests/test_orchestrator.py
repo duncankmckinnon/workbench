@@ -2010,8 +2010,8 @@ async def test_completed_stages_persisted_after_full_pipeline_pass(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_completed_stages_drops_pre_fixer_passes(tmp_path):
-    """A fixer in the middle of the run invalidates a pre-fixer test pass."""
+async def test_completed_stages_keeps_tester_through_review_fix(tmp_path):
+    """A review-fixer invalidates the review it follows, but not the tester pass."""
     plan = _make_plan()
     repo = tmp_path
     (repo / ".workbench").mkdir()
@@ -2033,7 +2033,13 @@ async def test_completed_stages_drops_pre_fixer_passes(tmp_path):
                 status=TaskStatus.DONE,
                 output="VERDICT: FAIL",
             ),
-            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed"),
+            AgentResult(
+                task_id="task-1",
+                role=Role.FIXER,
+                status=TaskStatus.DONE,
+                output="fixed",
+                step="review-fix#1",
+            ),
             AgentResult(
                 task_id="task-1",
                 role=Role.REVIEWER,
@@ -2057,9 +2063,85 @@ async def test_completed_stages_drops_pre_fixer_passes(tmp_path):
         await run_plan(plan=plan, repo=repo, use_tmux=False)
 
     status = SessionStatus.load(repo, "test-plan", "workbench-1")
-    # Tester pass was pre-fixer and not re-run — should be dropped.
+    # The fixer only addressed review feedback, so the tester pass stands.
     # Reviewer pass came after the fixer — preserved.
-    assert status.tasks["task-1"].completed_stages == ["implementor", "reviewer"]
+    assert status.tasks["task-1"].completed_stages == ["implementor", "tester", "reviewer"]
+
+
+@pytest.mark.asyncio
+async def test_tdd_completed_stages_keep_tester_through_review_fix(tmp_path):
+    """A TDD run whose review needed a fix still records the tester stage."""
+    plan = _make_plan()
+    repo = tmp_path
+    (repo / ".workbench").mkdir()
+
+    async def fake_pipeline(**kwargs):
+        return [
+            AgentResult(
+                task_id="task-1",
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="wrote failing tests",
+                step="tdd-test",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.IMPLEMENTOR,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+                step="tdd-implement",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.TESTER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+                step="test#1",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: FAIL",
+                step="review#1",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.FIXER,
+                status=TaskStatus.DONE,
+                output="fixed",
+                step="review-fix#1",
+            ),
+            AgentResult(
+                task_id="task-1",
+                role=Role.REVIEWER,
+                status=TaskStatus.DONE,
+                output="VERDICT: PASS",
+                step="review#2",
+            ),
+        ]
+
+    with (
+        patch("workbench.orchestrator.create_session_branch", return_value="workbench-1"),
+        patch("workbench.orchestrator.create_worktree") as mock_wt,
+        patch("workbench.orchestrator.run_pipeline", side_effect=fake_pipeline),
+        patch("workbench.orchestrator.merge_into_session") as mock_merge,
+        patch("workbench.orchestrator.delete_branch"),
+    ):
+        mock_wt.return_value = MagicMock(
+            branch="wb/test-task", path=tmp_path / "wt", cleanup=MagicMock()
+        )
+        mock_merge.return_value = MagicMock(success=True, message="merged", conflicts=None)
+
+        await run_plan(plan=plan, repo=repo, use_tmux=False, tdd=True)
+
+    status = SessionStatus.load(repo, "test-plan", "workbench-1")
+    assert status.tasks["task-1"].completed_stages == [
+        "tdd-test",
+        "tdd-implement",
+        "tester",
+        "reviewer",
+    ]
 
 
 @pytest.mark.asyncio
@@ -2080,7 +2162,13 @@ async def test_completed_stages_only_impl_when_fixer_invalidates_test(tmp_path):
                 status=TaskStatus.DONE,
                 output="VERDICT: PASS",
             ),
-            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed"),
+            AgentResult(
+                task_id="task-1",
+                role=Role.FIXER,
+                status=TaskStatus.DONE,
+                output="fixed",
+                step="test-fix#1",
+            ),
         ]
 
     with (
@@ -2464,9 +2552,15 @@ async def test_on_result_persists_completed_stages_mid_pipeline(tmp_path):
             )
         )
         await asyncio.sleep(0)
-        # Fixer invalidates tester — the next persist should drop tester.
+        # A test-fixer invalidates tester — the next persist should drop tester.
         on_result(
-            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed")
+            AgentResult(
+                task_id="task-1",
+                role=Role.FIXER,
+                status=TaskStatus.DONE,
+                output="fixed",
+                step="test-fix#1",
+            )
         )
         await asyncio.sleep(0)
         return [
@@ -2479,7 +2573,13 @@ async def test_on_result_persists_completed_stages_mid_pipeline(tmp_path):
                 status=TaskStatus.DONE,
                 output="VERDICT: PASS",
             ),
-            AgentResult(task_id="task-1", role=Role.FIXER, status=TaskStatus.DONE, output="fixed"),
+            AgentResult(
+                task_id="task-1",
+                role=Role.FIXER,
+                status=TaskStatus.DONE,
+                output="fixed",
+                step="test-fix#1",
+            ),
         ]
 
     with (
