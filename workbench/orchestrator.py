@@ -15,6 +15,7 @@ from rich.text import Text
 from .agents import (
     TDD_IMPLEMENT_STAGE,
     TDD_TEST_STAGE,
+    TEST_FIX_STEP_PREFIX,
     AgentResult,
     Role,
     TaskStatus,
@@ -493,8 +494,12 @@ async def run_plan(
                 ) -> list[str]:
                     """Pipeline stages that have completed successfully, post fixer invalidation.
 
-                    A fixer edits code on top of impl, invalidating any earlier test/review
-                    pass — those passes must be re-run before they're trusted again.
+                    A fixer edits code on top of impl, invalidating the review that
+                    follows it. Only a *test*-fixer invalidates a tester pass — it edits
+                    code the tester rejected, so that pass must be re-earned. A
+                    review-fixer runs after the tester already passed and the pipeline
+                    does not re-test, so keeping the tester trusted is what the run
+                    actually did.
 
                     ``resume_stages`` seeds the trusted set for resumed tasks where
                     impl/test ran in a prior process; a fixer in the current results
@@ -513,7 +518,8 @@ async def run_plan(
                         elif r.role == Role.REVIEWER and r.passed:
                             trusted.add(Role.REVIEWER.value)
                         elif r.role == Role.FIXER:
-                            trusted.discard(Role.TESTER.value)
+                            if r.step.startswith(TEST_FIX_STEP_PREFIX):
+                                trusted.discard(Role.TESTER.value)
                             trusted.discard(Role.REVIEWER.value)
                     order = [
                         TDD_TEST_STAGE,

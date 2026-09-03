@@ -80,6 +80,13 @@ class TaskStatus(StrEnum):
 TDD_TEST_STAGE = "tdd-test"
 TDD_IMPLEMENT_STAGE = "tdd-implement"
 
+# Step prefixes for the two fixer invocations. Steps are rendered as
+# f"{PREFIX}#{attempt}"; resume tracking reads the prefix back to tell which
+# stage a fixer invalidated (a test-fixer edits code the tester signed off on,
+# a review-fixer only invalidates the review).
+TEST_FIX_STEP_PREFIX = "test-fix"
+REVIEW_FIX_STEP_PREFIX = "review-fix"
+
 
 @dataclass
 class AgentResult:
@@ -434,7 +441,7 @@ async def run_pipeline(
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                     agents_config_paths=agents_config_paths,
-                    meta=replace(base_meta, step=f"test-fix#{attempt}"),
+                    meta=replace(base_meta, step=f"{TEST_FIX_STEP_PREFIX}#{attempt}"),
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
                     model=_model_for(Role.FIXER),
@@ -521,7 +528,7 @@ async def run_pipeline(
                     agent_cmd=_agent_for(Role.FIXER),
                     use_tmux=use_tmux,
                     agents_config_paths=agents_config_paths,
-                    meta=replace(base_meta, step=f"review-fix#{attempt}"),
+                    meta=replace(base_meta, step=f"{REVIEW_FIX_STEP_PREFIX}#{attempt}"),
                     trace_env=trace_env,
                     trace_prompt=trace_prompt,
                     model=_model_for(Role.FIXER),
