@@ -49,17 +49,14 @@ class SessionMetadata:
         return "```wb-session\n" + "\n".join(lines) + "\n```"
 
     def as_env(self) -> dict[str, str]:
-        """WB_* vars for non-empty fields plus an OTEL_RESOURCE_ATTRIBUTES string.
+        """WB_* vars for non-empty fields, e.g. {"WB_PLAN": "p", "WB_WAVE": "2"}.
 
-        Returns {} when no fields are set. Does NOT merge any inherited
-        OTEL_RESOURCE_ATTRIBUTES — that is the job of merge_trace_env().
+        Returns {} when no fields are set. Claude Code overwrites
+        OTEL_RESOURCE_ATTRIBUTES on its own spans, so run metadata rides on
+        WB_* env vars instead; a tracing backend (thirdeye) reads those and
+        records them as span tags.
         """
-        fields = self._fields()
-        if not fields:
-            return {}
-        env = {f"WB_{key.upper()}": value for key, value in fields}
-        env["OTEL_RESOURCE_ATTRIBUTES"] = ",".join(f"wb.{key}={value}" for key, value in fields)
-        return env
+        return {f"WB_{key.upper()}": value for key, value in self._fields()}
 
 
 def with_session_metadata(prompt: str, meta: SessionMetadata | None) -> str:
@@ -72,21 +69,12 @@ def with_session_metadata(prompt: str, meta: SessionMetadata | None) -> str:
 
 
 def merge_trace_env(base: Mapping[str, str], meta: SessionMetadata | None) -> dict[str, str]:
-    """Overlay meta.as_env() onto a copy of base.
+    """Overlay meta.as_env() (WB_* vars) onto a copy of base.
 
-    OTEL_RESOURCE_ATTRIBUTES is concatenated with any value already present in
-    base (``inherited,wb.plan=...,...``) rather than overwritten, so a caller's
-    base resource attributes survive. Returns dict(base) unchanged when meta is
-    None or empty.
+    Returns dict(base) unchanged when meta is None or renders empty. Any
+    OTEL_* vars already in base pass through untouched.
     """
     merged = dict(base)
-    if meta is None:
-        return merged
-    extra = meta.as_env()
-    inherited_otel = merged.get("OTEL_RESOURCE_ATTRIBUTES", "")
-    for key, value in extra.items():
-        if key == "OTEL_RESOURCE_ATTRIBUTES" and inherited_otel:
-            merged[key] = f"{inherited_otel},{value}"
-        else:
-            merged[key] = value
+    if meta is not None:
+        merged.update(meta.as_env())
     return merged

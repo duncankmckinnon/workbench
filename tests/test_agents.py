@@ -719,7 +719,7 @@ class TestSessionMetadataWiring:
         assert env["WB_PLAN"] == "p"
         assert env["WB_TASK"] == "task-1"
         assert env["WB_AGENT"] == Role.IMPLEMENTOR.value
-        assert "OTEL_RESOURCE_ATTRIBUTES" in env
+        assert "OTEL_RESOURCE_ATTRIBUTES" not in env
 
     def test_run_agent_trace_prompt_prepends_block(self, sample_ctx, tmp_path):
         """trace_prompt=True → build_command receives prompt starting with the block."""
