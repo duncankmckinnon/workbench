@@ -49,10 +49,10 @@ class TestAsEnv:
             "WB_TASK": "task-3",
             "WB_AGENT": "tester",
             "WB_STEP": "test#1",
-            "OTEL_RESOURCE_ATTRIBUTES": (
-                "wb.plan=p,wb.wave=2,wb.task=task-3,wb.agent=tester,wb.step=test#1"
-            ),
         }
+
+    def test_no_otel_resource_attributes(self, meta_full):
+        assert "OTEL_RESOURCE_ATTRIBUTES" not in meta_full.as_env()
 
     def test_empty_metadata(self):
         assert SessionMetadata().as_env() == {}
@@ -79,11 +79,11 @@ class TestMergeTraceEnv:
         assert merged["WB_TASK"] == "task-3"
         assert merged["WB_AGENT"] == "tester"
         assert merged["WB_STEP"] == "test#1"
-        assert "OTEL_RESOURCE_ATTRIBUTES" in merged
+        assert "OTEL_RESOURCE_ATTRIBUTES" not in merged
 
-    def test_inherits_otel_resource_attributes(self, meta_full):
+    def test_preexisting_otel_resource_attributes_untouched(self, meta_full):
         merged = merge_trace_env({"OTEL_RESOURCE_ATTRIBUTES": "service.name=foo"}, meta_full)
-        assert merged["OTEL_RESOURCE_ATTRIBUTES"].startswith("service.name=foo,wb.plan=p")
+        assert merged["OTEL_RESOURCE_ATTRIBUTES"] == "service.name=foo"
 
     def test_none_returns_base_copy(self):
         assert merge_trace_env({"A": "1"}, None) == {"A": "1"}
