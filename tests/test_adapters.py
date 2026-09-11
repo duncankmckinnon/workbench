@@ -521,6 +521,45 @@ class TestAgentConfig:
         config = AgentConfig.from_dict({"command": "x", "args": ["{prompt}"]})
         assert config.inject_env is False
 
+    def test_yaml_override_of_builtin_keeps_env_injection(self, tmp_path):
+        """A YAML entry for a built-in name inherits the built-in's inject_env.
+
+        The entry replaces the built-in wholesale, so without this an
+        agents.yaml that just omits inject_env silently turns off WB_*
+        injection for claude/codex — the run metadata never reaches the agent.
+        """
+        path = tmp_path / "agents.yaml"
+        path.write_text(
+            "agents:\n"
+            "  claude:\n"
+            "    command: claude\n"
+            "    args: ['-p', '{prompt}']\n"
+            "  codex:\n"
+            "    command: codex\n"
+            "    args: ['exec', '{prompt}']\n"
+        )
+
+        assert get_adapter("claude", [path]).config.inject_env is True
+        assert get_adapter("codex", [path]).config.inject_env is True
+
+    def test_yaml_override_can_still_opt_out(self, tmp_path):
+        path = tmp_path / "agents.yaml"
+        path.write_text(
+            "agents:\n"
+            "  claude:\n"
+            "    command: claude\n"
+            "    args: ['-p', '{prompt}']\n"
+            "    inject_env: false\n"
+        )
+
+        assert get_adapter("claude", [path]).config.inject_env is False
+
+    def test_unknown_yaml_agent_stays_opt_in(self, tmp_path):
+        path = tmp_path / "agents.yaml"
+        path.write_text("agents:\n  mycli:\n    command: mycli\n    args: ['{prompt}']\n")
+
+        assert get_adapter("mycli", [path]).config.inject_env is False
+
     def test_from_dict_inject_env_opt_in(self):
         config = AgentConfig.from_dict({"command": "x", "args": ["{prompt}"], "inject_env": True})
         assert config.inject_env is True
