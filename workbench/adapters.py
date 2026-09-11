@@ -57,15 +57,26 @@ class AgentConfig:
         return entry
 
     @classmethod
-    def from_dict(cls, entry: dict[str, Any], default_command: str = "") -> AgentConfig:
-        """Deserialize from a YAML dict with defaults for missing fields."""
+    def from_dict(
+        cls,
+        entry: dict[str, Any],
+        default_command: str = "",
+        *,
+        default_inject_env: bool = False,
+    ) -> AgentConfig:
+        """Deserialize from a YAML dict with defaults for missing fields.
+
+        ``default_inject_env`` stays False for agents workbench knows nothing
+        about — handing the whole environment to an arbitrary CLI is opt-in.
+        Entries that override a built-in pass the built-in's own default.
+        """
         return cls(
             command=entry.get("command", default_command),
             args=entry.get("args", ["{prompt}"]),
             output_format=entry.get("output_format", "text"),
             json_result_key=entry.get("json_result_key", "result"),
             json_cost_key=entry.get("json_cost_key", "cost_usd"),
-            inject_env=entry.get("inject_env", False),
+            inject_env=entry.get("inject_env", default_inject_env),
             model=entry.get("model"),
             model_flag=entry.get("model_flag"),
         )
@@ -117,8 +128,19 @@ class AgentAdapter(ABC):
 
     @classmethod
     def from_config(cls, name: str, entry: dict[str, Any]) -> ConfigAdapter:
-        """Create a ConfigAdapter from a YAML config dict."""
-        config = AgentConfig.from_dict(entry, default_command=name)
+        """Create a ConfigAdapter from a YAML config dict.
+
+        A YAML entry replaces its built-in wholesale, so an entry that omits
+        ``inject_env`` inherits the built-in's value rather than silently
+        dropping to opt-out — otherwise run metadata (``WB_*``) never reaches
+        the agent and nothing downstream can tag the session with it.
+        """
+        builtin = BUILTIN_ADAPTERS.get(name)
+        config = AgentConfig.from_dict(
+            entry,
+            default_command=name,
+            default_inject_env=builtin().config.inject_env if builtin else False,
+        )
         return ConfigAdapter(name=name, config=config)
 
 
